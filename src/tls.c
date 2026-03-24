@@ -8596,7 +8596,8 @@ static int TLSX_KeyShare_GenEccKey(WOLFSSL *ssl, KeyShareEntry* kse)
 }
 
 #ifdef WOLFSSL_HAVE_MLKEM
-#if defined(WOLFSSL_MLKEM_CACHE_A) && \
+#if (defined(WOLFSSL_MLKEM_CACHE_A) || \
+    (defined(HAVE_PKCS11) && !defined(NO_PKCS11_MLKEM))) && \
     !defined(WOLFSSL_TLSX_PQC_MLKEM_STORE_PRIV_KEY)
     /* Store KyberKey object rather than private key bytes in key share entry.
      * Improves performance at cost of more dynamic memory being used. */
