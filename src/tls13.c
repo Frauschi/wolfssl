@@ -4281,8 +4281,17 @@ static int SetupPskKey(WOLFSSL* ssl, PreSharedKey* psk, int clientHello)
         }
 
         if (!clientHello) {
-            /* CLIENT: using PSK for peer authentication. */
-            ssl->options.peerAuthGood = 1;
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+            if (ssl->options.certWithExternPsk) {
+                /* Certificate authentication is still required. */
+                ssl->options.peerAuthGood = 0;
+            }
+            else
+#endif
+            {
+                /* CLIENT: using PSK for peer authentication. */
+                ssl->options.peerAuthGood = 1;
+            }
         }
     }
 #endif
@@ -5691,6 +5700,20 @@ int DoTls13ServerHello(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
             XMEMSET(ssl->arrays->psk_key, 0, MAX_PSK_KEY_LEN);
         }
         else {
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+            if (ssl->options.certWithExternPsk && psk->resumption) {
+                /* RFC8773bis mode requires external PSK, not ticket resumption. */
+                WOLFSSL_ERROR_VERBOSE(PSK_KEY_ERROR);
+                return PSK_KEY_ERROR;
+            }
+            if (ssl->options.certWithExternPsk && ssl->options.shSentKeyShare == 0) {
+                /* RFC8773bis Sec. 3: cert_with_extern_psk requires psk_dhe_ke;
+                 * a ServerHello without a key_share confirms only psk_ke. */
+                WOLFSSL_MSG("cert_with_extern_psk: ServerHello missing key_share");
+                WOLFSSL_ERROR_VERBOSE(EXT_MISSING);
+                return EXT_MISSING;
+            }
+#endif
             if ((ret = SetupPskKey(ssl, psk, 0)) != 0)
                 return ret;
             ssl->options.pskNegotiated = 1;
@@ -6035,10 +6058,15 @@ static int FindPsk(WOLFSSL* ssl, PreSharedKey* psk, const byte* suite, int* err)
     ret = FindPskSuite(ssl, psk, ssl->arrays->psk_key, &ssl->arrays->psk_keySz,
                        suite, &found, foundSuite);
     if (ret == 0 && found) {
+        /* This identity matched via external PSK callback, not ticket resume. */
+        psk->resumption = 0;
         /* Default to ciphersuite if cb doesn't specify. */
         ssl->options.resuming = 0;
         /* Don't send certificate request when using PSK. */
-        ssl->options.verifyPeer = 0;
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+        if (!ssl->options.certWithExternPsk)
+#endif
+            ssl->options.verifyPeer = 0;
 
         /* PSK age is always zero. */
         if (psk->ticketAge != 0) {
@@ -6088,6 +6116,9 @@ static int DoPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 inputSz,
     byte          binderKey[WC_MAX_DIGEST_SIZE];
     byte          binder[WC_MAX_DIGEST_SIZE];
     word32        binderLen;
+#if defined(WOLFSSL_CERT_WITH_EXTERN_PSK) && defined(HAVE_SESSION_TICKET)
+    int           certWithExternOffered = 0;
+#endif
 
     #ifdef NO_PSK
         (void) suite; /* to avoid unused var warning when not used */
@@ -6102,6 +6133,10 @@ static int DoPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 inputSz,
         WOLFSSL_MSG("No pre shared extension keys found");
         return BAD_FUNC_ARG;
     }
+#if defined(WOLFSSL_CERT_WITH_EXTERN_PSK) && defined(HAVE_SESSION_TICKET)
+    certWithExternOffered =
+        TLSX_Find(ssl->extensions, TLSX_CERT_WITH_EXTERN_PSK) != NULL;
+#endif
 
     /* Look through all client's pre-shared keys for a match. */
     for (current = (PreSharedKey*)ext->data; current != NULL;
@@ -6158,6 +6193,12 @@ static int DoPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 inputSz,
             }
             if (ret != 0)
                 continue;
+#if defined(WOLFSSL_CERT_WITH_EXTERN_PSK) && defined(HAVE_SESSION_TICKET)
+            if (certWithExternOffered) {
+                WOLFSSL_ERROR_VERBOSE(PSK_KEY_ERROR);
+                return PSK_KEY_ERROR;
+            }
+#endif
 
             /* SERVER: using secret in session ticket for peer auth. */
             ssl->options.peerAuthGood = 1;
@@ -6372,6 +6413,12 @@ static int CheckPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 helloSz,
 
     if (*usingPSK != 0) {
         word32 modes;
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+        int usingCertWithExternPsk = 0;
+        TLSX* certExt = NULL;
+        TLSX* pskExt = NULL;
+        PreSharedKey* chosenPsk = NULL;
+#endif
     #ifdef WOLFSSL_EARLY_DATA
         TLSX*  extEarlyData;
 
@@ -6405,14 +6452,62 @@ static int CheckPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 helloSz,
         }
         modes = ext->val;
 
+    #ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+        certExt = TLSX_Find(ssl->extensions, TLSX_CERT_WITH_EXTERN_PSK);
+        if (certExt != NULL) {
+            pskExt = TLSX_Find(ssl->extensions, TLSX_PRE_SHARED_KEY);
+            if (pskExt != NULL)
+                chosenPsk = (PreSharedKey*)pskExt->data;
+            while (chosenPsk != NULL && !chosenPsk->chosen)
+                chosenPsk = chosenPsk->next;
+            if (chosenPsk == NULL || chosenPsk->resumption) {
+                WOLFSSL_ERROR_VERBOSE(PSK_KEY_ERROR);
+                return PSK_KEY_ERROR;
+            }
+            if ((modes & (1 << PSK_DHE_KE)) == 0) {
+                WOLFSSL_ERROR_VERBOSE(PSK_KEY_ERROR);
+                return PSK_KEY_ERROR;
+            }
+            usingCertWithExternPsk = 1;
+            ssl->options.certWithExternPsk = 1;
+            ret = PickHashSigAlgo(ssl, clSuites->hashSigAlgo,
+                                  clSuites->hashSigAlgoSz, 1);
+            if (ret != 0)
+                return ret;
+            ssl->options.sendVerify = SEND_CERT;
+            certExt->resp = 1;
+        }
+        else {
+            ssl->options.certWithExternPsk = 0;
+        }
+    #endif
+
+#ifndef HAVE_SUPPORTED_CURVES
+    #ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+        if (usingCertWithExternPsk) {
+            WOLFSSL_ERROR_VERBOSE(PSK_KEY_ERROR);
+            return PSK_KEY_ERROR;
+        }
+    #endif
+#endif
     #ifdef HAVE_SUPPORTED_CURVES
         ext = TLSX_Find(ssl->extensions, TLSX_KEY_SHARE);
         /* Use (EC)DHE for forward-security if possible. */
-        if ((modes & (1 << PSK_DHE_KE)) != 0 && !ssl->options.noPskDheKe &&
-                                                                  ext != NULL) {
-            /* Only use named group used in last session. */
-            ssl->namedGroup = ssl->session->namedGroup;
-
+        if (((modes & (1 << PSK_DHE_KE)) != 0 && !ssl->options.noPskDheKe &&
+             ext != NULL)
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+             || usingCertWithExternPsk
+#endif
+        ) {
+            if (ext == NULL) {
+                WOLFSSL_ERROR_VERBOSE(EXT_MISSING);
+                return EXT_MISSING;
+            }
+            /* Resumption path uses previous session group. */
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+            if (!usingCertWithExternPsk)
+#endif
+                ssl->namedGroup = ssl->session->namedGroup;
             *usingPSK = 2; /* generate new ephemeral key */
         }
         else if (ssl->options.onlyPskDheKe) {
@@ -6434,6 +6529,10 @@ static int CheckPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 helloSz,
     }
 #ifdef WOLFSSL_PSK_ID_PROTECTION
     else {
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+        TLSX_Remove(&ssl->extensions, TLSX_CERT_WITH_EXTERN_PSK, ssl->heap);
+        ssl->options.certWithExternPsk = 0;
+#endif
     #ifndef NO_CERTS
         if (ssl->buffers.certChainCnt != 0)
             return 0;
@@ -7260,7 +7359,11 @@ int DoTls13ClientHello(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
 
 #if (defined(HAVE_SESSION_TICKET) || !defined(NO_PSK)) && \
                                                     defined(HAVE_TLS_EXTENSIONS)
-    if (!args->usingPSK)
+    if (!args->usingPSK
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+        || ssl->options.certWithExternPsk
+#endif
+    )
 #endif
     {
 #if defined(HAVE_SESSION_TICKET) || !defined(NO_PSK)
@@ -12639,7 +12742,11 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
             /* Server's authenticating with PSK must not send this. */
             if (ssl->options.side == WOLFSSL_CLIENT_END &&
                              ssl->options.serverState == SERVER_CERT_COMPLETE &&
-                             ssl->options.pskNegotiated) {
+                             ssl->options.pskNegotiated
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+                             && !ssl->options.certWithExternPsk
+#endif
+               ) {
                 WOLFSSL_MSG("Certificate received while using PSK");
                 WOLFSSL_ERROR_VERBOSE(SANITY_MSG_E);
                 return SANITY_MSG_E;
@@ -12703,7 +12810,11 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
         #endif
         #if defined(HAVE_SESSION_TICKET) || !defined(NO_PSK)
             /* Server's authenticating with PSK must not send this. */
-            if (ssl->options.pskNegotiated) {
+            if (ssl->options.pskNegotiated
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+                && !ssl->options.certWithExternPsk
+#endif
+               ) {
                 WOLFSSL_MSG("CertificateRequest received while using PSK");
                 WOLFSSL_ERROR_VERBOSE(SANITY_MSG_E);
                 return SANITY_MSG_E;
@@ -12744,7 +12855,11 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
                 }
             #if defined(HAVE_SESSION_TICKET) || !defined(NO_PSK)
                 /* Server's authenticating with PSK must not send this. */
-                if (ssl->options.pskNegotiated) {
+                if (ssl->options.pskNegotiated
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+                    && !ssl->options.certWithExternPsk
+#endif
+                   ) {
                     WOLFSSL_MSG("CertificateVerify received while using PSK");
                     WOLFSSL_ERROR_VERBOSE(SANITY_MSG_E);
                     return SANITY_MSG_E;
@@ -12799,11 +12914,25 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
                  * using PSK. */
             #if defined(HAVE_SESSION_TICKET) || !defined(NO_PSK)
                 if (ssl->options.pskNegotiated) {
-                    if (ssl->options.serverState !=
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+                    if (ssl->options.certWithExternPsk) {
+                        if (ssl->options.serverState !=
+                                                SERVER_CERT_VERIFY_COMPLETE) {
+                            WOLFSSL_MSG("Finished received out of order - "
+                                        "cert_with_extern_psk");
+                            WOLFSSL_ERROR_VERBOSE(OUT_OF_ORDER_E);
+                            return OUT_OF_ORDER_E;
+                        }
+                    }
+                    else
+#endif
+                    {
+                        if (ssl->options.serverState !=
                                          SERVER_ENCRYPTED_EXTENSIONS_COMPLETE) {
-                        WOLFSSL_MSG("Finished received out of order - PSK");
-                        WOLFSSL_ERROR_VERBOSE(OUT_OF_ORDER_E);
-                        return OUT_OF_ORDER_E;
+                            WOLFSSL_MSG("Finished received out of order - PSK");
+                            WOLFSSL_ERROR_VERBOSE(OUT_OF_ORDER_E);
+                            return OUT_OF_ORDER_E;
+                        }
                     }
                 }
                 else
@@ -12841,7 +12970,11 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
             }
         #endif
         #if defined(HAVE_SESSION_TICKET) || !defined(NO_PSK)
-            if (!ssl->options.pskNegotiated)
+            if (!ssl->options.pskNegotiated
+#ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
+                || ssl->options.certWithExternPsk
+#endif
+            )
         #endif
             {
                 /* Must have received a Certificate message from client if
