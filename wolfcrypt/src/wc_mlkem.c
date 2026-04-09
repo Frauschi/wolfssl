@@ -178,7 +178,6 @@ sword16 wc_mlkem_opt_blocker(void) {
 
 /******************************************************************************/
 
-#ifdef WOLFSSL_MLKEM_DYNAMIC_KEYS
 /* Get the k value (number of polynomials in a vector) from the key type.
  *
  * @param  [in]  key  ML-KEM key object.
@@ -213,6 +212,7 @@ static int mlkemkey_get_k(const MlKemKey* key)
     }
 }
 
+#ifdef WOLFSSL_MLKEM_DYNAMIC_KEYS
 /* Allocate (or reallocate) the private key buffer, right-sized for k.
  *
  * @param  [in, out]  key  ML-KEM key object.
@@ -417,13 +417,13 @@ int wc_MlKemKey_Init(MlKemKey* key, int type, void* heap, int devId)
     #endif
         key->flags = 0;
 
-#ifdef WOLFSSL_MLKEM_DYNAMIC_KEYS
+    #ifdef WOLFSSL_MLKEM_DYNAMIC_KEYS
         key->priv = NULL;
         key->pub = NULL;
-#ifdef WOLFSSL_MLKEM_CACHE_A
+    #ifdef WOLFSSL_MLKEM_CACHE_A
         key->a = NULL;
-#endif
-#endif
+    #endif
+    #endif
 
         /* Zero out all data. */
         XMEMSET(&key->prf, 0, sizeof(key->prf));
@@ -461,25 +461,23 @@ int wc_MlKemKey_Free(MlKemKey* key)
         ForceZero(&key->hash, sizeof(key->hash));
         ForceZero(&key->prf, sizeof(key->prf));
 #ifdef WOLFSSL_MLKEM_DYNAMIC_KEYS
-        {
+        if (key->priv != NULL) {
             int k = mlkemkey_get_k(key);
-            if (key->priv != NULL) {
-                ForceZero(key->priv,
-                    (word32)(k * MLKEM_N) * (word32)sizeof(sword16));
-                XFREE(key->priv, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
-                key->priv = NULL;
-            }
-            if (key->pub != NULL) {
-                XFREE(key->pub, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
-                key->pub = NULL;
-            }
-#ifdef WOLFSSL_MLKEM_CACHE_A
-            if (key->a != NULL) {
-                XFREE(key->a, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
-                key->a = NULL;
-            }
-#endif
+            ForceZero(key->priv,
+                (word32)(k * MLKEM_N) * (word32)sizeof(sword16));
+            XFREE(key->priv, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
+            key->priv = NULL;
         }
+        if (key->pub != NULL) {
+            XFREE(key->pub, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
+            key->pub = NULL;
+        }
+    #ifdef WOLFSSL_MLKEM_CACHE_A
+        if (key->a != NULL) {
+            XFREE(key->a, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
+            key->a = NULL;
+        }
+    #endif
 #else
         ForceZero(key->priv, sizeof(key->priv));
 #endif
@@ -627,45 +625,9 @@ int wc_MlKemKey_MakeKeyWithRandom(MlKemKey* key, const unsigned char* rand,
         key->flags = 0;
 
         /* Establish parameters based on key type. */
-        switch (key->type) {
-#ifndef WOLFSSL_NO_ML_KEM
-    #ifdef WOLFSSL_WC_ML_KEM_512
-        case WC_ML_KEM_512:
-            k = WC_ML_KEM_512_K;
-            break;
-    #endif
-    #ifdef WOLFSSL_WC_ML_KEM_768
-        case WC_ML_KEM_768:
-            k = WC_ML_KEM_768_K;
-            break;
-    #endif
-    #ifdef WOLFSSL_WC_ML_KEM_1024
-        case WC_ML_KEM_1024:
-            k = WC_ML_KEM_1024_K;
-            break;
-    #endif
-#endif
-#ifdef WOLFSSL_MLKEM_KYBER
-    #ifdef WOLFSSL_KYBER512
-        case KYBER512:
-            k = KYBER512_K;
-            break;
-    #endif
-    #ifdef WOLFSSL_KYBER768
-        case KYBER768:
-            k = KYBER768_K;
-            break;
-    #endif
-    #ifdef WOLFSSL_KYBER1024
-        case KYBER1024:
-            k = KYBER1024_K;
-            break;
-    #endif
-#endif
-        default:
-            /* No other values supported. */
+        k = mlkemkey_get_k(key);
+        if (k == 0) {
             ret = NOT_COMPILED_IN;
-            break;
         }
     }
 
