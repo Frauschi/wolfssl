@@ -734,7 +734,10 @@ struct dilithium_key {
     int  labelLen;
 #endif
 
-#ifndef WOLFSSL_DILITHIUM_ASSIGN_KEY
+#if defined(WOLFSSL_DILITHIUM_DYNAMIC_KEYS)
+    byte* p;    /* heap-allocated, right-sized public key */
+    byte* k;    /* heap-allocated, right-sized secret key */
+#elif !defined(WOLFSSL_DILITHIUM_ASSIGN_KEY)
 #ifdef USE_INTEL_SPEEDUP
     byte p[DILITHIUM_MAX_PUB_KEY_SIZE+8];
     byte k[DILITHIUM_MAX_KEY_SIZE+8];
