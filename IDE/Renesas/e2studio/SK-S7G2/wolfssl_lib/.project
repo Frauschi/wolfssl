@@ -441,11 +441,6 @@
 			<locationURI>PARENT-5-PROJECT_LOC/wolfcrypt/src/sp_x86_64.c</locationURI>
 		</link>
 		<link>
-			<name>src/wolfcrypt/sphincs.c</name>
-			<type>1</type>
-			<locationURI>PARENT-5-PROJECT_LOC/wolfcrypt/src/sphincs.c</locationURI>
-		</link>
-		<link>
 			<name>src/wolfcrypt/srp.c</name>
 			<type>1</type>
 			<locationURI>PARENT-5-PROJECT_LOC/wolfcrypt/src/srp.c</locationURI>

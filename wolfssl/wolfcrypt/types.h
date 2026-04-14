@@ -2309,8 +2309,8 @@ enum Max_ASN {
     DSA_INTS            =   5,     /* DSA ints in private key */
     MAX_SALT_SIZE       =  64,     /* MAX PKCS Salt length */
     MAX_IV_SIZE         =  64,     /* MAX PKCS Iv length */
-#ifdef HAVE_SPHINCS
-    MAX_ENCODED_SIG_SZ  = 51200,
+#ifdef WOLFSSL_HAVE_SLHDSA
+    MAX_ENCODED_SIG_SZ  = 49856,
 #elif defined(HAVE_FALCON) || defined(HAVE_DILITHIUM)
     MAX_ENCODED_SIG_SZ  = 5120,
 #elif !defined(NO_RSA)
@@ -2362,7 +2362,7 @@ enum Max_ASN {
                             /* Maximum DER digest ASN header size */
                             /* Max X509 header length indicates the
                              * max length + 2 ('\n', '\0') */
-#if defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || defined(HAVE_SPHINCS)
+#if defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_SLHDSA)
     MAX_X509_HEADER_SZ  = (48 + 2), /* Maximum PEM Header/Footer Size */
 #else
     MAX_X509_HEADER_SZ  = (37 + 2), /* Maximum PEM Header/Footer Size */

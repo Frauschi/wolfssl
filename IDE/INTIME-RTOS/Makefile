@@ -320,7 +320,6 @@ INCL_TARGS := 	wolfssl/callbacks.h \
 	wolfssl/wolfcrypt/sm4.h \
 	wolfssl/wolfcrypt/sp.h \
 	wolfssl/wolfcrypt/sp_int.h \
-	wolfssl/wolfcrypt/sphincs.h \
 	wolfssl/wolfcrypt/srp.h \
 	wolfssl/wolfcrypt/tfm.h \
 	wolfssl/wolfcrypt/types.h \

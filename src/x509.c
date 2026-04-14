@@ -12157,8 +12157,8 @@ static int CertFromX509(Cert* cert, WOLFSSL_X509* x509)
     #if defined(HAVE_DILITHIUM)
         dilithium_key* dilithium = NULL;
     #endif
-    #if defined(HAVE_SPHINCS)
-        sphincs_key* sphincs = NULL;
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+        SlhDsaKey* slhdsa = NULL;
     #endif
         WC_RNG rng;
         word32 idx = 0;
@@ -12389,63 +12389,65 @@ static int CertFromX509(Cert* cert, WOLFSSL_X509* x509)
             key = (void*)dilithium;
         }
     #endif
-    #if defined(HAVE_SPHINCS)
-        if ((x509->pubKeyOID == SPHINCS_FAST_LEVEL1k) ||
-            (x509->pubKeyOID == SPHINCS_FAST_LEVEL3k) ||
-            (x509->pubKeyOID == SPHINCS_FAST_LEVEL5k) ||
-            (x509->pubKeyOID == SPHINCS_SMALL_LEVEL1k) ||
-            (x509->pubKeyOID == SPHINCS_SMALL_LEVEL3k) ||
-            (x509->pubKeyOID == SPHINCS_SMALL_LEVEL5k)) {
-            sphincs = (sphincs_key*)XMALLOC(sizeof(sphincs_key), NULL,
-                                          DYNAMIC_TYPE_SPHINCS);
-            if (sphincs == NULL) {
-                WOLFSSL_MSG("Failed to allocate memory for sphincs_key");
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+        if ((x509->pubKeyOID == SLH_DSA_SHAKE_128Fk) ||
+            (x509->pubKeyOID == SLH_DSA_SHAKE_192Fk) ||
+            (x509->pubKeyOID == SLH_DSA_SHAKE_256Fk) ||
+            (x509->pubKeyOID == SLH_DSA_SHAKE_128Sk) ||
+            (x509->pubKeyOID == SLH_DSA_SHAKE_192Sk) ||
+            (x509->pubKeyOID == SLH_DSA_SHAKE_256Sk)) {
+            enum SlhDsaParam param = SLHDSA_SHAKE128F;
+
+            slhdsa = (SlhDsaKey*)XMALLOC(sizeof(SlhDsaKey), NULL,
+                                          DYNAMIC_TYPE_SLHDSA);
+            if (slhdsa == NULL) {
+                WOLFSSL_MSG("Failed to allocate memory for SlhDsaKey");
                 XFREE(cert, NULL, DYNAMIC_TYPE_CERT);
                 return WOLFSSL_FAILURE;
             }
 
-            ret = wc_sphincs_init(sphincs);
+            if (x509->pubKeyOID == SLH_DSA_SHAKE_128Fk) {
+                type = SLH_DSA_SHAKE_128F_TYPE;
+                param = SLHDSA_SHAKE128F;
+            }
+            else if (x509->pubKeyOID == SLH_DSA_SHAKE_192Fk) {
+                type = SLH_DSA_SHAKE_192F_TYPE;
+                param = SLHDSA_SHAKE192F;
+            }
+            else if (x509->pubKeyOID == SLH_DSA_SHAKE_256Fk) {
+                type = SLH_DSA_SHAKE_256F_TYPE;
+                param = SLHDSA_SHAKE256F;
+            }
+            else if (x509->pubKeyOID == SLH_DSA_SHAKE_128Sk) {
+                type = SLH_DSA_SHAKE_128S_TYPE;
+                param = SLHDSA_SHAKE128S;
+            }
+            else if (x509->pubKeyOID == SLH_DSA_SHAKE_192Sk) {
+                type = SLH_DSA_SHAKE_192S_TYPE;
+                param = SLHDSA_SHAKE192S;
+            }
+            else if (x509->pubKeyOID == SLH_DSA_SHAKE_256Sk) {
+                type = SLH_DSA_SHAKE_256S_TYPE;
+                param = SLHDSA_SHAKE256S;
+            }
+
+            ret = wc_SlhDsaKey_Init(slhdsa, param, NULL, INVALID_DEVID);
             if (ret != 0) {
-                XFREE(sphincs, NULL, DYNAMIC_TYPE_SPHINCS);
+                XFREE(slhdsa, NULL, DYNAMIC_TYPE_SLHDSA);
                 XFREE(cert, NULL, DYNAMIC_TYPE_CERT);
                 return ret;
             }
 
-            if (x509->pubKeyOID == SPHINCS_FAST_LEVEL1k) {
-                type = SPHINCS_FAST_LEVEL1_TYPE;
-                wc_sphincs_set_level_and_optim(sphincs, 1, FAST_VARIANT);
-            }
-            else if (x509->pubKeyOID == SPHINCS_FAST_LEVEL3k) {
-                type = SPHINCS_FAST_LEVEL3_TYPE;
-                wc_sphincs_set_level_and_optim(sphincs, 3, FAST_VARIANT);
-            }
-            else if (x509->pubKeyOID == SPHINCS_FAST_LEVEL3k) {
-                type = SPHINCS_FAST_LEVEL5_TYPE;
-                wc_sphincs_set_level_and_optim(sphincs, 5, FAST_VARIANT);
-            }
-            else if (x509->pubKeyOID == SPHINCS_SMALL_LEVEL1k) {
-                type = SPHINCS_SMALL_LEVEL1_TYPE;
-                wc_sphincs_set_level_and_optim(sphincs, 1, SMALL_VARIANT);
-            }
-            else if (x509->pubKeyOID == SPHINCS_SMALL_LEVEL3k) {
-                type = SPHINCS_SMALL_LEVEL3_TYPE;
-                wc_sphincs_set_level_and_optim(sphincs, 3, SMALL_VARIANT);
-            }
-            else if (x509->pubKeyOID == SPHINCS_SMALL_LEVEL3k) {
-                type = SPHINCS_SMALL_LEVEL5_TYPE;
-                wc_sphincs_set_level_and_optim(sphincs, 5, SMALL_VARIANT);
-            }
-
-            ret = wc_Sphincs_PublicKeyDecode(x509->pubKey.buffer, &idx, sphincs,
-                                             x509->pubKey.length);
+            ret = wc_SlhDsaKey_PublicKeyDecode(x509->pubKey.buffer, &idx,
+                                               slhdsa, x509->pubKey.length);
             if (ret != 0) {
                 WOLFSSL_ERROR_VERBOSE(ret);
-                wc_sphincs_free(sphincs);
-                XFREE(sphincs, NULL, DYNAMIC_TYPE_SPHINCS);
+                wc_SlhDsaKey_Free(slhdsa);
+                XFREE(slhdsa, NULL, DYNAMIC_TYPE_SLHDSA);
                 XFREE(cert, NULL, DYNAMIC_TYPE_CERT);
                 return ret;
             }
-            key = (void*)sphincs;
+            key = (void*)slhdsa;
         }
     #endif
         if (key == NULL) {
@@ -12569,15 +12571,15 @@ cleanup:
             XFREE(dilithium, NULL, DYNAMIC_TYPE_DILITHIUM);
         }
     #endif
-    #if defined(HAVE_SPHINCS)
-        if ((x509->pubKeyOID == SPHINCS_FAST_LEVEL1k) ||
-            (x509->pubKeyOID == SPHINCS_FAST_LEVEL3k) ||
-            (x509->pubKeyOID == SPHINCS_FAST_LEVEL5k) ||
-            (x509->pubKeyOID == SPHINCS_SMALL_LEVEL1k) ||
-            (x509->pubKeyOID == SPHINCS_SMALL_LEVEL3k) ||
-            (x509->pubKeyOID == SPHINCS_SMALL_LEVEL5k)) {
-            wc_sphincs_free(sphincs);
-            XFREE(sphincs, NULL, DYNAMIC_TYPE_SPHINCS);
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+        if ((x509->pubKeyOID == SLH_DSA_SHAKE_128Fk) ||
+            (x509->pubKeyOID == SLH_DSA_SHAKE_192Fk) ||
+            (x509->pubKeyOID == SLH_DSA_SHAKE_256Fk) ||
+            (x509->pubKeyOID == SLH_DSA_SHAKE_128Sk) ||
+            (x509->pubKeyOID == SLH_DSA_SHAKE_192Sk) ||
+            (x509->pubKeyOID == SLH_DSA_SHAKE_256Sk)) {
+            wc_SlhDsaKey_Free(slhdsa);
+            XFREE(slhdsa, NULL, DYNAMIC_TYPE_SLHDSA);
         }
     #endif
         XFREE(cert, NULL, DYNAMIC_TYPE_CERT);

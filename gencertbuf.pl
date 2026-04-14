@@ -153,15 +153,15 @@ my @fileList_falcon = (
         ["certs/falcon/bench_falcon_level5_key.der", "bench_falcon_level5_key" ],
         );
 
-#Sphincs+ Post-Quantum Keys
-#Used with HAVE_PQC
-my @fileList_sphincs = (
-        ["certs/sphincs/bench_sphincs_fast_level1_key.der", "bench_sphincs_fast_level1_key" ],
-        ["certs/sphincs/bench_sphincs_fast_level3_key.der", "bench_sphincs_fast_level3_key" ],
-        ["certs/sphincs/bench_sphincs_fast_level5_key.der", "bench_sphincs_fast_level5_key" ],
-        ["certs/sphincs/bench_sphincs_small_level1_key.der", "bench_sphincs_small_level1_key" ],
-        ["certs/sphincs/bench_sphincs_small_level3_key.der", "bench_sphincs_small_level3_key" ],
-        ["certs/sphincs/bench_sphincs_small_level5_key.der", "bench_sphincs_small_level5_key" ],
+#SLH-DSA Post-Quantum Keys
+#Used with WOLFSSL_HAVE_SLHDSA
+my @fileList_slhdsa = (
+        ["certs/slhdsa/bench_slhdsa_shake128s_key.der", "bench_slhdsa_shake128s_key" ],
+        ["certs/slhdsa/bench_slhdsa_shake128f_key.der", "bench_slhdsa_shake128f_key" ],
+        ["certs/slhdsa/bench_slhdsa_shake192s_key.der", "bench_slhdsa_shake192s_key" ],
+        ["certs/slhdsa/bench_slhdsa_shake192f_key.der", "bench_slhdsa_shake192f_key" ],
+        ["certs/slhdsa/bench_slhdsa_shake256s_key.der", "bench_slhdsa_shake256s_key" ],
+        ["certs/slhdsa/bench_slhdsa_shake256f_key.der", "bench_slhdsa_shake256f_key" ],
         );
 
 
@@ -177,7 +177,7 @@ my $num_4096     = @fileList_4096;
 my $num_sm2      = @fileList_sm2;
 my $num_sm2_der  = @fileList_sm2_der;
 my $num_falcon   = @fileList_falcon;
-my $num_sphincs  = @fileList_sphincs;
+my $num_slhdsa   = @fileList_slhdsa;
 
 # open our output file, "+>" creates and/or truncates
 open OUT_FILE, "+>", $outputFile  or die $!;
@@ -2098,12 +2098,12 @@ static const unsigned char bench_dilithium_level5_pubkey[] = {
 
 ";
 
-# convert and print sphincs keys
-print OUT_FILE "#if defined(HAVE_SPHINCS)\n\n";
-for (my $i = 0; $i < $num_sphincs; $i++) {
+# convert and print SLH-DSA keys
+print OUT_FILE "#if defined(WOLFSSL_HAVE_SLHDSA)\n\n";
+for (my $i = 0; $i < $num_slhdsa; $i++) {
 
-    my $fname = $fileList_sphincs[$i][0];
-    my $sname = $fileList_sphincs[$i][1];
+    my $fname = $fileList_slhdsa[$i][0];
+    my $sname = $fileList_slhdsa[$i][1];
 
     print OUT_FILE "/* $fname */\n";
     print OUT_FILE "static const unsigned char $sname\[] =\n";
@@ -2116,7 +2116,7 @@ for (my $i = 0; $i < $num_sphincs; $i++) {
     print OUT_FILE "#define sizeof_$sname (sizeof($sname))\n\n"
 }
 
-print OUT_FILE "#endif /* HAVE_SPHINCS */\n\n";
+print OUT_FILE "#endif /* WOLFSSL_HAVE_SLHDSA */\n\n";
 
 # convert and print 256-bit cert/keys
 print OUT_FILE "#if defined(HAVE_ECC) && defined(USE_CERT_BUFFERS_256)\n\n";

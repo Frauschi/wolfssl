@@ -253,13 +253,13 @@
     The following NIST Competition winning algorithms are supported:
     - ML-KEM (CRYSTALS-KYBER) (key encapsulation mechanism)
     - ML-DSA (CRYSTALS-Dilithium) (signature scheme)
+    - SLH-DSA (FIPS 205) (signature scheme)
 
     The following NIST Competition winning algorithms were supported by our
     liboqs integration. Support for their standardized specifications will
     return when we write our own implementations.
 
     - FALCON (signature scheme)
-    - SPHINCS+ (signature scheme)
 
     The following NIST Competition Round 3 finalist algorithms were supported,
     but have been removed after 5.3.3
