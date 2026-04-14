@@ -174,7 +174,8 @@ static const byte
 
 #ifndef NO_CERTS
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(HAVE_ED25519) || \
-    defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM)
+    defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || \
+    defined(WOLFSSL_HAVE_SLHDSA)
 
 static WC_INLINE int GetMsgHash(WOLFSSL* ssl, byte* hash);
 
@@ -8145,7 +8146,8 @@ static int SendTls13CertificateRequest(WOLFSSL* ssl, byte* reqCtx,
 #ifndef NO_CERTS
 #if (!defined(NO_WOLFSSL_SERVER) || !defined(WOLFSSL_NO_CLIENT_AUTH)) && \
     (!defined(NO_RSA) || defined(HAVE_ECC) || defined(HAVE_ED25519) || \
-     defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM))
+     defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || \
+     defined(WOLFSSL_HAVE_SLHDSA))
 /* Encode the signature algorithm into buffer.
  *
  * hashalgo  The hash algorithm.
@@ -8232,16 +8234,42 @@ static WC_INLINE void EncodeSigAlg(const WOLFSSL * ssl, byte hashAlgo,
 #endif
 #ifdef HAVE_DILITHIUM
         case dilithium_level2_sa_algo:
-            output[0] = DILITHIUM_LEVEL2_SA_MAJOR;
+            output[0] = PQC_SA_MAJOR;
             output[1] = DILITHIUM_LEVEL2_SA_MINOR;
             break;
         case dilithium_level3_sa_algo:
-            output[0] = DILITHIUM_LEVEL3_SA_MAJOR;
+            output[0] = PQC_SA_MAJOR;
             output[1] = DILITHIUM_LEVEL3_SA_MINOR;
             break;
         case dilithium_level5_sa_algo:
-            output[0] = DILITHIUM_LEVEL5_SA_MAJOR;
+            output[0] = PQC_SA_MAJOR;
             output[1] = DILITHIUM_LEVEL5_SA_MINOR;
+            break;
+#endif
+#ifdef WOLFSSL_HAVE_SLHDSA
+        case slhdsa_shake_128s_sa_algo:
+            output[0] = PQC_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_128S_SA_MINOR;
+            break;
+        case slhdsa_shake_128f_sa_algo:
+            output[0] = PQC_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_128F_SA_MINOR;
+            break;
+        case slhdsa_shake_192s_sa_algo:
+            output[0] = PQC_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_192S_SA_MINOR;
+            break;
+        case slhdsa_shake_192f_sa_algo:
+            output[0] = PQC_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_192F_SA_MINOR;
+            break;
+        case slhdsa_shake_256s_sa_algo:
+            output[0] = PQC_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_256S_SA_MINOR;
+            break;
+        case slhdsa_shake_256f_sa_algo:
+            output[0] = PQC_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_256F_SA_MINOR;
             break;
 #endif
         default:
@@ -8251,7 +8279,8 @@ static WC_INLINE void EncodeSigAlg(const WOLFSSL * ssl, byte hashAlgo,
 #endif
 
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(HAVE_ED25519) || \
-    defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM)
+    defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || \
+    defined(WOLFSSL_HAVE_SLHDSA)
 #ifdef WOLFSSL_DUAL_ALG_CERTS
 /* These match up with what the OQS team has defined. */
 #define HYBRID_SA_MAJOR 0xFE
@@ -8440,8 +8469,9 @@ static WC_INLINE int DecodeTls13SigAlg(byte* input, byte* hashAlgo,
                 ret = INVALID_PARAMETER;
             break;
 #endif /* HAVE_FALCON */
-#if defined(HAVE_DILITHIUM)
-        case DILITHIUM_SA_MAJOR:
+#if defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_SLHDSA)
+        case PQC_SA_MAJOR:
+    #if defined(HAVE_DILITHIUM)
             if (input[1] == DILITHIUM_LEVEL2_SA_MINOR) {
                 *hsType = dilithium_level2_sa_algo;
                 /* Hash performed as part of sign/verify operation. */
@@ -8454,13 +8484,36 @@ static WC_INLINE int DecodeTls13SigAlg(byte* input, byte* hashAlgo,
                 *hsType = dilithium_level5_sa_algo;
                 /* Hash performed as part of sign/verify operation. */
                 *hashAlgo = sha512_mac;
-            }
-            else
+            } else
+    #endif /* HAVE_DILITHIUM */
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+            /* SLH-DSA handles hashing internally. Set a nominal hashAlgo
+             * that satisfies the minHash check in PickHashSigAlgo. */
+            if (input[1] == SLHDSA_SHAKE_128S_SA_MINOR) {
+                *hsType = slhdsa_shake_128s_sa_algo;
+                *hashAlgo = sha256_mac;
+            } else if (input[1] == SLHDSA_SHAKE_128F_SA_MINOR) {
+                *hsType = slhdsa_shake_128f_sa_algo;
+                *hashAlgo = sha256_mac;
+            } else if (input[1] == SLHDSA_SHAKE_192S_SA_MINOR) {
+                *hsType = slhdsa_shake_192s_sa_algo;
+                *hashAlgo = sha384_mac;
+            } else if (input[1] == SLHDSA_SHAKE_192F_SA_MINOR) {
+                *hsType = slhdsa_shake_192f_sa_algo;
+                *hashAlgo = sha384_mac;
+            } else if (input[1] == SLHDSA_SHAKE_256S_SA_MINOR) {
+                *hsType = slhdsa_shake_256s_sa_algo;
+                *hashAlgo = sha512_mac;
+            } else if (input[1] == SLHDSA_SHAKE_256F_SA_MINOR) {
+                *hsType = slhdsa_shake_256f_sa_algo;
+                *hashAlgo = sha512_mac;
+            } else
+    #endif /* WOLFSSL_HAVE_SLHDSA */
             {
                 ret = INVALID_PARAMETER;
             }
             break;
-#endif /* HAVE_DILITHIUM */
+#endif /* HAVE_DILITHIUM || WOLFSSL_HAVE_SLHDSA */
         default:
             *hashAlgo = input[0];
             *hsType   = input[1];
@@ -9395,7 +9448,7 @@ static int SendTls13Certificate(WOLFSSL* ssl)
 
 #if (!defined(NO_RSA) || defined(HAVE_ECC) || defined(HAVE_ED25519) || \
      defined(HAVE_ED448) || defined(HAVE_FALCON) || \
-     defined(HAVE_DILITHIUM)) && \
+     defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_SLHDSA)) && \
     (!defined(NO_WOLFSSL_SERVER) || !defined(WOLFSSL_NO_CLIENT_AUTH))
 typedef struct Scv13Args {
     byte*  output; /* not allocated */
@@ -9652,6 +9705,11 @@ static int SendTls13CertificateVerify(WOLFSSL* ssl)
                 args->sigAlgo = ssl->buffers.keyType;
             }
         #endif /* HAVE_DILITHIUM */
+        #if defined(WOLFSSL_HAVE_SLHDSA)
+            else if (ssl->hsType == DYNAMIC_TYPE_SLHDSA) {
+                args->sigAlgo = ssl->buffers.keyType;
+            }
+        #endif /* WOLFSSL_HAVE_SLHDSA */
             else {
                 ERROR_OUT(ALGO_ID_E, exit_scv);
             }
@@ -9818,6 +9876,11 @@ static int SendTls13CertificateVerify(WOLFSSL* ssl)
                 args->sigLen = DILITHIUM_MAX_SIG_SIZE;
             }
         #endif /* HAVE_DILITHIUM */
+        #if defined(WOLFSSL_HAVE_SLHDSA)
+            if (ssl->hsType == DYNAMIC_TYPE_SLHDSA) {
+                args->sigLen = WC_SLHDSA_MAX_SIG_LEN;
+            }
+        #endif /* WOLFSSL_HAVE_SLHDSA */
 
         #ifdef WOLFSSL_DUAL_ALG_CERTS
             if (ssl->sigSpec != NULL &&
@@ -9942,6 +10005,14 @@ static int SendTls13CertificateVerify(WOLFSSL* ssl)
                 args->length = (word16)args->sigLen;
             }
         #endif /* HAVE_DILITHIUM */
+        #if defined(WOLFSSL_HAVE_SLHDSA)
+            if (ssl->hsType == DYNAMIC_TYPE_SLHDSA) {
+                ret = wc_SlhDsaKey_Sign((SlhDsaKey*)ssl->hsKey, NULL, 0,
+                                        args->sigData, args->sigDataSz,
+                                        sigOut, &args->sigLen, ssl->rng);
+                args->length = (word16)args->sigLen;
+            }
+        #endif /* WOLFSSL_HAVE_SLHDSA */
         #if !defined(NO_RSA) && !defined(WOLFSSL_RSA_PUBLIC_ONLY) && \
             !defined(WOLFSSL_RSA_VERIFY_ONLY)
             if (ssl->hsType == DYNAMIC_TYPE_RSA) {
@@ -10186,19 +10257,102 @@ static int SendTls13CertificateVerify(WOLFSSL* ssl)
             }
 #endif /* WOLFSSL_DTLS13 */
 
-            /* This message is always encrypted. */
-            ret = BuildTls13Message(ssl, args->output,
-                                    WC_MAX_CERT_VERIFY_SZ + MAX_MSG_EXTRA,
-                                    args->output + RECORD_HEADER_SZ,
-                                    args->sendSz - RECORD_HEADER_SZ, handshake,
-                                    1, 0, 0);
+            {
+                /* The CertificateVerify handshake message may exceed
+                 * MAX_RECORD_SIZE for large PQC signatures (e.g. SLH-DSA
+                 * SHAKE-128f = 17088 bytes). Split into multiple encrypted
+                 * records, each within the limit.
+                 *
+                 * Each fragment is hashed into the transcript via
+                 * BuildTls13Message(hashOutput=1), matching the approach
+                 * used by SendTls13Certificate for large cert chains. The
+                 * client-side receiver hashes each decrypted record
+                 * independently in the same incremental order. */
+                int hsLen = args->sendSz - RECORD_HEADER_SZ;
+                byte* hsData = args->output + RECORD_HEADER_SZ;
+                int maxPlain = MAX_RECORD_SIZE - 1
+                                             - ssl->specs.aead_mac_size;
 
-            if (ret < 0) {
-                goto exit_scv;
-            }
-            else {
-                args->sendSz = ret;
-                ret = 0;
+                if (hsLen <= maxPlain) {
+                    /* Fits in a single record — standard path. */
+                    ret = BuildTls13Message(ssl, args->output,
+                                WC_MAX_CERT_VERIFY_SZ + MAX_MSG_EXTRA,
+                                hsData, hsLen, handshake, 1, 0, 0);
+                    if (ret < 0)
+                        goto exit_scv;
+                    args->sendSz = ret;
+                    ret = 0;
+                    ssl->buffers.outputBuffer.length += (word32)args->sendSz;
+                }
+                else {
+                    /* Fragment across multiple records. Each fragment is
+                     * hashed with hashOutput=1 so the transcript accumulates
+                     * incrementally, matching what the receiver does.
+                     *
+                     * IMPORTANT: BuildTls13Message encrypts in-place,
+                     * overwriting the plaintext. We must save the tail
+                     * data before encrypting any fragment, since all
+                     * fragments share the same source buffer initially. */
+                    int tailSz = hsLen - maxPlain;
+                    byte* tailCopy;
+                    int builtSz;
+                    int totalSent = 0;
+                    int off;
+                    byte* out;
+
+                    /* Save everything past the first fragment before
+                     * encryption overwrites it. */
+                    tailCopy = (byte*)XMALLOC((word32)tailSz, ssl->heap,
+                                              DYNAMIC_TYPE_TMP_BUFFER);
+                    if (tailCopy == NULL) {
+                        ERROR_OUT(MEMORY_E, exit_scv);
+                    }
+                    XMEMCPY(tailCopy, hsData + maxPlain, (word32)tailSz);
+
+                    /* First fragment: encrypt in-place from original buffer. */
+                    builtSz = BuildTls13Message(ssl, args->output,
+                                    maxPlain + MAX_MSG_EXTRA,
+                                    hsData, maxPlain, handshake, 1, 0, 0);
+                    if (builtSz < 0) {
+                        XFREE(tailCopy, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                        ret = builtSz;
+                        goto exit_scv;
+                    }
+                    ssl->buffers.outputBuffer.length += (word32)builtSz;
+                    totalSent += builtSz;
+
+                    /* Remaining fragments from the saved tail copy. */
+                    off = 0;
+                    while (off < tailSz) {
+                        int fragSz = tailSz - off;
+                        if (fragSz > maxPlain)
+                            fragSz = maxPlain;
+
+                        if ((ret = CheckAvailableSize(ssl,
+                                    fragSz + MAX_MSG_EXTRA)) != 0) {
+                            XFREE(tailCopy, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                            goto exit_scv;
+                        }
+                        out = GetOutputBuffer(ssl);
+                        builtSz = BuildTls13Message(ssl, out,
+                                        fragSz + MAX_MSG_EXTRA,
+                                        tailCopy + off, fragSz,
+                                        handshake, 1, 0, 0);
+                        if (builtSz < 0) {
+                            XFREE(tailCopy, ssl->heap,
+                                   DYNAMIC_TYPE_TMP_BUFFER);
+                            ret = builtSz;
+                            goto exit_scv;
+                        }
+                        ssl->buffers.outputBuffer.length += (word32)builtSz;
+                        totalSent += builtSz;
+                        off += fragSz;
+                    }
+
+                    XFREE(tailCopy, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                    args->sendSz = totalSent;
+                    ret = 0;
+                }
             }
 
         #if defined(WOLFSSL_CALLBACKS) || defined(OPENSSL_EXTRA)
@@ -10213,7 +10367,6 @@ static int SendTls13CertificateVerify(WOLFSSL* ssl)
             }
         #endif
 
-            ssl->buffers.outputBuffer.length += (word32)args->sendSz;
             ssl->options.buildingMsg = 0;
             if (!ssl->options.groupMessages)
                 ret = SendBuffered(ssl);
@@ -10314,7 +10467,8 @@ static int DoTls13Certificate(WOLFSSL* ssl, byte* input, word32* inOutIdx,
 #endif
 
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(HAVE_ED25519) || \
-                                                             defined(HAVE_ED448)
+    defined(HAVE_ED448) || defined(HAVE_FALCON) || \
+    defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_SLHDSA)
 
 typedef struct Dcv13Args {
     byte*  output; /* not allocated */
@@ -10770,6 +10924,14 @@ static int DoTls13CertificateVerify(WOLFSSL* ssl, byte* input,
                                ssl->peerDilithiumKeyPresent;
             }
         #endif
+        #ifdef WOLFSSL_HAVE_SLHDSA
+            if (ssl->options.peerSigAlgo >= slhdsa_shake_128s_sa_algo &&
+                ssl->options.peerSigAlgo <= slhdsa_shake_256f_sa_algo) {
+                WOLFSSL_MSG("Peer sent SLH-DSA sig");
+                validSigAlgo = (ssl->peerSlhDsaKey != NULL) &&
+                               ssl->peerSlhDsaKeyPresent;
+            }
+        #endif
         #ifndef NO_RSA
             if (ssl->options.peerSigAlgo == rsa_sa_algo) {
                 WOLFSSL_MSG("Peer sent PKCS#1.5 algo - not valid TLS 1.3");
@@ -11077,6 +11239,29 @@ static int DoTls13CertificateVerify(WOLFSSL* ssl, byte* input,
                 }
             }
         #endif /* HAVE_DILITHIUM */
+        #if defined(WOLFSSL_HAVE_SLHDSA)
+            if ((ssl->options.peerSigAlgo >= slhdsa_shake_128s_sa_algo) &&
+                (ssl->options.peerSigAlgo <= slhdsa_shake_256f_sa_algo) &&
+                (ssl->peerSlhDsaKeyPresent)) {
+                WOLFSSL_MSG("Doing SLH-DSA peer cert verify");
+                ret = wc_SlhDsaKey_Verify(ssl->peerSlhDsaKey, NULL, 0,
+                                          args->sigData, args->sigDataSz,
+                                          sig, args->sigSz);
+
+                if (ret == 0) {
+                    /* CLIENT/SERVER: data verified with public key from
+                     * certificate. */
+                    ssl->options.peerAuthGood = 1;
+
+                    FreeKey(ssl, DYNAMIC_TYPE_SLHDSA,
+                            (void**)&ssl->peerSlhDsaKey);
+                    ssl->peerSlhDsaKeyPresent = 0;
+                }
+                else {
+                    WOLFSSL_MSG("SLH-DSA signature verification failed");
+                }
+            }
+        #endif /* WOLFSSL_HAVE_SLHDSA */
 
             /* Check for error */
             if (ret != 0) {
@@ -11311,7 +11496,8 @@ exit_dcv:
 
     return ret;
 }
-#endif /* !NO_RSA || HAVE_ECC */
+#endif /* !NO_RSA || HAVE_ECC || HAVE_ED25519 || HAVE_ED448 || HAVE_FALCON ||
+        * HAVE_DILITHIUM || WOLFSSL_HAVE_SLHDSA */
 #endif /* !NO_CERTS */
 
 /* Parse and handle a TLS v1.3 Finished message.
@@ -13273,7 +13459,8 @@ int DoTls13HandShakeMsgType(WOLFSSL* ssl, byte* input, word32* inOutIdx,
 #endif
 
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(HAVE_ED25519) || \
-    defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM)
+    defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || \
+    defined(WOLFSSL_HAVE_SLHDSA)
     case certificate_verify:
         WOLFSSL_MSG("processing certificate verify");
         ret = DoTls13CertificateVerify(ssl, input, inOutIdx, size);
@@ -13960,7 +14147,8 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
         case FIRST_REPLY_THIRD:
         #if (!defined(NO_CERTS) && (!defined(NO_RSA) || defined(HAVE_ECC) || \
              defined(HAVE_ED25519) || defined(HAVE_ED448) || \
-             defined(HAVE_FALCON) || defined(HAVE_DILITHIUM))) && \
+             defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || \
+             defined(WOLFSSL_HAVE_SLHDSA))) && \
              (!defined(NO_WOLFSSL_SERVER) || !defined(WOLFSSL_NO_CLIENT_AUTH))
             if (!ssl->options.resuming && ssl->options.sendVerify) {
                 ssl->error = SendTls13CertificateVerify(ssl);
@@ -15122,7 +15310,7 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
         case TLS13_CERT_SENT :
 #if !defined(NO_CERTS) && (!defined(NO_RSA) || defined(HAVE_ECC) || \
      defined(HAVE_ED25519) || defined(HAVE_ED448) || defined(HAVE_FALCON) || \
-     defined(HAVE_DILITHIUM))
+     defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_SLHDSA))
             if (!ssl->options.resuming && ssl->options.sendVerify) {
                 if ((ssl->error = SendTls13CertificateVerify(ssl)) != 0) {
                     WOLFSSL_ERROR(ssl->error);

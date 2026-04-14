@@ -118,6 +118,9 @@
     #if defined(HAVE_DILITHIUM)
         #include <wolfssl/wolfcrypt/dilithium.h>
     #endif /* HAVE_DILITHIUM */
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+        #include <wolfssl/wolfcrypt/wc_slhdsa.h>
+    #endif /* WOLFSSL_HAVE_SLHDSA */
     #if defined(OPENSSL_ALL) || defined(HAVE_STUNNEL)
         #ifdef HAVE_OCSP
             #include <wolfssl/openssl/ocsp.h>
@@ -15897,6 +15900,9 @@ WOLFSSL_CTX* wolfSSL_set_SSL_CTX(WOLFSSL* ssl, WOLFSSL_CTX* ctx)
     ssl->options.haveStaticECC    = ctx->haveStaticECC;
     ssl->options.haveFalconSig    = ctx->haveFalconSig;
     ssl->options.haveDilithiumSig = ctx->haveDilithiumSig;
+#ifdef WOLFSSL_HAVE_SLHDSA
+    ssl->options.haveSlhDsaSig   = ctx->haveSlhDsaSig;
+#endif
 #ifdef WOLFSSL_DUAL_ALG_CERTS
 #ifndef WOLFSSL_BLIND_PRIVATE_KEY
     ssl->buffers.altKey   = ctx->altPrivateKey;

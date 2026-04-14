@@ -2300,6 +2300,11 @@ int InitSSL_Side(WOLFSSL* ssl, word16 side)
         ssl->options.haveDilithiumSig  = 1; /* always on client side */
     }
 #endif /* HAVE_DILITHIUM */
+#ifdef WOLFSSL_HAVE_SLHDSA
+    if (ssl->options.side == WOLFSSL_CLIENT_END) {
+        ssl->options.haveSlhDsaSig  = 1; /* always on client side */
+    }
+#endif /* WOLFSSL_HAVE_SLHDSA */
 
 #if defined(HAVE_EXTENDED_MASTER) && !defined(NO_WOLFSSL_CLIENT)
     if (ssl->options.side == WOLFSSL_CLIENT_END) {
@@ -2643,6 +2648,9 @@ int InitSSL_Ctx(WOLFSSL_CTX* ctx, WOLFSSL_METHOD* method, void* heap)
 #ifdef HAVE_DILITHIUM
     ctx->minDilithiumKeySz = MIN_DILITHIUMKEY_SZ;
 #endif /* HAVE_DILITHIUM */
+#ifdef WOLFSSL_HAVE_SLHDSA
+    ctx->minSlhDsaKeySz = MIN_SLHDSAKEY_SZ;
+#endif /* WOLFSSL_HAVE_SLHDSA */
     ctx->verifyDepth = MAX_CHAIN_DEPTH;
 #ifdef OPENSSL_EXTRA
     ctx->cbioFlag = WOLFSSL_CBIO_NONE;
@@ -2716,6 +2724,11 @@ int InitSSL_Ctx(WOLFSSL_CTX* ctx, WOLFSSL_METHOD* method, void* heap)
         ctx->haveDilithiumSig = 1;     /* always on client side */
                                        /* server can turn on by loading key */
 #endif /* HAVE_DILITHIUM */
+#ifdef WOLFSSL_HAVE_SLHDSA
+    if (method->side == WOLFSSL_CLIENT_END)
+        ctx->haveSlhDsaSig = 1;        /* always on client side */
+                                       /* server can turn on by loading key */
+#endif /* WOLFSSL_HAVE_SLHDSA */
 #ifdef HAVE_ECC
     if (method->side == WOLFSSL_CLIENT_END) {
         ctx->haveECDSAsig  = 1;        /* always on client side */
@@ -3392,20 +3405,52 @@ static WC_INLINE void AddSuiteHashSigAlgo(byte* hashSigAlgo, byte macAlgo,
     #ifdef HAVE_DILITHIUM
         if (sigAlgo == dilithium_level2_sa_algo) {
             ADD_HASH_SIG_ALGO(hashSigAlgo, inOutIdx,
-                DILITHIUM_LEVEL2_SA_MAJOR, DILITHIUM_LEVEL2_SA_MINOR);
+                PQC_SA_MAJOR, DILITHIUM_LEVEL2_SA_MINOR);
         }
         else
         if (sigAlgo == dilithium_level3_sa_algo) {
             ADD_HASH_SIG_ALGO(hashSigAlgo, inOutIdx,
-                DILITHIUM_LEVEL3_SA_MAJOR, DILITHIUM_LEVEL3_SA_MINOR);
+                PQC_SA_MAJOR, DILITHIUM_LEVEL3_SA_MINOR);
         }
         else
         if (sigAlgo == dilithium_level5_sa_algo) {
             ADD_HASH_SIG_ALGO(hashSigAlgo, inOutIdx,
-                DILITHIUM_LEVEL5_SA_MAJOR, DILITHIUM_LEVEL5_SA_MINOR);
+                PQC_SA_MAJOR, DILITHIUM_LEVEL5_SA_MINOR);
         }
         else
     #endif /* HAVE_DILITHIUM */
+    #ifdef WOLFSSL_HAVE_SLHDSA
+        if (sigAlgo == slhdsa_shake_128s_sa_algo) {
+            ADD_HASH_SIG_ALGO(hashSigAlgo, inOutIdx,
+                PQC_SA_MAJOR, SLHDSA_SHAKE_128S_SA_MINOR);
+        }
+        else
+        if (sigAlgo == slhdsa_shake_128f_sa_algo) {
+            ADD_HASH_SIG_ALGO(hashSigAlgo, inOutIdx,
+                PQC_SA_MAJOR, SLHDSA_SHAKE_128F_SA_MINOR);
+        }
+        else
+        if (sigAlgo == slhdsa_shake_192s_sa_algo) {
+            ADD_HASH_SIG_ALGO(hashSigAlgo, inOutIdx,
+                PQC_SA_MAJOR, SLHDSA_SHAKE_192S_SA_MINOR);
+        }
+        else
+        if (sigAlgo == slhdsa_shake_192f_sa_algo) {
+            ADD_HASH_SIG_ALGO(hashSigAlgo, inOutIdx,
+                PQC_SA_MAJOR, SLHDSA_SHAKE_192F_SA_MINOR);
+        }
+        else
+        if (sigAlgo == slhdsa_shake_256s_sa_algo) {
+            ADD_HASH_SIG_ALGO(hashSigAlgo, inOutIdx,
+                PQC_SA_MAJOR, SLHDSA_SHAKE_256S_SA_MINOR);
+        }
+        else
+        if (sigAlgo == slhdsa_shake_256f_sa_algo) {
+            ADD_HASH_SIG_ALGO(hashSigAlgo, inOutIdx,
+                PQC_SA_MAJOR, SLHDSA_SHAKE_256F_SA_MINOR);
+        }
+        else
+    #endif /* WOLFSSL_HAVE_SLHDSA */
 #ifdef WC_RSA_PSS
         if (sigAlgo == rsa_pss_sa_algo) {
             /* RSA PSS is sig then mac */
@@ -3520,6 +3565,22 @@ void InitSuitesHashSigAlgo(byte* hashSigAlgo, int haveSig, int tls1_2,
             keySz, &idx);
     }
 #endif /* HAVE_DILITHIUM */
+#ifdef WOLFSSL_HAVE_SLHDSA
+    if (haveSig & SIG_SLHDSA) {
+        AddSuiteHashSigAlgo(hashSigAlgo, no_mac, slhdsa_shake_128s_sa_algo,
+            keySz, &idx);
+        AddSuiteHashSigAlgo(hashSigAlgo, no_mac, slhdsa_shake_128f_sa_algo,
+            keySz, &idx);
+        AddSuiteHashSigAlgo(hashSigAlgo, no_mac, slhdsa_shake_192s_sa_algo,
+            keySz, &idx);
+        AddSuiteHashSigAlgo(hashSigAlgo, no_mac, slhdsa_shake_192f_sa_algo,
+            keySz, &idx);
+        AddSuiteHashSigAlgo(hashSigAlgo, no_mac, slhdsa_shake_256s_sa_algo,
+            keySz, &idx);
+        AddSuiteHashSigAlgo(hashSigAlgo, no_mac, slhdsa_shake_256f_sa_algo,
+            keySz, &idx);
+    }
+#endif /* WOLFSSL_HAVE_SLHDSA */
     if (haveSig & SIG_RSA) {
     #ifdef WC_RSA_PSS
         if (tls1_2) {
@@ -4758,8 +4819,9 @@ void DecodeSigAlg(const byte* input, byte* hashAlgo, byte* hsType)
             }
             break;
     #endif /* HAVE_FALCON */
-    #ifdef HAVE_DILITHIUM
-        case DILITHIUM_SA_MAJOR:
+    #if defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_SLHDSA)
+        case PQC_SA_MAJOR:
+        #ifdef HAVE_DILITHIUM
             if (input[1] == DILITHIUM_LEVEL2_SA_MINOR) {
                 *hsType = dilithium_level2_sa_algo;
                 *hashAlgo = sha256_mac;
@@ -4772,8 +4834,38 @@ void DecodeSigAlg(const byte* input, byte* hashAlgo, byte* hsType)
                 *hsType = dilithium_level5_sa_algo;
                 *hashAlgo = sha512_mac;
             }
+            else
+        #endif /* HAVE_DILITHIUM */
+        #ifdef WOLFSSL_HAVE_SLHDSA
+            /* SLH-DSA handles hashing internally. Set a nominal hashAlgo
+             * that satisfies the minHash check in PickHashSigAlgo. */
+            if (input[1] == SLHDSA_SHAKE_128S_SA_MINOR) {
+                *hsType = slhdsa_shake_128s_sa_algo;
+                *hashAlgo = sha256_mac;
+            }
+            else if (input[1] == SLHDSA_SHAKE_128F_SA_MINOR) {
+                *hsType = slhdsa_shake_128f_sa_algo;
+                *hashAlgo = sha256_mac;
+            }
+            else if (input[1] == SLHDSA_SHAKE_192S_SA_MINOR) {
+                *hsType = slhdsa_shake_192s_sa_algo;
+                *hashAlgo = sha384_mac;
+            }
+            else if (input[1] == SLHDSA_SHAKE_192F_SA_MINOR) {
+                *hsType = slhdsa_shake_192f_sa_algo;
+                *hashAlgo = sha384_mac;
+            }
+            else if (input[1] == SLHDSA_SHAKE_256S_SA_MINOR) {
+                *hsType = slhdsa_shake_256s_sa_algo;
+                *hashAlgo = sha512_mac;
+            }
+            else if (input[1] == SLHDSA_SHAKE_256F_SA_MINOR) {
+                *hsType = slhdsa_shake_256f_sa_algo;
+                *hashAlgo = sha512_mac;
+            }
+        #endif /* WOLFSSL_HAVE_SLHDSA */
             break;
-    #endif /* HAVE_DILITHIUM */
+    #endif /* HAVE_DILITHIUM || WOLFSSL_HAVE_SLHDSA */
         default:
             *hashAlgo = input[0];
             *hsType   = input[1];
@@ -7108,7 +7200,9 @@ int SetSSL_CTX(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup)
     ssl->eccTempKeySz = ctx->eccTempKeySz;
     ssl->ecdhCurveOID = ctx->ecdhCurveOID;
 #endif
-#if defined(HAVE_ECC) || defined(HAVE_ED25519) || defined(HAVE_ED448)
+#if defined(HAVE_ECC) || defined(HAVE_ED25519) || defined(HAVE_ED448) || \
+    defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || \
+    defined(WOLFSSL_HAVE_SLHDSA)
     ssl->pkCurveOID = ctx->pkCurveOID;
 #endif
 
@@ -7155,6 +7249,7 @@ int SetSSL_CTX(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup)
     ssl->options.haveStaticECC    = ctx->haveStaticECC;
     ssl->options.haveFalconSig    = ctx->haveFalconSig;
     ssl->options.haveDilithiumSig = ctx->haveDilithiumSig;
+    ssl->options.haveSlhDsaSig   = ctx->haveSlhDsaSig;
 
 #ifndef NO_PSK
     ssl->options.havePSK       = (word16)(ctx->havePSK);
@@ -7194,6 +7289,9 @@ int SetSSL_CTX(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup)
 #ifdef HAVE_DILITHIUM
     ssl->options.minDilithiumKeySz = ctx->minDilithiumKeySz;
 #endif /* HAVE_DILITHIUM */
+#ifdef WOLFSSL_HAVE_SLHDSA
+    ssl->options.minSlhDsaKeySz = ctx->minSlhDsaKeySz;
+#endif /* WOLFSSL_HAVE_SLHDSA */
 #if defined(OPENSSL_EXTRA) || defined(OPENSSL_EXTRA_X509_SMALL)
     ssl->options.verifyDepth = ctx->verifyDepth;
 #endif
@@ -8329,6 +8427,11 @@ void FreeKey(WOLFSSL* ssl, int type, void** pKey)
                 wc_dilithium_free((dilithium_key*)*pKey);
                 break;
         #endif /* HAVE_DILITHIUM */
+        #if defined(WOLFSSL_HAVE_SLHDSA)
+            case DYNAMIC_TYPE_SLHDSA:
+                wc_SlhDsaKey_Free((SlhDsaKey*)*pKey);
+                break;
+        #endif /* WOLFSSL_HAVE_SLHDSA */
         #ifndef NO_DH
             case DYNAMIC_TYPE_DH:
                 wc_FreeDhKey((DhKey*)*pKey);
@@ -8420,6 +8523,11 @@ int AllocKey(WOLFSSL* ssl, int type, void** pKey)
             sz = sizeof(dilithium_key);
             break;
     #endif /* HAVE_DILITHIUM */
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+        case DYNAMIC_TYPE_SLHDSA:
+            sz = sizeof(SlhDsaKey);
+            break;
+    #endif /* WOLFSSL_HAVE_SLHDSA */
     #ifndef NO_DH
         case DYNAMIC_TYPE_DH:
             sz = sizeof(DhKey);
@@ -8518,6 +8626,14 @@ int AllocKey(WOLFSSL* ssl, int type, void** pKey)
             ret = 0;
             break;
     #endif /* HAVE_DILITHIUM */
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+        case DYNAMIC_TYPE_SLHDSA:
+            /* Init with default param; will be re-initialized with correct
+             * param before use. */
+            ret = wc_SlhDsaKey_Init((SlhDsaKey*)*pKey, SLHDSA_SHAKE128S,
+                                    ssl->heap, ssl->devId);
+            break;
+    #endif /* WOLFSSL_HAVE_SLHDSA */
     #ifdef HAVE_CURVE448
         case DYNAMIC_TYPE_CURVE448:
             wc_curve448_init((curve448_key*)*pKey);
@@ -8543,7 +8659,8 @@ int AllocKey(WOLFSSL* ssl, int type, void** pKey)
 
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(HAVE_ED25519) || \
     defined(HAVE_CURVE25519) || defined(HAVE_ED448) || \
-    defined(HAVE_CURVE448) || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM)
+    defined(HAVE_CURVE448) || defined(HAVE_FALCON) || \
+    defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_SLHDSA)
 static int ReuseKey(WOLFSSL* ssl, int type, void* pKey)
 {
     int ret = 0;
@@ -8601,6 +8718,13 @@ static int ReuseKey(WOLFSSL* ssl, int type, void* pKey)
             ret = wc_dilithium_init((dilithium_key*)pKey);
             break;
     #endif /* HAVE_DILITHIUM */
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+        case DYNAMIC_TYPE_SLHDSA:
+            wc_SlhDsaKey_Free((SlhDsaKey*)pKey);
+            ret = wc_SlhDsaKey_Init((SlhDsaKey*)pKey, SLHDSA_SHAKE128S,
+                                    ssl->heap, ssl->devId);
+            break;
+    #endif /* WOLFSSL_HAVE_SLHDSA */
     #ifndef NO_DH
         case DYNAMIC_TYPE_DH:
             wc_FreeDhKey((DhKey*)pKey);
@@ -8941,6 +9065,10 @@ void wolfSSL_ResourceFree(WOLFSSL* ssl)
     FreeKey(ssl, DYNAMIC_TYPE_FALCON, (void**)&ssl->peerFalconKey);
     ssl->peerFalconKeyPresent = 0;
 #endif
+#if defined(WOLFSSL_HAVE_SLHDSA)
+    FreeKey(ssl, DYNAMIC_TYPE_SLHDSA, (void**)&ssl->peerSlhDsaKey);
+    ssl->peerSlhDsaKeyPresent = 0;
+#endif
 #ifdef HAVE_PK_CALLBACKS
     #ifdef HAVE_ECC
         XFREE(ssl->buffers.peerEccDsaKey.buffer, ssl->heap, DYNAMIC_TYPE_ECC);
@@ -9213,6 +9341,10 @@ void FreeHandshakeResources(WOLFSSL* ssl)
         FreeKey(ssl, DYNAMIC_TYPE_DILITHIUM, (void**)&ssl->peerDilithiumKey);
         ssl->peerDilithiumKeyPresent = 0;
 #endif /* HAVE_DILITHIUM */
+#if defined(WOLFSSL_HAVE_SLHDSA)
+        FreeKey(ssl, DYNAMIC_TYPE_SLHDSA, (void**)&ssl->peerSlhDsaKey);
+        ssl->peerSlhDsaKeyPresent = 0;
+#endif /* WOLFSSL_HAVE_SLHDSA */
     }
 
 #ifdef HAVE_ECC
@@ -15557,6 +15689,22 @@ static int ProcessPeerCertCheckKey(WOLFSSL* ssl, ProcPeerCertArgs* args)
             }
             break;
     #endif /* HAVE_DILITHIUM */
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+        case SLH_DSA_SHAKE_128Sk:
+        case SLH_DSA_SHAKE_128Fk:
+        case SLH_DSA_SHAKE_192Sk:
+        case SLH_DSA_SHAKE_192Fk:
+        case SLH_DSA_SHAKE_256Sk:
+        case SLH_DSA_SHAKE_256Fk:
+            if (ssl->options.minSlhDsaKeySz < 0 ||
+                args->dCert->pubKeySize
+                < (word16)ssl->options.minSlhDsaKeySz) {
+                WOLFSSL_MSG("SLH-DSA key size in cert chain error");
+                ret = PEER_KEY_ERROR;
+                WOLFSSL_ERROR_VERBOSE(ret);
+            }
+            break;
+    #endif /* WOLFSSL_HAVE_SLHDSA */
         default:
             WOLFSSL_MSG("Key size not checked");
             /* key not being checked for size if not in
@@ -17332,6 +17480,69 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                         break;
                     }
                 #endif /* HAVE_DILITHIUM */
+                #if defined(WOLFSSL_HAVE_SLHDSA)
+                    case SLH_DSA_SHAKE_128Sk:
+                    case SLH_DSA_SHAKE_128Fk:
+                    case SLH_DSA_SHAKE_192Sk:
+                    case SLH_DSA_SHAKE_192Fk:
+                    case SLH_DSA_SHAKE_256Sk:
+                    case SLH_DSA_SHAKE_256Fk:
+                    {
+                        int keyRet = 0;
+                        enum SlhDsaParam param;
+                        if (args->dCert->keyOID == SLH_DSA_SHAKE_128Sk)
+                            param = SLHDSA_SHAKE128S;
+                        else if (args->dCert->keyOID == SLH_DSA_SHAKE_128Fk)
+                            param = SLHDSA_SHAKE128F;
+                        else if (args->dCert->keyOID == SLH_DSA_SHAKE_192Sk)
+                            param = SLHDSA_SHAKE192S;
+                        else if (args->dCert->keyOID == SLH_DSA_SHAKE_192Fk)
+                            param = SLHDSA_SHAKE192F;
+                        else if (args->dCert->keyOID == SLH_DSA_SHAKE_256Sk)
+                            param = SLHDSA_SHAKE256S;
+                        else
+                            param = SLHDSA_SHAKE256F;
+
+                        if (ssl->peerSlhDsaKey == NULL) {
+                            /* alloc/init on demand */
+                            keyRet = AllocKey(ssl, DYNAMIC_TYPE_SLHDSA,
+                                    (void**)&ssl->peerSlhDsaKey);
+                        } else if (ssl->peerSlhDsaKeyPresent) {
+                            keyRet = ReuseKey(ssl, DYNAMIC_TYPE_SLHDSA,
+                                    ssl->peerSlhDsaKey);
+                            ssl->peerSlhDsaKeyPresent = 0;
+                        }
+
+                        /* Re-init with the correct param */
+                        if (keyRet == 0) {
+                            wc_SlhDsaKey_Free(ssl->peerSlhDsaKey);
+                            keyRet = wc_SlhDsaKey_Init(ssl->peerSlhDsaKey,
+                                         param, ssl->heap, INVALID_DEVID);
+                        }
+
+                        if (keyRet != 0 ||
+                            wc_SlhDsaKey_ImportPublic(ssl->peerSlhDsaKey,
+                                                      args->dCert->publicKey,
+                                                      args->dCert->pubKeySize)
+                            != 0) {
+                            ret = PEER_KEY_ERROR;
+                        }
+                        else {
+                            ssl->peerSlhDsaKeyPresent = 1;
+                        }
+
+                        /* check size of peer SLH-DSA key */
+                        if (ret == 0 && ssl->peerSlhDsaKeyPresent &&
+                               !ssl->options.verifyNone &&
+                               (int)args->dCert->pubKeySize <
+                               ssl->options.minSlhDsaKeySz) {
+                            ret = PEER_KEY_ERROR;
+                            WOLFSSL_ERROR_VERBOSE(ret);
+                            WOLFSSL_MSG("Peer SLH-DSA key is too small");
+                        }
+                        break;
+                    }
+                #endif /* WOLFSSL_HAVE_SLHDSA */
                     default:
                         break;
                 }
@@ -29270,6 +29481,7 @@ int SetCipherListFromBytes(WOLFSSL_CTX* ctx, Suites* suites, const byte* list,
     int haveECDSAsig     = 0;
     int haveFalconSig    = 0;
     int haveDilithiumSig = 0;
+    int haveSlhDsaSig    = 0;
     int haveAnon         = 0;
     int tls1_3           = 0;
 
@@ -29344,6 +29556,9 @@ int SetCipherListFromBytes(WOLFSSL_CTX* ctx, Suites* suites, const byte* list,
         #ifdef HAVE_DILITHIUM
             haveDilithiumSig = 1;
         #endif /* HAVE_DILITHIUM */
+        #ifdef WOLFSSL_HAVE_SLHDSA
+            haveSlhDsaSig = 1;
+        #endif /* WOLFSSL_HAVE_SLHDSA */
         }
         else
     #endif /* WOLFSSL_TLS13 */
@@ -29382,6 +29597,7 @@ int SetCipherListFromBytes(WOLFSSL_CTX* ctx, Suites* suites, const byte* list,
         haveSig |= haveRSAsig ? SIG_RSA : 0;
         haveSig |= haveFalconSig ? SIG_FALCON : 0;
         haveSig |= haveDilithiumSig ? SIG_DILITHIUM : 0;
+        haveSig |= haveSlhDsaSig ? SIG_SLHDSA : 0;
         haveSig |= haveAnon ? SIG_ANON : 0;
         InitSuitesHashSigAlgo(suites->hashSigAlgo, haveSig, 1, tls1_3,
             keySz, &suites->hashSigAlgoSz);
@@ -29623,6 +29839,26 @@ static int MatchSigAlgo(WOLFSSL* ssl, int sigAlgo)
         return sigAlgo == dilithium_level5_sa_algo;
     }
 #endif /* HAVE_DILITHIUM */
+#ifdef WOLFSSL_HAVE_SLHDSA
+    if (ssl->pkCurveOID == SLH_DSA_SHAKE_128Sk) {
+        return sigAlgo == slhdsa_shake_128s_sa_algo;
+    }
+    if (ssl->pkCurveOID == SLH_DSA_SHAKE_128Fk) {
+        return sigAlgo == slhdsa_shake_128f_sa_algo;
+    }
+    if (ssl->pkCurveOID == SLH_DSA_SHAKE_192Sk) {
+        return sigAlgo == slhdsa_shake_192s_sa_algo;
+    }
+    if (ssl->pkCurveOID == SLH_DSA_SHAKE_192Fk) {
+        return sigAlgo == slhdsa_shake_192f_sa_algo;
+    }
+    if (ssl->pkCurveOID == SLH_DSA_SHAKE_256Sk) {
+        return sigAlgo == slhdsa_shake_256s_sa_algo;
+    }
+    if (ssl->pkCurveOID == SLH_DSA_SHAKE_256Fk) {
+        return sigAlgo == slhdsa_shake_256f_sa_algo;
+    }
+#endif /* WOLFSSL_HAVE_SLHDSA */
 #ifdef WC_RSA_PSS
     /* RSA certificate and PSS sig alg. */
     if (ssl->options.sigAlgo == rsa_sa_algo) {
@@ -29835,6 +30071,20 @@ int PickHashSigAlgo(WOLFSSL* ssl, const byte* hashSigAlgo, word32 hashSigAlgoSz,
             break;
         }
     #endif /* HAVE_DILITHIUM */
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+        if (ssl->pkCurveOID == SLH_DSA_SHAKE_128Sk ||
+            ssl->pkCurveOID == SLH_DSA_SHAKE_128Fk ||
+            ssl->pkCurveOID == SLH_DSA_SHAKE_192Sk ||
+            ssl->pkCurveOID == SLH_DSA_SHAKE_192Fk ||
+            ssl->pkCurveOID == SLH_DSA_SHAKE_256Sk ||
+            ssl->pkCurveOID == SLH_DSA_SHAKE_256Fk) {
+            /* Matched SLH-DSA - set chosen and finished. */
+            ssl->options.sigAlgo = sigAlgo;
+            ssl->options.hashAlgo = hashAlgo;
+            ret = 0;
+            break;
+        }
+    #endif /* WOLFSSL_HAVE_SLHDSA */
     #if defined(HAVE_ECC_BRAINPOOL)
         if (ssl->pkCurveOID == ECC_BRAINPOOLP256R1_OID ||
             ssl->pkCurveOID == ECC_BRAINPOOLP384R1_OID ||
@@ -30364,6 +30614,9 @@ static int DecodePrivateKey_ex(WOLFSSL *ssl, byte keyType, const DerBuffer* key,
                  (keyType == dilithium_level3_sa_algo) ||
                  (keyType == dilithium_level5_sa_algo))
             *hsType = DYNAMIC_TYPE_DILITHIUM;
+        else if (keyType >= slhdsa_shake_128s_sa_algo &&
+                 keyType <= slhdsa_shake_256f_sa_algo)
+            *hsType = DYNAMIC_TYPE_SLHDSA;
 
         /* Create the private key */
         ret = CreateDevPrivateKey(hsKey, key->buffer,
@@ -30784,6 +31037,57 @@ static int DecodePrivateKey_ex(WOLFSSL *ssl, byte keyType, const DerBuffer* key,
         }
     }
 #endif /* HAVE_DILITHIUM */
+#if defined(WOLFSSL_HAVE_SLHDSA)
+    FreeKey(ssl, *hsType, hsKey);
+
+    if (keyType >= slhdsa_shake_128s_sa_algo &&
+        keyType <= slhdsa_shake_256f_sa_algo) {
+        enum SlhDsaParam param;
+
+        *hsType = DYNAMIC_TYPE_SLHDSA;
+
+        /* Map keyType to SlhDsaParam */
+        switch (keyType) {
+            case slhdsa_shake_128s_sa_algo: param = SLHDSA_SHAKE128S; break;
+            case slhdsa_shake_128f_sa_algo: param = SLHDSA_SHAKE128F; break;
+            case slhdsa_shake_192s_sa_algo: param = SLHDSA_SHAKE192S; break;
+            case slhdsa_shake_192f_sa_algo: param = SLHDSA_SHAKE192F; break;
+            case slhdsa_shake_256s_sa_algo: param = SLHDSA_SHAKE256S; break;
+            case slhdsa_shake_256f_sa_algo: param = SLHDSA_SHAKE256F; break;
+            default:
+                ERROR_OUT(ALGO_ID_E, exit_dpk);
+        }
+
+        /* Allocate and init with correct param */
+        *hsKey = (void*)XMALLOC(sizeof(SlhDsaKey), ssl->heap,
+                                DYNAMIC_TYPE_SLHDSA);
+        if (*hsKey == NULL) {
+            ERROR_OUT(MEMORY_E, exit_dpk);
+        }
+        ret = wc_SlhDsaKey_Init((SlhDsaKey*)*hsKey, param, ssl->heap,
+                                ssl->devId);
+        if (ret != 0) {
+            goto exit_dpk;
+        }
+
+        WOLFSSL_MSG("Trying SLH-DSA private key");
+
+        /* Set start of data to beginning of buffer. */
+        idx = 0;
+        /* Decode the key assuming it is an SLH-DSA private key. */
+        ret = wc_SlhDsaKey_PrivateKeyDecode(key->buffer, &idx,
+                                            (SlhDsaKey*)*hsKey,
+                                            key->length);
+        if (ret == 0) {
+            WOLFSSL_MSG("Using SLH-DSA private key");
+
+            /* Return the maximum signature length. */
+            *sigLen = (word32)wc_SlhDsaKey_SigSize((SlhDsaKey*)*hsKey);
+
+            goto exit_dpk;
+        }
+    }
+#endif /* WOLFSSL_HAVE_SLHDSA */
 
     (void)idx;
     (void)keySzDecoded;

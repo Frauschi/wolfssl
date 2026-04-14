@@ -129,6 +129,9 @@
 #ifdef HAVE_DILITHIUM
     #include <wolfssl/wolfcrypt/dilithium.h>
 #endif
+#ifdef WOLFSSL_HAVE_SLHDSA
+    #include <wolfssl/wolfcrypt/wc_slhdsa.h>
+#endif
 #ifdef HAVE_HKDF
     #include <wolfssl/wolfcrypt/kdf.h>
 #endif
@@ -1763,7 +1766,6 @@ enum Misc {
     SM2_SA_MINOR        = 8,   /* Least significant byte for SM2 with SM3 */
 
     FALCON_SA_MAJOR     = 0xFE,/* Most significant byte used with falcon sig algs */
-    DILITHIUM_SA_MAJOR  = 0x09,/* Most significant byte used with dilithium sig algs */
 
     /* These values for falcon match what OQS has defined. */
     FALCON_LEVEL1_SA_MAJOR = 0xFE,
@@ -1771,14 +1773,19 @@ enum Misc {
     FALCON_LEVEL5_SA_MAJOR = 0xFE,
     FALCON_LEVEL5_SA_MINOR = 0xB1,
 
-    /* these values for MLDSA (Dilithium) correspond to what is proposed in the
-     * IETF. */
-    DILITHIUM_LEVEL2_SA_MAJOR = 0x09,
+    /* Shared major byte for PQC TLS signature algorithms (ML-DSA, SLH-DSA). */
+    PQC_SA_MAJOR              = 0x09,
     DILITHIUM_LEVEL2_SA_MINOR = 0x04,
-    DILITHIUM_LEVEL3_SA_MAJOR = 0x09,
     DILITHIUM_LEVEL3_SA_MINOR = 0x05,
-    DILITHIUM_LEVEL5_SA_MAJOR = 0x09,
     DILITHIUM_LEVEL5_SA_MINOR = 0x06,
+
+    /* SLH-DSA code points per draft-reddy-tls-slhdsa-02 */
+    SLHDSA_SHAKE_128S_SA_MINOR = 0x17,
+    SLHDSA_SHAKE_128F_SA_MINOR = 0x18,
+    SLHDSA_SHAKE_192S_SA_MINOR = 0x19,
+    SLHDSA_SHAKE_192F_SA_MINOR = 0x1A,
+    SLHDSA_SHAKE_256S_SA_MINOR = 0x1B,
+    SLHDSA_SHAKE_256F_SA_MINOR = 0x1C,
 
     MIN_RSA_SHA512_PSS_BITS = 512 * 2 + 8 * 8, /* Min key size */
     MIN_RSA_SHA384_PSS_BITS = 384 * 2 + 8 * 8, /* Min key size */
@@ -1879,7 +1886,7 @@ WOLFSSL_LOCAL int NamedGroupIsPqcHybrid(int group);
 
 /* number of items in the signature algo list */
 #ifndef WOLFSSL_MAX_SIGALGO
-#if defined(HAVE_FALCON) || defined(HAVE_DILITHIUM)
+#if defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_SLHDSA)
     /* If we are building with post-quantum algorithms, we likely want to
      * inter-op with OQS's OpenSSL and they send a lot more sigalgs.
      */
@@ -1916,6 +1923,11 @@ WOLFSSL_LOCAL int NamedGroupIsPqcHybrid(int group);
 #ifdef HAVE_DILITHIUM
 #ifndef MIN_DILITHIUMKEY_SZ
     #define MIN_DILITHIUMKEY_SZ    2528
+#endif
+#endif
+#ifdef WOLFSSL_HAVE_SLHDSA
+#ifndef MIN_SLHDSAKEY_SZ
+    #define MIN_SLHDSAKEY_SZ    32  /* smallest SLH-DSA pub key (SHAKE-128) */
 #endif
 #endif
 
@@ -1958,8 +1970,11 @@ WOLFSSL_LOCAL int NamedGroupIsPqcHybrid(int group);
 #endif
 
 #ifndef MAX_X509_SIZE
-    #if defined(HAVE_FALCON) || defined(HAVE_DILITHIUM)
-        #define MAX_X509_SIZE   (8*1024) /* max static x509 buffer size; dilithium is big */
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+        /* SLH-DSA-SHAKE-256f: sig=49856 + pubkey=64 + overhead ~500 */
+        #define MAX_X509_SIZE   (56*1024)
+    #elif defined(HAVE_FALCON) || defined(HAVE_DILITHIUM)
+        #define MAX_X509_SIZE   (8*1024) /* max static x509 buffer size; PQC sigs are big */
     #elif defined(WOLFSSL_HAPROXY)
         #define MAX_X509_SIZE   3072 /* max static x509 buffer size */
     #else
@@ -2665,6 +2680,9 @@ struct WOLFSSL_CERT_MANAGER {
 #endif
 #ifdef HAVE_DILITHIUM
     short           minDilithiumKeySz;  /* minimum allowed Dilithium key size */
+#endif
+#ifdef WOLFSSL_HAVE_SLHDSA
+    short           minSlhDsaKeySz;     /* minimum allowed SLH-DSA key size */
 #endif
 #ifdef WC_ASN_UNKNOWN_EXT_CB
     wc_UnknownExtCallback unknownExtCallback;
@@ -3915,6 +3933,7 @@ struct WOLFSSL_CTX {
     byte        haveECDSAsig:1;   /* server cert signed w/ ECDSA */
     byte        haveFalconSig:1;  /* server cert signed w/ Falcon */
     byte        haveDilithiumSig:1;/* server cert signed w/ Dilithium */
+    byte        haveSlhDsaSig:1;  /* server cert signed w/ SLH-DSA */
     byte        haveStaticECC:1;  /* static server ECC private key */
     byte        partialWrite:1;   /* only one msg per write call */
     byte        autoRetry:1;      /* retry read/write on a WANT_{READ|WRITE} */
@@ -4004,6 +4023,9 @@ struct WOLFSSL_CTX {
 #endif
 #ifdef HAVE_DILITHIUM
     short       minDilithiumKeySz;/* minimum Dilithium key size */
+#endif
+#ifdef WOLFSSL_HAVE_SLHDSA
+    short       minSlhDsaKeySz;   /* minimum SLH-DSA key size */
 #endif
     unsigned long     mask;             /* store SSL_OP_ flags */
 #if defined(OPENSSL_EXTRA) || defined(HAVE_CURL)
@@ -4371,10 +4393,11 @@ enum KeyExchangeAlgorithm {
 #define SIG_SM2         0x04
 #define SIG_FALCON      0x08
 #define SIG_DILITHIUM   0x10
+#define SIG_SLHDSA      0x40
 #define SIG_ANON        0x20
 /* SIG_ANON is omitted by default */
 #define SIG_ALL         (SIG_ECDSA | SIG_RSA | SIG_SM2 | SIG_FALCON | \
-                         SIG_DILITHIUM)
+                         SIG_DILITHIUM | SIG_SLHDSA)
 
 /* Supported Authentication Schemes */
 enum SignatureAlgorithm {
@@ -4394,6 +4417,12 @@ enum SignatureAlgorithm {
     sm2_sa_algo                  = 17,
     any_sa_algo                  = 18,
     ecc_brainpool_sa_algo        = 19,
+    slhdsa_shake_128s_sa_algo    = 20,
+    slhdsa_shake_128f_sa_algo    = 21,
+    slhdsa_shake_192s_sa_algo    = 22,
+    slhdsa_shake_192f_sa_algo    = 23,
+    slhdsa_shake_256s_sa_algo    = 24,
+    slhdsa_shake_256f_sa_algo    = 25,
     invalid_sa_algo              = 255
 };
 
@@ -5053,6 +5082,7 @@ struct Options {
     word16            haveStaticECC:1;    /* static server ECC private key */
     word16            haveFalconSig:1;    /* server Falcon signed cert */
     word16            haveDilithiumSig:1; /* server Dilithium signed cert */
+    word16            haveSlhDsaSig:1;    /* server SLH-DSA signed cert */
     word16            havePeerCert:1;     /* do we have peer's cert */
     word16            havePeerVerify:1;   /* and peer's cert verify */
     word16            usingPSK_cipher:1;  /* are using psk as cipher */
@@ -5237,6 +5267,9 @@ struct Options {
 #endif
 #if defined(HAVE_DILITHIUM)
     short           minDilithiumKeySz;/* minimum Dilithium key size */
+#endif
+#if defined(WOLFSSL_HAVE_SLHDSA)
+    short           minSlhDsaKeySz;   /* minimum SLH-DSA key size */
 #endif
 #if defined(OPENSSL_EXTRA) || defined(OPENSSL_EXTRA_X509_SMALL)
     byte            verifyDepth;      /* maximum verification depth */
@@ -5450,7 +5483,8 @@ struct WOLFSSL_X509 {
     int              pubKeyOID;
     DNS_entry*       altNamesNext;                   /* hint for retrieval */
 #if defined(HAVE_ECC) || defined(HAVE_ED25519) || defined(HAVE_ED448) || \
-    defined(HAVE_FALCON) || defined(HAVE_DILITHIUM)
+    defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || \
+    defined(WOLFSSL_HAVE_SLHDSA)
     word32       pkCurveOID;
 #endif
 #ifndef NO_CERTS
@@ -6166,6 +6200,10 @@ struct WOLFSSL {
 #ifdef HAVE_DILITHIUM
     dilithium_key*  peerDilithiumKey;
     byte            peerDilithiumKeyPresent;
+#endif
+#ifdef WOLFSSL_HAVE_SLHDSA
+    SlhDsaKey*      peerSlhDsaKey;
+    byte            peerSlhDsaKeyPresent;
 #endif
 #ifdef HAVE_LIBZ
     z_stream        c_stream;           /* compression   stream */
