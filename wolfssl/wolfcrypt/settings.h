@@ -3280,7 +3280,7 @@ extern void uITRON4_free(void *p) ;
      (defined(HAVE_ED448)      && defined(HAVE_ED448_KEY_EXPORT)) || \
      (defined(HAVE_CURVE448)   && defined(HAVE_CURVE448_KEY_EXPORT)) || \
       defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || \
-      defined(HAVE_SPHINCS) || defined(HAVE_LIBOQS))
+      defined(WOLFSSL_HAVE_SLHDSA) || defined(HAVE_LIBOQS))
     #define WC_ENABLE_ASYM_KEY_EXPORT
 #endif
 
@@ -3290,7 +3290,7 @@ extern void uITRON4_free(void *p) ;
      (defined(HAVE_ED448)      && defined(HAVE_ED448_KEY_IMPORT)) || \
      (defined(HAVE_CURVE448)   && defined(HAVE_CURVE448_KEY_IMPORT)) || \
       defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || \
-      defined(HAVE_SPHINCS) || defined(HAVE_LIBOQS))
+      defined(WOLFSSL_HAVE_SLHDSA) || defined(HAVE_LIBOQS))
     #define WC_ENABLE_ASYM_KEY_IMPORT
 #endif
 
@@ -4553,9 +4553,6 @@ extern void uITRON4_free(void *p) ;
 #define HAVE_FALCON
 #ifndef HAVE_DILITHIUM
     #define HAVE_DILITHIUM
-#endif
-#ifndef WOLFSSL_NO_SPHINCS
-    #define HAVE_SPHINCS
 #endif
 #ifndef WOLFSSL_HAVE_MLKEM
     #define WOLFSSL_HAVE_MLKEM
