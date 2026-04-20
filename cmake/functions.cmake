@@ -215,7 +215,6 @@ function(generate_build_flags)
     endif()
     if(WOLFSSL_OQS OR WOLFSSL_USER_SETTINGS)
         set(BUILD_FALCON "yes" PARENT_SCOPE)
-        set(BUILD_SPHINCS "yes" PARENT_SCOPE)
         set(BUILD_DILITHIUM "yes" PARENT_SCOPE)
         set(BUILD_EXT_MLKEM "yes" PARENT_SCOPE)
         set(BUILD_OQS_HELPER "yes" PARENT_SCOPE)
@@ -1027,10 +1026,6 @@ function(generate_lib_src_list LIB_SOURCES)
 
         if(BUILD_FALCON)
             list(APPEND LIB_SOURCES wolfcrypt/src/falcon.c)
-        endif()
-
-        if(BUILD_SPHINCS)
-            list(APPEND LIB_SOURCES wolfcrypt/src/sphincs.c)
         endif()
 
         if(BUILD_DILITHIUM)

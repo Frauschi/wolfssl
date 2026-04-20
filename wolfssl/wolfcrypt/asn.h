@@ -67,8 +67,8 @@ that can be serialized and deserialized in a cross-platform way.
 #ifdef HAVE_ED448
     #include <wolfssl/wolfcrypt/ed448.h>
 #endif
-#ifdef HAVE_SPHINCS
-    #include <wolfssl/wolfcrypt/sphincs.h>
+#ifdef WOLFSSL_HAVE_SLHDSA
+    #include <wolfssl/wolfcrypt/wc_slhdsa.h>
 #endif
 #ifdef HAVE_FALCON
     #include <wolfssl/wolfcrypt/falcon.h>
@@ -1538,7 +1538,7 @@ struct SignatureCtx {
 #endif
 #if defined(HAVE_ECC) || defined(HAVE_ED25519) || defined(HAVE_ED448) || \
     !defined(NO_DSA) || defined(HAVE_DILITHIUM) || defined(HAVE_FALCON) || \
-    defined(HAVE_SPHINCS)
+    defined(WOLFSSL_HAVE_SLHDSA)
     int verify;
 #endif
     union {
@@ -1591,11 +1591,11 @@ struct SignatureCtx {
         struct dilithium_key* dilithium;
         #endif
     #endif
-    #ifdef HAVE_SPHINCS
+    #ifdef WOLFSSL_HAVE_SLHDSA
         #ifdef WOLFSSL_NO_MALLOC
-        struct sphincs_key  sphincs[1];
+        SlhDsaKey  slhdsa[1];
         #else
-        struct sphincs_key* sphincs;
+        SlhDsaKey* slhdsa;
         #endif
     #endif
     #ifndef WOLFSSL_NO_MALLOC
@@ -1852,13 +1852,14 @@ struct DecodedCert {
 #endif /* WOLFSSL_SUBJ_INFO_ACC */
 
 #if defined(HAVE_ECC) || defined(HAVE_ED25519) || defined(HAVE_ED448) || \
-    defined(HAVE_DILITHIUM) || defined(HAVE_FALCON) || defined(HAVE_SPHINCS)
+    defined(HAVE_DILITHIUM) || defined(HAVE_FALCON) || \
+    defined(WOLFSSL_HAVE_SLHDSA)
     word32  pkCurveOID;           /* Public Key's curve OID */
     #ifdef WOLFSSL_CUSTOM_CURVES
         int  pkCurveSize;         /* Public Key's curve size */
     #endif
 #endif /* HAVE_ECC || HAVE_ED25519 || HAVE_ED448 || HAVE_DILITHIUM ||
-        * HAVE_FALCON || HAVE_SPHINCS */
+        * HAVE_FALCON || WOLFSSL_HAVE_SLHDSA */
     const byte* beforeDate;
     int     beforeDateLen;
     const byte* afterDate;
@@ -2680,12 +2681,18 @@ enum cert_enums {
     ML_DSA_LEVEL2_KEY        = 21,
     ML_DSA_LEVEL3_KEY        = 22,
     ML_DSA_LEVEL5_KEY        = 23,
-    SPHINCS_FAST_LEVEL1_KEY  = 24,
-    SPHINCS_FAST_LEVEL3_KEY  = 25,
-    SPHINCS_FAST_LEVEL5_KEY  = 26,
-    SPHINCS_SMALL_LEVEL1_KEY = 27,
-    SPHINCS_SMALL_LEVEL3_KEY = 28,
-    SPHINCS_SMALL_LEVEL5_KEY = 29
+    SLH_DSA_SHA2_128S_KEY    = 24,
+    SLH_DSA_SHA2_128F_KEY    = 25,
+    SLH_DSA_SHA2_192S_KEY    = 26,
+    SLH_DSA_SHA2_192F_KEY    = 27,
+    SLH_DSA_SHA2_256S_KEY    = 28,
+    SLH_DSA_SHA2_256F_KEY    = 29,
+    SLH_DSA_SHAKE_128S_KEY   = 30,
+    SLH_DSA_SHAKE_128F_KEY   = 31,
+    SLH_DSA_SHAKE_192S_KEY   = 32,
+    SLH_DSA_SHAKE_192F_KEY   = 33,
+    SLH_DSA_SHAKE_256S_KEY   = 34,
+    SLH_DSA_SHAKE_256F_KEY   = 35
 };
 
 #endif /* WOLFSSL_CERT_GEN */
@@ -3123,7 +3130,7 @@ WOLFSSL_TEST_VIS int  wolfssl_local_MatchIpSubnet(const byte* ip, int ipSz,
     || (defined(HAVE_CURVE25519) && defined(HAVE_CURVE25519_KEY_IMPORT)) \
     || (defined(HAVE_ED448) && defined(HAVE_ED448_KEY_IMPORT)) \
     || (defined(HAVE_CURVE448) && defined(HAVE_CURVE448_KEY_IMPORT)) \
-    || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || defined(HAVE_SPHINCS))
+    || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_SLHDSA))
 WOLFSSL_LOCAL int DecodeAsymKey_Assign(const byte* input, word32* inOutIdx,
     word32 inSz, const byte** seed, word32* seedLen, const byte** privKey,
     word32* privKeyLen, const byte** pubKey, word32* pubKeyLen,

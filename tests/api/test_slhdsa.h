@@ -33,6 +33,9 @@ int test_wc_slhdsa_sign_vfy(void);
 int test_wc_slhdsa_sign_hash(void);
 int test_wc_slhdsa_export_import(void);
 int test_wc_slhdsa_check_key(void);
+int test_wc_slhdsa_der_roundtrip(void);
+int test_wc_slhdsa_der_negative(void);
+int test_wc_slhdsa_der_decode_files(void);
 
 #define TEST_SLHDSA_DECLS                                                      \
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa),                                 \
@@ -43,6 +46,9 @@ int test_wc_slhdsa_check_key(void);
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_sign_vfy),                        \
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_sign_hash),                       \
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_export_import),                   \
-    TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_check_key)
+    TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_check_key),                       \
+    TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_der_roundtrip),                   \
+    TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_der_negative),                    \
+    TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_der_decode_files)
 
 #endif /* WOLFCRYPT_TEST_SLHDSA_H */

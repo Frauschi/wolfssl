@@ -245,7 +245,6 @@ COMPONENT_OBJS += $(WOLFSSL_ROOT)/wolfcrypt/src/siphash.o
 COMPONENT_OBJS += $(WOLFSSL_ROOT)/wolfcrypt/src/sm2.o
 COMPONENT_OBJS += $(WOLFSSL_ROOT)/wolfcrypt/src/sm3.o
 COMPONENT_OBJS += $(WOLFSSL_ROOT)/wolfcrypt/src/sm4.o
-COMPONENT_OBJS += $(WOLFSSL_ROOT)/wolfcrypt/src/sphincs.o
 # COMPONENT_OBJS += $(WOLFSSL_ROOT)/wolfcrypt/src/sp_arm32.o
 # COMPONENT_OBJS += $(WOLFSSL_ROOT)/wolfcrypt/src/sp_arm64.o
 # COMPONENT_OBJS += $(WOLFSSL_ROOT)/wolfcrypt/src/sp_armthumb.o

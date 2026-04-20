@@ -152,8 +152,7 @@ int test_wc_slhdsa_sizes(void)
     ExpectIntEQ(wc_SlhDsaKey_PrivateSize(&key), WC_SLHDSA_SHAKE192S_PRIV_LEN);
 #endif
     ExpectIntEQ(wc_SlhDsaKey_PublicSize(&key), WC_SLHDSA_SHAKE192S_PUB_LEN);
-    /* Verify signature size is positive. */
-    ExpectIntGT(wc_SlhDsaKey_SigSize(&key), 0);
+    ExpectIntEQ(wc_SlhDsaKey_SigSize(&key), WC_SLHDSA_SHAKE192S_SIG_LEN);
     wc_SlhDsaKey_Free(&key);
 
 #ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
@@ -162,8 +161,8 @@ int test_wc_slhdsa_sizes(void)
 #endif
     ExpectIntEQ(wc_SlhDsaKey_PublicSizeFromParam(SLHDSA_SHAKE192S),
         WC_SLHDSA_SHAKE192S_PUB_LEN);
-    /* Verify SigSizeFromParam returns positive value. */
-    ExpectIntGT(wc_SlhDsaKey_SigSizeFromParam(SLHDSA_SHAKE192S), 0);
+    ExpectIntEQ(wc_SlhDsaKey_SigSizeFromParam(SLHDSA_SHAKE192S),
+        WC_SLHDSA_SHAKE192S_SIG_LEN);
 #endif
 
 #ifdef WOLFSSL_SLHDSA_PARAM_192F
@@ -1170,5 +1169,325 @@ int test_wc_slhdsa_check_key(void)
     XFREE(pubKey, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     XFREE(privKey, NULL, DYNAMIC_TYPE_TMP_BUFFER);
 #endif /* WOLFSSL_HAVE_SLHDSA */
+    return EXPECT_RESULT();
+}
+
+#if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
+    defined(WC_ENABLE_ASYM_KEY_EXPORT)
+/* Round-trip a single SLH-DSA parameter set through the DER codec:
+ * generate -> KeyToDer -> PrivateKeyDecode -> sign/verify round-trip.
+ * Also tests PublicKeyToDer -> PublicKeyDecode, and that the decode
+ * correctly auto-detects the parameter set from the OID. */
+static int slhdsa_der_roundtrip_one(enum SlhDsaParam param)
+{
+    EXPECT_DECLS;
+    SlhDsaKey keyGen;
+    SlhDsaKey keyPriv;
+    SlhDsaKey keyPub;
+    WC_RNG rng;
+    byte* derBuf = NULL;
+    byte* sig = NULL;
+    const word32 derBufSz = 16 * 1024;
+    word32 derLen;
+    word32 idx;
+    word32 sigLen;
+    /* Use the same param as placeholder - the auto-detect overrides it
+     * anyway, and this avoids failures when FAST or SMALL variants are
+     * selectively disabled via WOLFSSL_SLHDSA_PARAM_NO_FAST/NO_SMALL. */
+    enum SlhDsaParam placeholder = param;
+    static const byte msg[] = "SLH-DSA DER round-trip";
+
+    XMEMSET(&rng, 0, sizeof(rng));
+    XMEMSET(&keyGen, 0, sizeof(keyGen));
+    XMEMSET(&keyPriv, 0, sizeof(keyPriv));
+    XMEMSET(&keyPub, 0, sizeof(keyPub));
+
+    derBuf = (byte*)XMALLOC(derBufSz, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    ExpectNotNull(derBuf);
+    sig = (byte*)XMALLOC(WC_SLHDSA_MAX_SIG_LEN, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    ExpectNotNull(sig);
+
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_SlhDsaKey_Init(&keyGen, param, NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&keyGen, &rng), 0);
+
+    /* Encode the freshly-generated key to DER (private + public). */
+    ExpectIntGT(derLen = (word32)wc_SlhDsaKey_KeyToDer(&keyGen, derBuf,
+        derBufSz), 0);
+
+    /* Decode into a fresh key.  The decode must auto-detect the real
+     * parameter set from the OID embedded in the DER encoding. */
+    ExpectIntEQ(wc_SlhDsaKey_Init(&keyPriv, placeholder, NULL, INVALID_DEVID),
+        0);
+    idx = 0;
+    ExpectIntEQ(wc_SlhDsaKey_PrivateKeyDecode(derBuf, &idx, &keyPriv, derLen),
+        0);
+    /* Verify the decoded key reports the ORIGINAL parameter set. */
+    if (keyPriv.params != NULL) {
+        ExpectIntEQ((int)keyPriv.params->param, (int)param);
+    }
+
+    /* Sign with the decoded private key and verify with the originally
+     * generated key. This proves the decoded key material is correct. */
+    sigLen = WC_SLHDSA_MAX_SIG_LEN;
+    ExpectIntEQ(wc_SlhDsaKey_Sign(&keyPriv, NULL, 0, msg, (word32)sizeof(msg),
+        sig, &sigLen, &rng), 0);
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&keyGen, NULL, 0, msg, (word32)sizeof(msg),
+        sig, sigLen), 0);
+
+    /* Also test PrivateKeyToDer -> PrivateKeyDecode round-trip. */
+    {
+        SlhDsaKey keyPriv2;
+        word32 derLen2;
+        word32 idx2 = 0;
+        XMEMSET(&keyPriv2, 0, sizeof(keyPriv2));
+        ExpectIntGT(derLen2 = (word32)wc_SlhDsaKey_PrivateKeyToDer(&keyGen,
+            derBuf, derBufSz), 0);
+        ExpectIntEQ(wc_SlhDsaKey_Init(&keyPriv2, placeholder, NULL,
+            INVALID_DEVID), 0);
+        ExpectIntEQ(wc_SlhDsaKey_PrivateKeyDecode(derBuf, &idx2, &keyPriv2,
+            derLen2), 0);
+        /* Verify the PrivateKeyToDer output matches KeyToDer. */
+        sigLen = WC_SLHDSA_MAX_SIG_LEN;
+        ExpectIntEQ(wc_SlhDsaKey_Sign(&keyPriv2, NULL, 0, msg,
+            (word32)sizeof(msg), sig, &sigLen, &rng), 0);
+        ExpectIntEQ(wc_SlhDsaKey_Verify(&keyGen, NULL, 0, msg,
+            (word32)sizeof(msg), sig, sigLen), 0);
+        wc_SlhDsaKey_Free(&keyPriv2);
+    }
+
+    /* Now round-trip the public key alone. */
+    ExpectIntGT(derLen = (word32)wc_SlhDsaKey_PublicKeyToDer(&keyGen, derBuf,
+        derBufSz, 1), 0);
+    ExpectIntEQ(wc_SlhDsaKey_Init(&keyPub, placeholder, NULL, INVALID_DEVID),
+        0);
+    idx = 0;
+    ExpectIntEQ(wc_SlhDsaKey_PublicKeyDecode(derBuf, &idx, &keyPub, derLen), 0);
+    if (keyPub.params != NULL) {
+        ExpectIntEQ((int)keyPub.params->param, (int)param);
+    }
+    /* The decoded public key should verify the signature we just produced. */
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&keyPub, NULL, 0, msg, (word32)sizeof(msg),
+        sig, sigLen), 0);
+
+    wc_SlhDsaKey_Free(&keyPub);
+    wc_SlhDsaKey_Free(&keyPriv);
+    wc_SlhDsaKey_Free(&keyGen);
+    wc_FreeRng(&rng);
+    XFREE(sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(derBuf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+
+    return EXPECT_RESULT();
+}
+#endif
+
+/*
+ * DER codec round-trip test: encode each compiled-in SLH-DSA parameter set
+ * to DER, decode it (without telling the decoder which parameter set it is),
+ * confirm auto-detect produces the right parameter, and verify a signature
+ * produced with the decoded key. This test would fail if PrivateKeyDecode
+ * / PublicKeyDecode did not auto-detect the parameter set from the OID.
+ */
+int test_wc_slhdsa_der_roundtrip(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
+    defined(WC_ENABLE_ASYM_KEY_EXPORT)
+    /* Only SHAKE variants are tested; SHA2 SLH-DSA test coverage is pending
+     * native SHA2 implementation. */
+#ifdef WOLFSSL_SLHDSA_PARAM_128S
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHAKE128S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_128F
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHAKE128F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_192S
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHAKE192S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_192F
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHAKE192F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_256S
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHAKE256S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_256F
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHAKE256F), TEST_SUCCESS);
+#endif
+#endif /* WOLFSSL_HAVE_SLHDSA && !VERIFY_ONLY && WC_ENABLE_ASYM_KEY_EXPORT */
+    return EXPECT_RESULT();
+}
+
+/*
+ * Negative / error-path tests for the DER encode/decode functions.
+ */
+int test_wc_slhdsa_der_negative(void)
+{
+    EXPECT_DECLS;
+#ifdef WOLFSSL_HAVE_SLHDSA
+    SlhDsaKey key;
+    word32 idx;
+    byte buf[16];
+
+    XMEMSET(&key, 0, sizeof(key));
+
+    /* PrivateKeyDecode: NULL parameters */
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    idx = 0;
+    ExpectIntEQ(wc_SlhDsaKey_PrivateKeyDecode(NULL, &idx, &key, 10),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_SlhDsaKey_PrivateKeyDecode(buf, NULL, &key, 10),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_SlhDsaKey_PrivateKeyDecode(buf, &idx, NULL, 10),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_SlhDsaKey_PrivateKeyDecode(buf, &idx, &key, 0),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    /* PrivateKeyDecode: truncated data */
+    idx = 0;
+    XMEMSET(buf, 0, sizeof(buf));
+    ExpectIntNE(wc_SlhDsaKey_PrivateKeyDecode(buf, &idx, &key, sizeof(buf)), 0);
+#endif
+
+    /* PublicKeyDecode: NULL parameters */
+    idx = 0;
+    ExpectIntEQ(wc_SlhDsaKey_PublicKeyDecode(NULL, &idx, &key, 10),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_SlhDsaKey_PublicKeyDecode(buf, NULL, &key, 10),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_SlhDsaKey_PublicKeyDecode(buf, &idx, NULL, 10),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_SlhDsaKey_PublicKeyDecode(buf, &idx, &key, 0),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+
+#if defined(WC_ENABLE_ASYM_KEY_EXPORT) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY)
+    /* KeyToDer / PrivateKeyToDer: NULL key */
+    ExpectIntEQ(wc_SlhDsaKey_KeyToDer(NULL, buf, sizeof(buf)),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_SlhDsaKey_PrivateKeyToDer(NULL, buf, sizeof(buf)),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+
+    /* KeyToDer: public-only key should return MISSING_KEY */
+    {
+        SlhDsaKey pubOnly;
+        XMEMSET(&pubOnly, 0, sizeof(pubOnly));
+#ifdef WOLFSSL_SLHDSA_PARAM_128S
+        ExpectIntEQ(wc_SlhDsaKey_Init(&pubOnly, SLHDSA_SHAKE128S, NULL,
+            INVALID_DEVID), 0);
+        /* Only set the public flag, no private key material. */
+        pubOnly.flags = WC_SLHDSA_FLAG_PUBLIC;
+        ExpectIntEQ(wc_SlhDsaKey_KeyToDer(&pubOnly, NULL, 0),
+            WC_NO_ERR_TRACE(MISSING_KEY));
+        ExpectIntEQ(wc_SlhDsaKey_PrivateKeyToDer(&pubOnly, NULL, 0),
+            WC_NO_ERR_TRACE(MISSING_KEY));
+        wc_SlhDsaKey_Free(&pubOnly);
+#endif
+    }
+#endif /* WC_ENABLE_ASYM_KEY_EXPORT && !VERIFY_ONLY */
+
+    /* PublicKeyToDer: NULL key */
+#ifdef WC_ENABLE_ASYM_KEY_EXPORT
+    ExpectIntEQ(wc_SlhDsaKey_PublicKeyToDer(NULL, buf, sizeof(buf), 1),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+#endif
+
+#endif /* WOLFSSL_HAVE_SLHDSA */
+    return EXPECT_RESULT();
+}
+
+#if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
+    !defined(NO_FILESYSTEM)
+/* Load an RFC 9909 compliant DER file from disk and confirm that
+ * wc_SlhDsaKey_PrivateKeyDecode accepts it, auto-detects the parameter
+ * set from the OID, and produces a usable signing key. This test
+ * exercises the on-disk certs/slhdsa/ fixtures - any future file-format
+ * drift (nested wrapper, seed-only, wrong length) will be caught here. */
+static int slhdsa_decode_file_one(const char *path, enum SlhDsaParam expected)
+{
+    EXPECT_DECLS;
+    XFILE f = XBADFILE;
+    byte der[256];
+    int derSz = 0;
+    SlhDsaKey key;
+    WC_RNG rng;
+    word32 idx = 0;
+    byte sig[WC_SLHDSA_MAX_SIG_LEN];
+    word32 sigLen = (word32)sizeof(sig);
+    static const byte msg[] = "slhdsa decode-file test";
+
+    XMEMSET(&key, 0, sizeof(key));
+    XMEMSET(&rng, 0, sizeof(rng));
+
+    ExpectTrue((f = XFOPEN(path, "rb")) != XBADFILE);
+    if (f != XBADFILE) {
+        ExpectIntGT(derSz = (int)XFREAD(der, 1, sizeof(der), f), 0);
+        XFCLOSE(f);
+    }
+
+    /* Seed the decoder with a DIFFERENT parameter than the file; auto-detect
+     * must overwrite it from the OID. If parameter-set gating disables the
+     * placeholder, fall back to the expected param (tests still exercise
+     * auto-detect because that's what the decoder uses). */
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, expected, NULL, INVALID_DEVID), 0);
+
+    ExpectIntEQ(wc_SlhDsaKey_PrivateKeyDecode(der, &idx, &key, (word32)derSz),
+        0);
+    ExpectNotNull(key.params);
+    if (key.params != NULL) {
+        ExpectIntEQ((int)key.params->param, (int)expected);
+    }
+
+    /* Sanity: signing works with the decoded key. */
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_SlhDsaKey_Sign(&key, NULL, 0, msg, (word32)sizeof(msg),
+        sig, &sigLen, &rng), 0);
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, NULL, 0, msg, (word32)sizeof(msg),
+        sig, sigLen), 0);
+
+    wc_SlhDsaKey_Free(&key);
+    wc_FreeRng(&rng);
+    return EXPECT_RESULT();
+}
+#endif
+
+/* Load each checked-in bench_slhdsa_shake*_key.der fixture and confirm it
+ * decodes via wc_SlhDsaKey_PrivateKeyDecode with correct auto-detection.
+ * These fixtures are RFC 9909 compliant (bare OCTET STRING, 4*n bytes) -
+ * this test would fail if the files drift to a non-compliant encoding
+ * (e.g. nested OCTET STRING, seed-only). */
+int test_wc_slhdsa_der_decode_files(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
+    !defined(NO_FILESYSTEM)
+#ifdef WOLFSSL_SLHDSA_PARAM_128S
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_shake128s_key.der", SLHDSA_SHAKE128S),
+        TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_128F
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_shake128f_key.der", SLHDSA_SHAKE128F),
+        TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_192S
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_shake192s_key.der", SLHDSA_SHAKE192S),
+        TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_192F
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_shake192f_key.der", SLHDSA_SHAKE192F),
+        TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_256S
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_shake256s_key.der", SLHDSA_SHAKE256S),
+        TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_256F
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_shake256f_key.der", SLHDSA_SHAKE256F),
+        TEST_SUCCESS);
+#endif
+#endif
     return EXPECT_RESULT();
 }

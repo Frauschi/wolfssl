@@ -376,10 +376,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\wolfcrypt\src\sphincs.c"
-				>
-			</File>
-			<File
 				RelativePath=".\wolfcrypt\src\sp_c32.c"
 				>
 			</File>
