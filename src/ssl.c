@@ -13380,12 +13380,6 @@ const WOLFSSL_ObjectInfo wolfssl_object_info[] = {
                                                           "Falcon Level 1"},
         { CTC_FALCON_LEVEL5, FALCON_LEVEL5k,  oidKeyType, "Falcon Level 5",
                                                           "Falcon Level 5"},
-        { CTC_FALCON_LEVEL1_PADDED, FALCON_LEVEL1_PADDEDk, oidKeyType,
-                                      "Falcon Padded Level 1",
-                                      "Falcon Padded Level 1"},
-        { CTC_FALCON_LEVEL5_PADDED, FALCON_LEVEL5_PADDEDk, oidKeyType,
-                                      "Falcon Padded Level 5",
-                                      "Falcon Padded Level 5"},
     #endif /* HAVE_FALCON */
     #ifdef HAVE_DILITHIUM
     #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT

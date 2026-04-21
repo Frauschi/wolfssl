@@ -15530,7 +15530,6 @@ static int ProcessPeerCertCheckKey(WOLFSSL* ssl, ProcPeerCertArgs* args)
     #endif /* HAVE_ED448 */
     #if defined(HAVE_FALCON)
         case FALCON_LEVEL1k:
-        case FALCON_LEVEL1_PADDEDk:
             if (ssl->options.minFalconKeySz < 0 ||
                 FALCON_LEVEL1_KEY_SIZE < (word16)ssl->options.minFalconKeySz) {
                 WOLFSSL_MSG("Falcon key size in cert chain error");
@@ -15539,7 +15538,6 @@ static int ProcessPeerCertCheckKey(WOLFSSL* ssl, ProcPeerCertArgs* args)
             }
             break;
         case FALCON_LEVEL5k:
-        case FALCON_LEVEL5_PADDEDk:
             if (ssl->options.minFalconKeySz < 0 ||
                 FALCON_LEVEL5_KEY_SIZE < (word16)ssl->options.minFalconKeySz) {
                 WOLFSSL_MSG("Falcon key size in cert chain error");
@@ -17260,8 +17258,6 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                 #if defined(HAVE_FALCON)
                     case FALCON_LEVEL1k:
                     case FALCON_LEVEL5k:
-                    case FALCON_LEVEL1_PADDEDk:
-                    case FALCON_LEVEL5_PADDEDk:
                     {
                         int keyRet = 0;
                         if (ssl->peerFalconKey == NULL) {
@@ -17275,18 +17271,13 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                         }
 
                         if (keyRet == 0) {
-                            word32 koid = args->dCert->keyOID;
-                            byte level =
-                                ((koid == FALCON_LEVEL1k) ||
-                                 (koid == FALCON_LEVEL1_PADDEDk)) ? 1 : 5;
-                            keyRet = wc_falcon_set_level(ssl->peerFalconKey,
-                                                         level);
-                            if (keyRet == 0) {
-                                int padded =
-                                    ((koid == FALCON_LEVEL1_PADDEDk) ||
-                                     (koid == FALCON_LEVEL5_PADDEDk));
-                                keyRet = wc_falcon_set_padded(
-                                    ssl->peerFalconKey, padded);
+                            if (args->dCert->keyOID == FALCON_LEVEL1k) {
+                                keyRet = wc_falcon_set_level(ssl->peerFalconKey,
+                                1);
+                            }
+                            else {
+                                keyRet = wc_falcon_set_level(ssl->peerFalconKey,
+                                5);
                             }
                         }
 

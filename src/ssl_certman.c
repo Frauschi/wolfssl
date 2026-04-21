@@ -3131,7 +3131,6 @@ int AddCA(WOLFSSL_CERT_MANAGER* cm, DerBuffer** pDer, int type, int verify)
             #endif /* HAVE_ED448 */
             #if defined(HAVE_FALCON)
             case FALCON_LEVEL1k:
-            case FALCON_LEVEL1_PADDEDk:
                 if (cm->minFalconKeySz < 0 ||
                           FALCON_LEVEL1_KEY_SIZE < (word16)cm->minFalconKeySz) {
                     ret = FALCON_KEY_SIZE_E;
@@ -3139,7 +3138,6 @@ int AddCA(WOLFSSL_CERT_MANAGER* cm, DerBuffer** pDer, int type, int verify)
                 }
                 break;
             case FALCON_LEVEL5k:
-            case FALCON_LEVEL5_PADDEDk:
                 if (cm->minFalconKeySz < 0 ||
                           FALCON_LEVEL5_KEY_SIZE < (word16)cm->minFalconKeySz) {
                     ret = FALCON_KEY_SIZE_E;
