@@ -79,7 +79,6 @@
 #endif
 
 #include <wolfssl/wolfcrypt/mlkem.h>
-#include <wolfssl/wolfcrypt/wc_mlkem.h>
 #include <wolfssl/wolfcrypt/hash.h>
 #include <wolfssl/wolfcrypt/memory.h>
 #ifdef WOLF_CRYPTO_CB

@@ -79,7 +79,6 @@
 #endif
 #ifdef WOLFSSL_HAVE_MLKEM
     #include <wolfssl/wolfcrypt/mlkem.h>
-    #include <wolfssl/wolfcrypt/wc_mlkem.h>
 #endif
 #if defined(HAVE_DILITHIUM)
     #include <wolfssl/wolfcrypt/dilithium.h>

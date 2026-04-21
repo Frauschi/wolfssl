@@ -30,9 +30,6 @@
 
 #ifdef WOLFSSL_HAVE_MLKEM
     #include <wolfssl/wolfcrypt/mlkem.h>
-#ifdef WOLFSSL_WC_MLKEM
-    #include <wolfssl/wolfcrypt/wc_mlkem.h>
-#endif
 #endif
 #include <wolfssl/wolfcrypt/types.h>
 #include <tests/api/api.h>

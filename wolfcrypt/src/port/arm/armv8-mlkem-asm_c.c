@@ -34,7 +34,7 @@ XALIGNED(4) static const word16 L_mlkem_aarch64_consts[] = {
     0x0d01, 0xf301, 0x4ebf, 0x0549, 0x5049, 0x0000, 0x0000, 0x0000,
 };
 
-#include <wolfssl/wolfcrypt/wc_mlkem.h>
+#include <wolfssl/wolfcrypt/mlkem.h>
 
 #ifdef WOLFSSL_WC_MLKEM
 XALIGNED(4) static const word16 L_mlkem_aarch64_zetas[] = {

@@ -170,7 +170,6 @@
 #endif
 #ifdef WOLFSSL_HAVE_MLKEM
     #include <wolfssl/wolfcrypt/mlkem.h>
-    #include <wolfssl/wolfcrypt/wc_mlkem.h>
 #endif
 #if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_VERIFY_ONLY)
     #include <wolfssl/wolfcrypt/lms.h>

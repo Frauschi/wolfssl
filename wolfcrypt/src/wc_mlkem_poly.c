@@ -75,7 +75,7 @@
     #undef WOLFSSL_RISCV_ASM
 #endif
 
-#include <wolfssl/wolfcrypt/wc_mlkem.h>
+#include <wolfssl/wolfcrypt/mlkem.h>
 #include <wolfssl/wolfcrypt/sha3.h>
 #include <wolfssl/wolfcrypt/cpuid.h>
 
