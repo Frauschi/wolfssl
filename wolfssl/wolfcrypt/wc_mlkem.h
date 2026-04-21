@@ -1,4 +1,4 @@
-/* mlkem.h
+/* wc_mlkem.h
  *
  * Copyright (C) 2006-2026 wolfSSL Inc.
  *
@@ -20,11 +20,11 @@
  */
 
 /*!
-    \file wolfssl/wolfcrypt/mlkem.h
+    \file wolfssl/wolfcrypt/wc_mlkem.h
  */
 
-#ifndef WOLF_CRYPT_MLKEM_H
-#define WOLF_CRYPT_MLKEM_H
+#ifndef WOLF_CRYPT_WC_MLKEM_H
+#define WOLF_CRYPT_WC_MLKEM_H
 
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/wolfcrypt/random.h>
@@ -709,4 +709,4 @@ WOLFSSL_LOCAL unsigned int mlkem_arm32_rej_uniform(sword16* p, unsigned int len,
 
 #endif /* WOLFSSL_HAVE_MLKEM */
 
-#endif /* WOLF_CRYPT_MLKEM_H */
+#endif /* WOLF_CRYPT_WC_MLKEM_H */

@@ -169,7 +169,7 @@
     #include <wolfssl/wolfcrypt/dilithium.h>
 #endif
 #if defined(WOLFSSL_HAVE_MLKEM)
-    #include <wolfssl/wolfcrypt/mlkem.h>
+    #include <wolfssl/wolfcrypt/wc_mlkem.h>
 #endif
 #if defined(HAVE_PKCS7)
     #include <wolfssl/wolfcrypt/pkcs7.h>

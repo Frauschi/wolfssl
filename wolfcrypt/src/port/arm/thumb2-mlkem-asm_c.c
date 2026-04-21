@@ -47,7 +47,7 @@
 #define WOLFSSL_NO_VAR_ASSIGN_REG
 #endif /* __ghs__ */
 
-#include <wolfssl/wolfcrypt/mlkem.h>
+#include <wolfssl/wolfcrypt/wc_mlkem.h>
 
 #ifdef WOLFSSL_WC_MLKEM
 XALIGNED(4) static const word16 L_mlkem_thumb2_ntt_zetas[] = {

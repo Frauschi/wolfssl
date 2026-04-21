@@ -559,7 +559,7 @@
 		700F0CC92A2FC0D500755BA7 /* selftest.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = selftest.h; path = ../../wolfssl/wolfcrypt/selftest.h; sourceTree = "<group>"; };
 		700F0CCA2A2FC0D500755BA7 /* ge_operations.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ge_operations.h; path = ../../wolfssl/wolfcrypt/ge_operations.h; sourceTree = "<group>"; };
 		700F0CCB2A2FC0D500755BA7 /* async.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = async.h; path = ../../wolfssl/wolfcrypt/async.h; sourceTree = "<group>"; };
-		700F0CCC2A2FC0D500755BA7 /* mlkem.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = mlkem.h; path = ../../wolfssl/wolfcrypt/mlkem.h; sourceTree = "<group>"; };
+		700F0CCC2A2FC0D500755BA7 /* mlkem.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = mlkem.h; path = ../../wolfssl/wolfcrypt/wc_mlkem.h; sourceTree = "<group>"; };
 		700F0CCD2A2FC0D500755BA7 /* hpke.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = hpke.h; path = ../../wolfssl/wolfcrypt/hpke.h; sourceTree = "<group>"; };
 		700F0CCE2A2FC0D500755BA7 /* cpuid.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = cpuid.h; path = ../../wolfssl/wolfcrypt/cpuid.h; sourceTree = "<group>"; };
 		700F0CCF2A2FC0D500755BA7 /* fips.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = fips.h; path = ../../wolfssl/wolfcrypt/fips.h; sourceTree = "<group>"; };

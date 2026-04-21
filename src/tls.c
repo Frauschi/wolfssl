@@ -140,7 +140,7 @@
     #include <wolfssl/wolfcrypt/curve448.h>
 #endif
 #ifdef WOLFSSL_HAVE_MLKEM
-    #include <wolfssl/wolfcrypt/mlkem.h>
+    #include <wolfssl/wolfcrypt/wc_mlkem.h>
 #endif
 
 #if defined(WOLFSSL_RENESAS_TSIP_TLS)

@@ -389,7 +389,7 @@ static const byte const_byte_array[] = "A+Gd\0\0\0";
     #include <wolfssl/wolfcrypt/ed448.h>
 #endif
 #ifdef WOLFSSL_HAVE_MLKEM
-    #include <wolfssl/wolfcrypt/mlkem.h>
+    #include <wolfssl/wolfcrypt/wc_mlkem.h>
 #endif
 #ifdef HAVE_DILITHIUM
     #include <wolfssl/wolfcrypt/dilithium.h>

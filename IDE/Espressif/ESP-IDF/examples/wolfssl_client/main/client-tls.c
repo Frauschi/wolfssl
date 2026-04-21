@@ -42,7 +42,7 @@
 #include <wolfssl/ssl.h>
 
 #if defined(WOLFSSL_WC_MLKEM)
-    #include <wolfssl/wolfcrypt/mlkem.h>
+    #include <wolfssl/wolfcrypt/wc_mlkem.h>
 #endif
 #if defined(USE_CERT_BUFFERS_2048) || defined(USE_CERT_BUFFERS_1024)
     #include <wolfssl/certs_test.h>
