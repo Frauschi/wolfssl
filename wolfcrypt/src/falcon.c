@@ -87,25 +87,52 @@ int wc_falcon_sign_msg(const byte* in, word32 inLen,
 
     if (ret == 0) {
         if (key->level == 1) {
-            oqssig = OQS_SIG_new(OQS_SIG_alg_falcon_512);
+        #ifdef OQS_SIG_alg_falcon_padded_512
+            oqssig = OQS_SIG_new(key->padded
+                ? OQS_SIG_alg_falcon_padded_512
+                : OQS_SIG_alg_falcon_512);
+        #else
+            if (key->padded) {
+                ret = NOT_COMPILED_IN;
+            }
+            else {
+                oqssig = OQS_SIG_new(OQS_SIG_alg_falcon_512);
+            }
+        #endif
         }
         else if (key->level == 5) {
-            oqssig = OQS_SIG_new(OQS_SIG_alg_falcon_1024);
+        #ifdef OQS_SIG_alg_falcon_padded_1024
+            oqssig = OQS_SIG_new(key->padded
+                ? OQS_SIG_alg_falcon_padded_1024
+                : OQS_SIG_alg_falcon_1024);
+        #else
+            if (key->padded) {
+                ret = NOT_COMPILED_IN;
+            }
+            else {
+                oqssig = OQS_SIG_new(OQS_SIG_alg_falcon_1024);
+            }
+        #endif
         }
 
-        if (oqssig == NULL) {
+        if ((ret == 0) && (oqssig == NULL)) {
             ret = SIG_TYPE_E;
         }
     }
 
     /* check and set up out length */
     if (ret == 0) {
-        if ((key->level == 1) && (*outLen < FALCON_LEVEL1_SIG_SIZE)) {
-            *outLen = FALCON_LEVEL1_SIG_SIZE;
-            ret = BUFFER_E;
+        word32 needed = 0;
+        if (key->level == 1) {
+            needed = key->padded ? FALCON_LEVEL1_PADDED_SIG_SIZE
+                                 : FALCON_LEVEL1_SIG_SIZE;
         }
-        else if ((key->level == 5) && (*outLen < FALCON_LEVEL5_SIG_SIZE)) {
-            *outLen = FALCON_LEVEL5_SIG_SIZE;
+        else if (key->level == 5) {
+            needed = key->padded ? FALCON_LEVEL5_PADDED_SIG_SIZE
+                                 : FALCON_LEVEL5_SIG_SIZE;
+        }
+        if (*outLen < needed) {
+            *outLen = needed;
             ret = BUFFER_E;
         }
         localOutLen = *outLen;
@@ -179,13 +206,35 @@ int wc_falcon_verify_msg(const byte* sig, word32 sigLen, const byte* msg,
 
     if (ret == 0) {
         if (key->level == 1) {
-            oqssig = OQS_SIG_new(OQS_SIG_alg_falcon_512);
+        #ifdef OQS_SIG_alg_falcon_padded_512
+            oqssig = OQS_SIG_new(key->padded
+                ? OQS_SIG_alg_falcon_padded_512
+                : OQS_SIG_alg_falcon_512);
+        #else
+            if (key->padded) {
+                ret = NOT_COMPILED_IN;
+            }
+            else {
+                oqssig = OQS_SIG_new(OQS_SIG_alg_falcon_512);
+            }
+        #endif
         }
         else if (key->level == 5) {
-            oqssig = OQS_SIG_new(OQS_SIG_alg_falcon_1024);
+        #ifdef OQS_SIG_alg_falcon_padded_1024
+            oqssig = OQS_SIG_new(key->padded
+                ? OQS_SIG_alg_falcon_padded_1024
+                : OQS_SIG_alg_falcon_1024);
+        #else
+            if (key->padded) {
+                ret = NOT_COMPILED_IN;
+            }
+            else {
+                oqssig = OQS_SIG_new(OQS_SIG_alg_falcon_1024);
+            }
+        #endif
         }
 
-        if (oqssig == NULL) {
+        if ((ret == 0) && (oqssig == NULL)) {
             ret = SIG_TYPE_E;
         }
     }
@@ -319,8 +368,42 @@ int wc_falcon_set_level(falcon_key* key, byte level)
     }
 
     key->level = level;
+    key->padded = 0;
     key->pubKeySet = 0;
     key->prvKeySet = 0;
+    return 0;
+}
+
+/* Select the signature-encoding variant for this key.
+ *
+ * key    [in/out]  Falcon key.
+ * padded [in]      0 for compressed (Falcon-{512,1024}), non-zero for the
+ *                  fixed-length padded encoding (Falcon-padded-{512,1024}).
+ * returns BAD_FUNC_ARG when key is NULL.
+ */
+int wc_falcon_set_padded(falcon_key* key, int padded)
+{
+    if (key == NULL) {
+        return BAD_FUNC_ARG;
+    }
+
+    key->padded = padded ? 1 : 0;
+    return 0;
+}
+
+/* Get the signature-encoding variant of this key.
+ *
+ * key    [in]   Falcon key.
+ * padded [out]  Set to 0 for compressed, 1 for padded.
+ * returns BAD_FUNC_ARG when key or padded is NULL.
+ */
+int wc_falcon_get_padded(falcon_key* key, int* padded)
+{
+    if (key == NULL || padded == NULL) {
+        return BAD_FUNC_ARG;
+    }
+
+    *padded = key->padded;
     return 0;
 }
 
@@ -797,10 +880,12 @@ int wc_falcon_sig_size(falcon_key* key)
     }
 
     if (key->level == 1) {
-        return FALCON_LEVEL1_SIG_SIZE;
+        return key->padded ? FALCON_LEVEL1_PADDED_SIG_SIZE
+                           : FALCON_LEVEL1_SIG_SIZE;
     }
     else if (key->level == 5) {
-        return FALCON_LEVEL5_SIG_SIZE;
+        return key->padded ? FALCON_LEVEL5_PADDED_SIG_SIZE
+                           : FALCON_LEVEL5_SIG_SIZE;
     }
 
     return BAD_FUNC_ARG;
@@ -821,10 +906,10 @@ int wc_Falcon_PrivateKeyDecode(const byte* input, word32* inOutIdx,
     }
 
     if (key->level == 1) {
-        keytype = FALCON_LEVEL1k;
+        keytype = key->padded ? FALCON_LEVEL1_PADDEDk : FALCON_LEVEL1k;
     }
     else if (key->level == 5) {
-        keytype = FALCON_LEVEL5k;
+        keytype = key->padded ? FALCON_LEVEL5_PADDEDk : FALCON_LEVEL5k;
     }
     else {
         return BAD_FUNC_ARG;
@@ -876,10 +961,10 @@ int wc_Falcon_PublicKeyDecode(const byte* input, word32* inOutIdx,
     }
 
     if (key->level == 1) {
-        keytype = FALCON_LEVEL1k;
+        keytype = key->padded ? FALCON_LEVEL1_PADDEDk : FALCON_LEVEL1k;
     }
     else if (key->level == 5) {
-        keytype = FALCON_LEVEL5k;
+        keytype = key->padded ? FALCON_LEVEL5_PADDEDk : FALCON_LEVEL5k;
     }
     else {
         return BAD_FUNC_ARG;
@@ -924,10 +1009,10 @@ int wc_Falcon_PublicKeyToDer(falcon_key* key, byte* output, word32 inLen,
     }
 
     if (key->level == 1) {
-        keytype = FALCON_LEVEL1k;
+        keytype = key->padded ? FALCON_LEVEL1_PADDEDk : FALCON_LEVEL1k;
     }
     else if (key->level == 5) {
-        keytype = FALCON_LEVEL5k;
+        keytype = key->padded ? FALCON_LEVEL5_PADDEDk : FALCON_LEVEL5k;
     }
     else {
         return BAD_FUNC_ARG;
@@ -956,12 +1041,14 @@ int wc_Falcon_KeyToDer(falcon_key* key, byte* output, word32 inLen)
     if (key->level == 1) {
         return SetAsymKeyDer(key->k, FALCON_LEVEL1_KEY_SIZE, key->p,
                              FALCON_LEVEL1_KEY_SIZE, output, inLen,
-                             FALCON_LEVEL1k);
+                             key->padded ? FALCON_LEVEL1_PADDEDk
+                                         : FALCON_LEVEL1k);
     }
     else if (key->level == 5) {
         return SetAsymKeyDer(key->k, FALCON_LEVEL5_KEY_SIZE, key->p,
                              FALCON_LEVEL5_KEY_SIZE, output, inLen,
-                             FALCON_LEVEL5k);
+                             key->padded ? FALCON_LEVEL5_PADDEDk
+                                         : FALCON_LEVEL5k);
     }
 
     return BAD_FUNC_ARG;
@@ -975,11 +1062,15 @@ int wc_Falcon_PrivateKeyToDer(falcon_key* key, byte* output, word32 inLen)
 
     if (key->level == 1) {
         return SetAsymKeyDer(key->k, FALCON_LEVEL1_KEY_SIZE, NULL, 0, output,
-                             inLen, FALCON_LEVEL1k);
+                             inLen,
+                             key->padded ? FALCON_LEVEL1_PADDEDk
+                                         : FALCON_LEVEL1k);
     }
     else if (key->level == 5) {
         return SetAsymKeyDer(key->k, FALCON_LEVEL5_KEY_SIZE, NULL, 0, output,
-                             inLen, FALCON_LEVEL5k);
+                             inLen,
+                             key->padded ? FALCON_LEVEL5_PADDEDk
+                                         : FALCON_LEVEL5k);
     }
 
     return BAD_FUNC_ARG;

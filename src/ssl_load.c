@@ -826,12 +826,16 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
     ret = wc_falcon_init(key);
     if (ret == 0) {
         /* Set up key to parse the format specified. */
-        if ((*keyFormat == FALCON_LEVEL1k) || ((*keyFormat == 0) &&
+        if ((*keyFormat == FALCON_LEVEL1k) ||
+            (*keyFormat == FALCON_LEVEL1_PADDEDk) ||
+            ((*keyFormat == 0) &&
                 ((der->length == FALCON_LEVEL1_KEY_SIZE) ||
                  (der->length == FALCON_LEVEL1_PRV_KEY_SIZE)))) {
             ret = wc_falcon_set_level(key, 1);
         }
-        else if ((*keyFormat == FALCON_LEVEL5k) || ((*keyFormat == 0) &&
+        else if ((*keyFormat == FALCON_LEVEL5k) ||
+                 (*keyFormat == FALCON_LEVEL5_PADDEDk) ||
+                 ((*keyFormat == 0) &&
                  ((der->length == FALCON_LEVEL5_KEY_SIZE) ||
                   (der->length == FALCON_LEVEL5_PRV_KEY_SIZE)))) {
             ret = wc_falcon_set_level(key, 5);
@@ -839,6 +843,11 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
         else {
             wc_falcon_free(key);
             ret = ALGO_ID_E;
+        }
+        if (ret == 0 &&
+            ((*keyFormat == FALCON_LEVEL1_PADDEDk) ||
+             (*keyFormat == FALCON_LEVEL5_PADDEDk))) {
+            ret = wc_falcon_set_padded(key, 1);
         }
     }
 
@@ -852,7 +861,8 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
                                  ctx->minFalconKeySz;
 
             /* Format is known. */
-            if (*keyFormat == FALCON_LEVEL1k) {
+            if ((*keyFormat == FALCON_LEVEL1k) ||
+                (*keyFormat == FALCON_LEVEL1_PADDEDk)) {
                 *keyType = falcon_level1_sa_algo;
                 *keySize = FALCON_LEVEL1_KEY_SIZE;
             }
@@ -1116,9 +1126,12 @@ static int ProcessBufferTryDecode(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
     }
 #endif /* HAVE_ED448 && HAVE_ED448_KEY_IMPORT */
 #if defined(HAVE_FALCON)
-    /* Try Falcon if key format is Falcon level 1k or 5k or yet unknown. */
+    /* Try Falcon if key format is Falcon level 1k or 5k (padded or not)
+     * or yet unknown. */
     if ((ret == 0) && ((*keyFormat == 0) || (*keyFormat == FALCON_LEVEL1k) ||
-            (*keyFormat == FALCON_LEVEL5k))) {
+            (*keyFormat == FALCON_LEVEL5k) ||
+            (*keyFormat == FALCON_LEVEL1_PADDEDk) ||
+            (*keyFormat == FALCON_LEVEL5_PADDEDk))) {
         ret = ProcessBufferTryDecodeFalcon(ctx, ssl, der, keyFormat, heap,
             keyType, keySz);
         matchAnyKey = 1;
@@ -1444,6 +1457,8 @@ static void wolfssl_set_have_from_key_oid(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
     #ifdef HAVE_FALCON
         case FALCON_LEVEL1k:
         case FALCON_LEVEL5k:
+        case FALCON_LEVEL1_PADDEDk:
+        case FALCON_LEVEL5_PADDEDk:
             if (ssl != NULL) {
                 ssl->options.haveFalconSig = 1;
             }
@@ -1697,6 +1712,7 @@ static int ProcessBufferCertPublicKey(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
     #endif /* HAVE_ED448 */
     #if defined(HAVE_FALCON)
         case FALCON_LEVEL1k:
+        case FALCON_LEVEL1_PADDEDk:
             keyType = falcon_level1_sa_algo;
             /* Falcon is fixed key size */
             keySz = FALCON_LEVEL1_KEY_SIZE;
@@ -1707,6 +1723,7 @@ static int ProcessBufferCertPublicKey(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
             }
             break;
         case FALCON_LEVEL5k:
+        case FALCON_LEVEL5_PADDEDk:
             keyType = falcon_level5_sa_algo;
             /* Falcon is fixed key size */
             keySz = FALCON_LEVEL5_KEY_SIZE;
@@ -1907,6 +1924,7 @@ static int ProcessBufferCertAltPublicKey(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
     #endif /* HAVE_ED448 */
     #if defined(HAVE_FALCON)
         case FALCON_LEVEL1k:
+        case FALCON_LEVEL1_PADDEDk:
             keyType = falcon_level1_sa_algo;
             /* Falcon is fixed key size */
             keySz = FALCON_LEVEL1_KEY_SIZE;
@@ -1917,6 +1935,7 @@ static int ProcessBufferCertAltPublicKey(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
             }
             break;
         case FALCON_LEVEL5k:
+        case FALCON_LEVEL5_PADDEDk:
             keyType = falcon_level5_sa_algo;
             /* Falcon is fixed key size */
             keySz = FALCON_LEVEL5_KEY_SIZE;

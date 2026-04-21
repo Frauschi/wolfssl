@@ -58,6 +58,21 @@
 #define FALCON_LEVEL5_SIG_SIZE     OQS_SIG_falcon_1024_length_signature
 #define FALCON_LEVEL5_PUB_KEY_SIZE OQS_SIG_falcon_1024_length_public_key
 #define FALCON_LEVEL5_PRV_KEY_SIZE (FALCON_LEVEL5_PUB_KEY_SIZE+FALCON_LEVEL5_KEY_SIZE)
+
+/* Falcon-padded variants (new in liboqs >= 0.10). Key sizes are identical
+ * to the corresponding non-padded variants; only the signature is padded
+ * out to a fixed length. Fall back to the non-padded length if the liboqs
+ * headers don't define the padded constants. */
+#ifdef OQS_SIG_alg_falcon_padded_512
+#define FALCON_LEVEL1_PADDED_SIG_SIZE OQS_SIG_falcon_padded_512_length_signature
+#else
+#define FALCON_LEVEL1_PADDED_SIG_SIZE FALCON_LEVEL1_SIG_SIZE
+#endif
+#ifdef OQS_SIG_alg_falcon_padded_1024
+#define FALCON_LEVEL5_PADDED_SIG_SIZE OQS_SIG_falcon_padded_1024_length_signature
+#else
+#define FALCON_LEVEL5_PADDED_SIG_SIZE FALCON_LEVEL5_SIG_SIZE
+#endif
 #endif
 
 #define FALCON_MAX_KEY_SIZE     FALCON_LEVEL5_KEY_SIZE
@@ -76,6 +91,10 @@
 struct falcon_key {
     WC_BITFIELD pubKeySet:1;
     WC_BITFIELD prvKeySet:1;
+    /* Signature-encoding variant: 0 = compressed (Falcon-{512,1024}),
+     * 1 = padded (Falcon-padded-{512,1024}). Key material is identical
+     * between variants; only the signature encoding differs. */
+    WC_BITFIELD padded:1;
     byte level;
 
 #ifdef WOLF_CRYPTO_CB
@@ -126,6 +145,10 @@ WOLFSSL_API
 int wc_falcon_set_level(falcon_key* key, byte level);
 WOLFSSL_API
 int wc_falcon_get_level(falcon_key* key, byte* level);
+WOLFSSL_API
+int wc_falcon_set_padded(falcon_key* key, int padded);
+WOLFSSL_API
+int wc_falcon_get_padded(falcon_key* key, int* padded);
 WOLFSSL_API
 void wc_falcon_free(falcon_key* key);
 

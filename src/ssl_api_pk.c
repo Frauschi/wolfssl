@@ -87,6 +87,8 @@ static int check_cert_key_dev(word32 keyOID, byte* privKey, word32 privSz,
     #if defined(HAVE_FALCON)
             case FALCON_LEVEL1k:
             case FALCON_LEVEL5k:
+            case FALCON_LEVEL1_PADDEDk:
+            case FALCON_LEVEL5_PADDEDk:
                 type = DYNAMIC_TYPE_FALCON;
                 break;
     #endif
@@ -128,6 +130,8 @@ static int check_cert_key_dev(word32 keyOID, byte* privKey, word32 privSz,
     #if defined(HAVE_FALCON)
             case FALCON_LEVEL1k:
             case FALCON_LEVEL5k:
+            case FALCON_LEVEL1_PADDEDk:
+            case FALCON_LEVEL5_PADDEDk:
                 ret = wc_CryptoCb_PqcSignatureCheckPrivKey(pkey,
                     WC_PQC_SIG_TYPE_FALCON, pubKey, pubSz);
                 break;
@@ -172,6 +176,8 @@ static int check_cert_key_dev(word32 keyOID, byte* privKey, word32 privSz,
     #if defined(HAVE_FALCON)
         case FALCON_LEVEL1k:
         case FALCON_LEVEL5k:
+        case FALCON_LEVEL1_PADDEDk:
+        case FALCON_LEVEL5_PADDEDk:
             wc_falcon_free((falcon_key*)pkey);
             break;
     #endif

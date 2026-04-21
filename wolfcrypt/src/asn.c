@@ -4571,11 +4571,17 @@ static int ParseCRL_Extensions(DecodedCRL* dcrl, const byte* buf, word32* inOutI
     static const byte sigEd448Oid[] = {43, 101, 113};
 #endif /* HAVE_ED448 */
 #ifdef HAVE_FALCON
-    /* Falcon Level 1: 1 3 9999 3 6 */
-    static const byte sigFalcon_Level1Oid[] = {43, 206, 15, 3, 6};
+    /* Falcon Level 1: 1 3 9999 3 11 */
+    static const byte sigFalcon_Level1Oid[] = {43, 206, 15, 3, 11};
 
-    /* Falcon Level 5: 1 3 9999 3 9 */
-    static const byte sigFalcon_Level5Oid[] = {43, 206, 15, 3, 9};
+    /* Falcon Level 5: 1 3 9999 3 14 */
+    static const byte sigFalcon_Level5Oid[] = {43, 206, 15, 3, 14};
+
+    /* Falcon Padded Level 1: 1 3 9999 3 16 */
+    static const byte sigFalcon_Level1PaddedOid[] = {43, 206, 15, 3, 16};
+
+    /* Falcon Padded Level 5: 1 3 9999 3 19 */
+    static const byte sigFalcon_Level5PaddedOid[] = {43, 206, 15, 3, 19};
 #endif /* HAVE_FALCON */
 #ifdef HAVE_DILITHIUM
 #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
@@ -4659,11 +4665,17 @@ static int ParseCRL_Extensions(DecodedCRL* dcrl, const byte* buf, word32* inOutI
     static const byte keyDhOid[] = {42, 134, 72, 134, 247, 13, 1, 3, 1};
 #endif /* !NO_DH */
 #ifdef HAVE_FALCON
-    /* Falcon Level 1: 1 3 9999 3 6 */
-    static const byte keyFalcon_Level1Oid[] = {43, 206, 15, 3, 6};
+    /* Falcon Level 1: 1 3 9999 3 11 */
+    static const byte keyFalcon_Level1Oid[] = {43, 206, 15, 3, 11};
 
-    /* Falcon Level 5: 1 3 9999 3 9 */
-    static const byte keyFalcon_Level5Oid[] = {43, 206, 15, 3, 9};
+    /* Falcon Level 5: 1 3 9999 3 14 */
+    static const byte keyFalcon_Level5Oid[] = {43, 206, 15, 3, 14};
+
+    /* Falcon Padded Level 1: 1 3 9999 3 16 */
+    static const byte keyFalcon_Level1PaddedOid[] = {43, 206, 15, 3, 16};
+
+    /* Falcon Padded Level 5: 1 3 9999 3 19 */
+    static const byte keyFalcon_Level5PaddedOid[] = {43, 206, 15, 3, 19};
 #endif /* HAVE_FALCON */
 #ifdef HAVE_DILITHIUM
 #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
@@ -5518,6 +5530,14 @@ const byte* OidFromId(word32 id, word32 type, word32* oidSz)
                     oid = sigFalcon_Level5Oid;
                     *oidSz = sizeof(sigFalcon_Level5Oid);
                     break;
+                case CTC_FALCON_LEVEL1_PADDED:
+                    oid = sigFalcon_Level1PaddedOid;
+                    *oidSz = sizeof(sigFalcon_Level1PaddedOid);
+                    break;
+                case CTC_FALCON_LEVEL5_PADDED:
+                    oid = sigFalcon_Level5PaddedOid;
+                    *oidSz = sizeof(sigFalcon_Level5PaddedOid);
+                    break;
                 #endif /* HAVE_FALCON */
             #ifdef HAVE_DILITHIUM
                 #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
@@ -5642,6 +5662,14 @@ const byte* OidFromId(word32 id, word32 type, word32* oidSz)
                 case FALCON_LEVEL5k:
                     oid = keyFalcon_Level5Oid;
                     *oidSz = sizeof(keyFalcon_Level5Oid);
+                    break;
+                case FALCON_LEVEL1_PADDEDk:
+                    oid = keyFalcon_Level1PaddedOid;
+                    *oidSz = sizeof(keyFalcon_Level1PaddedOid);
+                    break;
+                case FALCON_LEVEL5_PADDEDk:
+                    oid = keyFalcon_Level5PaddedOid;
+                    *oidSz = sizeof(keyFalcon_Level5PaddedOid);
                     break;
                 #endif /* HAVE_FALCON */
             #ifdef HAVE_DILITHIUM
@@ -8999,7 +9027,8 @@ int wc_CheckPrivateKey(const byte* privKey, word32 privKeySz,
     else
     #endif /* HAVE_ED448 && HAVE_ED448_KEY_IMPORT && !NO_ASN_CRYPT */
     #if defined(HAVE_FALCON)
-    if ((ks == FALCON_LEVEL1k) || (ks == FALCON_LEVEL5k)) {
+    if ((ks == FALCON_LEVEL1k) || (ks == FALCON_LEVEL5k) ||
+        (ks == FALCON_LEVEL1_PADDEDk) || (ks == FALCON_LEVEL5_PADDEDk)) {
         WC_DECLARE_VAR(key_pair, falcon_key, 1, 0);
         word32     keyIdx = 0;
 
@@ -9011,11 +9040,15 @@ int wc_CheckPrivateKey(const byte* privKey, word32 privKeySz,
             return ret;
         }
 
-        if (ks == FALCON_LEVEL1k) {
+        if ((ks == FALCON_LEVEL1k) || (ks == FALCON_LEVEL1_PADDEDk)) {
             ret = wc_falcon_set_level(key_pair, 1);
         }
-        else if (ks == FALCON_LEVEL5k) {
+        else if ((ks == FALCON_LEVEL5k) || (ks == FALCON_LEVEL5_PADDEDk)) {
             ret = wc_falcon_set_level(key_pair, 5);
+        }
+        if (ret == 0 &&
+            ((ks == FALCON_LEVEL1_PADDEDk) || (ks == FALCON_LEVEL5_PADDEDk))) {
+            ret = wc_falcon_set_padded(key_pair, 1);
         }
 
         if (ret  < 0) {
@@ -9530,6 +9563,10 @@ int wc_GetKeyOID(byte* key, word32 keySz, const byte** curveOID, word32* oidSz,
             return MEMORY_E;
 
         if (wc_falcon_init(falcon) == 0) {
+            /* Try each (level, padded) combination until one parses cleanly.
+             * The DER's algorithm OID is what actually identifies the
+             * variant; these attempts just tell DecodeAsymKey which OID to
+             * accept. */
             tmpIdx = 0;
             if (wc_falcon_set_level(falcon, 1) == 0) {
                 if (wc_Falcon_PrivateKeyDecode(key, &tmpIdx, falcon, keySz)
@@ -9537,22 +9574,39 @@ int wc_GetKeyOID(byte* key, word32 keySz, const byte** curveOID, word32* oidSz,
                     *algoID = FALCON_LEVEL1k;
                 }
                 else {
-                    WOLFSSL_MSG("Not Falcon Level 1 DER key");
+                    tmpIdx = 0;
+                    (void)wc_falcon_set_padded(falcon, 1);
+                    if (wc_Falcon_PrivateKeyDecode(key, &tmpIdx, falcon,
+                                                   keySz) == 0) {
+                        *algoID = FALCON_LEVEL1_PADDEDk;
+                    }
+                    else {
+                        WOLFSSL_MSG("Not Falcon Level 1 DER key");
+                    }
                 }
             }
-            else if (wc_falcon_set_level(falcon, 5) == 0) {
+            if (*algoID == 0 && wc_falcon_set_level(falcon, 5) == 0) {
+                tmpIdx = 0;
                 if (wc_Falcon_PrivateKeyDecode(key, &tmpIdx, falcon, keySz)
                     == 0) {
                     *algoID = FALCON_LEVEL5k;
                 }
                 else {
-                    WOLFSSL_MSG("Not Falcon Level 5 DER key");
+                    tmpIdx = 0;
+                    (void)wc_falcon_set_padded(falcon, 1);
+                    if (wc_Falcon_PrivateKeyDecode(key, &tmpIdx, falcon,
+                                                   keySz) == 0) {
+                        *algoID = FALCON_LEVEL5_PADDEDk;
+                    }
+                    else {
+                        WOLFSSL_MSG("Not Falcon Level 5 DER key");
+                    }
                 }
             }
-            else {
-                WOLFSSL_MSG("GetKeyOID falcon initialization failed");
-            }
             wc_falcon_free(falcon);
+        }
+        else {
+            WOLFSSL_MSG("GetKeyOID falcon initialization failed");
         }
         XFREE(falcon, heap, DYNAMIC_TYPE_TMP_BUFFER);
     }
@@ -13038,6 +13092,14 @@ static int GetCertKey(DecodedCert* cert, const byte* source, word32* inOutIdx,
             cert->pkCurveOID = FALCON_LEVEL5k;
             ret = StoreKey(cert, source, &srcIdx, maxIdx);
             break;
+        case FALCON_LEVEL1_PADDEDk:
+            cert->pkCurveOID = FALCON_LEVEL1_PADDEDk;
+            ret = StoreKey(cert, source, &srcIdx, maxIdx);
+            break;
+        case FALCON_LEVEL5_PADDEDk:
+            cert->pkCurveOID = FALCON_LEVEL5_PADDEDk;
+            ret = StoreKey(cert, source, &srcIdx, maxIdx);
+            break;
     #endif /* HAVE_FALCON */
     #ifdef HAVE_DILITHIUM
         #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
@@ -15530,6 +15592,8 @@ static WC_INLINE int IsSigAlgoECC(word32 algoOID)
         #ifdef HAVE_FALCON
               || (algoOID == FALCON_LEVEL1k)
               || (algoOID == FALCON_LEVEL5k)
+              || (algoOID == FALCON_LEVEL1_PADDEDk)
+              || (algoOID == FALCON_LEVEL5_PADDEDk)
         #endif
         #ifdef HAVE_DILITHIUM
             #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
@@ -15858,6 +15922,8 @@ void FreeSignatureCtx(SignatureCtx* sigCtx)
         #if defined(HAVE_FALCON)
             case FALCON_LEVEL1k:
             case FALCON_LEVEL5k:
+            case FALCON_LEVEL1_PADDEDk:
+            case FALCON_LEVEL5_PADDEDk:
                 wc_falcon_free(sigCtx->key.falcon);
             #ifndef WOLFSSL_NO_MALLOC
                 XFREE(sigCtx->key.falcon, sigCtx->heap, DYNAMIC_TYPE_FALCON);
@@ -16063,6 +16129,8 @@ static int HashForSignature(const byte* buf, word32 bufSz, word32 sigOID,
     #ifdef HAVE_FALCON
         case CTC_FALCON_LEVEL1:
         case CTC_FALCON_LEVEL5:
+        case CTC_FALCON_LEVEL1_PADDED:
+        case CTC_FALCON_LEVEL5_PADDED:
             /* Hashes done in signing operation. */
             break;
     #endif
@@ -16241,6 +16309,10 @@ static int SigOidMatchesKeyOid(word32 sigOID, word32 keyOID)
             return (sigOID == CTC_FALCON_LEVEL1);
         case FALCON_LEVEL5k:
             return (sigOID == CTC_FALCON_LEVEL5);
+        case FALCON_LEVEL1_PADDEDk:
+            return (sigOID == CTC_FALCON_LEVEL1_PADDED);
+        case FALCON_LEVEL5_PADDEDk:
+            return (sigOID == CTC_FALCON_LEVEL5_PADDED);
     #endif
     #if defined(HAVE_DILITHIUM) && !defined(WOLFSSL_DILITHIUM_NO_VERIFY) && \
         !defined(WOLFSSL_DILITHIUM_NO_ASN1)
@@ -16607,37 +16679,17 @@ int ConfirmSignature(SignatureCtx* sigCtx,
             #endif
             #if defined(HAVE_FALCON)
                 case FALCON_LEVEL1k:
-                {
-                    word32 idx = 0;
-                    sigCtx->verify = 0;
-                #ifndef WOLFSSL_NO_MALLOC
-                    sigCtx->key.falcon =
-                        (falcon_key*)XMALLOC(sizeof(falcon_key),
-                                             sigCtx->heap,
-                                             DYNAMIC_TYPE_FALCON);
-                    if (sigCtx->key.falcon == NULL) {
-                        ERROR_OUT(MEMORY_E, exit_cs);
-                    }
-                #endif
-                    if ((ret = wc_falcon_init_ex(sigCtx->key.falcon,
-                                            sigCtx->heap, sigCtx->devId)) < 0) {
-                        goto exit_cs;
-                    }
-                    if ((ret = wc_falcon_set_level(sigCtx->key.falcon, 1))
-                        < 0) {
-                        goto exit_cs;
-                    }
-                    if ((ret = wc_Falcon_PublicKeyDecode(key, &idx,
-                        sigCtx->key.falcon, keySz)) < 0) {
-                        WOLFSSL_MSG("ASN Key import error Falcon Level 1");
-                        WOLFSSL_ERROR_VERBOSE(ret);
-                        goto exit_cs;
-                    }
-                    break;
-                }
                 case FALCON_LEVEL5k:
+                case FALCON_LEVEL1_PADDEDk:
+                case FALCON_LEVEL5_PADDEDk:
                 {
                     word32 idx = 0;
+                    byte falconLevel =
+                        ((keyOID == FALCON_LEVEL1k) ||
+                         (keyOID == FALCON_LEVEL1_PADDEDk)) ? 1 : 5;
+                    int falconPadded =
+                        ((keyOID == FALCON_LEVEL1_PADDEDk) ||
+                         (keyOID == FALCON_LEVEL5_PADDEDk));
                     sigCtx->verify = 0;
                 #ifndef WOLFSSL_NO_MALLOC
                     sigCtx->key.falcon =
@@ -16652,13 +16704,17 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                                             sigCtx->heap, sigCtx->devId)) < 0) {
                         goto exit_cs;
                     }
-                    if ((ret = wc_falcon_set_level(sigCtx->key.falcon, 5))
-                        < 0) {
+                    if ((ret = wc_falcon_set_level(sigCtx->key.falcon,
+                                                   falconLevel)) < 0) {
+                        goto exit_cs;
+                    }
+                    if ((ret = wc_falcon_set_padded(sigCtx->key.falcon,
+                                                    falconPadded)) < 0) {
                         goto exit_cs;
                     }
                     if ((ret = wc_Falcon_PublicKeyDecode(key, &idx,
                         sigCtx->key.falcon, keySz)) < 0) {
-                        WOLFSSL_MSG("ASN Key import error Falcon Level 5");
+                        WOLFSSL_MSG("ASN Key import error Falcon");
                         WOLFSSL_ERROR_VERBOSE(ret);
                         goto exit_cs;
                     }
@@ -17058,6 +17114,8 @@ int ConfirmSignature(SignatureCtx* sigCtx,
             #if defined(HAVE_FALCON)
                 case FALCON_LEVEL1k:
                 case FALCON_LEVEL5k:
+                case FALCON_LEVEL1_PADDEDk:
+                case FALCON_LEVEL5_PADDEDk:
                 {
                     ret = wc_falcon_verify_msg(sig, sigSz, buf, bufSz,
                                                &sigCtx->verify,
@@ -17254,6 +17312,7 @@ int ConfirmSignature(SignatureCtx* sigCtx,
             #endif /* HAVE_ED448 */
             #ifdef HAVE_FALCON
                 case FALCON_LEVEL1k:
+                case FALCON_LEVEL1_PADDEDk:
                 {
                     if (sigCtx->verify == 1) {
                         ret = 0;
@@ -17266,6 +17325,7 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                     break;
                 }
                 case FALCON_LEVEL5k:
+                case FALCON_LEVEL5_PADDEDk:
                 {
                     if (sigCtx->verify == 1) {
                         ret = 0;

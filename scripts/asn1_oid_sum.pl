@@ -290,8 +290,10 @@ my @x25519 = ( 1, 3, 101, 110 );
 my @ed448 = ( 1, 3, 101, 113 );
 my @x448 = ( 1, 3, 101, 111 );
 my @dh = ( 1, 2, 840, 113549, 1, 3, 1 );
-my @falcon_1 = ( 1, 3, 9999, 3, 6 );
-my @falcon_5 = ( 1, 3, 9999, 3, 9 );
+my @falcon_1 = ( 1, 3, 9999, 3, 11 );
+my @falcon_5 = ( 1, 3, 9999, 3, 14 );
+my @falcon_padded_1 = ( 1, 3, 9999, 3, 16 );
+my @falcon_padded_5 = ( 1, 3, 9999, 3, 19 );
 my @dilithium_2 = ( 1, 3, 6, 1, 4, 1, 2, 267, 12, 4, 4 );
 my @dilithium_3 = ( 1, 3, 6, 1, 4, 1, 2, 267, 12, 6, 5 );
 my @dilithium_5 = ( 1, 3, 6, 1, 4, 1, 2, 267, 12, 8, 7 );
@@ -319,7 +321,12 @@ my @keys = (
     { name => "X448",                 oid => \@x448            },
     { name => "DH",                   oid => \@dh              },
     { name => "FALCON_LEVEL1",        oid => \@falcon_1        },
-    { name => "FALCON_LEVEL5",        oid => \@falcon_5        },
+    { name => "FALCON_LEVEL5",        oid => \@falcon_5,
+                                      oid_sum => 279           },
+    { name => "FALCON_LEVEL1_PADDED", oid => \@falcon_padded_1,
+                                      oid_sum => 280           },
+    { name => "FALCON_LEVEL5_PADDED", oid => \@falcon_padded_5,
+                                      oid_sum => 284           },
     { name => "DILITHIUM_LEVEL2",     oid => \@dilithium_2     },
     { name => "DILITHIUM_LEVEL3",     oid => \@dilithium_3     },
     { name => "DILITHIUM_LEVEL5",     oid => \@dilithium_5     },
@@ -1109,6 +1116,13 @@ my @sig_types = (
     { name => "CTC_FALCON_LEVEL1",          oid => \@falcon_1,
                                             same => 1                       },
     { name => "CTC_FALCON_LEVEL5",          oid => \@falcon_5,
+                                            oid_sum => 279,
+                                            same => 1                       },
+    { name => "CTC_FALCON_LEVEL1_PADDED",   oid => \@falcon_padded_1,
+                                            oid_sum => 280,
+                                            same => 1                       },
+    { name => "CTC_FALCON_LEVEL5_PADDED",   oid => \@falcon_padded_5,
+                                            oid_sum => 284,
                                             same => 1                       },
     { name => "CTC_DILITHIUM_LEVEL2",       oid => \@dilithium_2,
                                             same => 1                       },

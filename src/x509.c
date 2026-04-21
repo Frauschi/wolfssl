@@ -12310,7 +12310,12 @@ static int CertFromX509(Cert* cert, WOLFSSL_X509* x509)
     #endif
     #if defined(HAVE_FALCON)
         if ((x509->pubKeyOID == FALCON_LEVEL1k) ||
-            (x509->pubKeyOID == FALCON_LEVEL5k)) {
+            (x509->pubKeyOID == FALCON_LEVEL5k) ||
+            (x509->pubKeyOID == FALCON_LEVEL1_PADDEDk) ||
+            (x509->pubKeyOID == FALCON_LEVEL5_PADDEDk)) {
+            int falconPadded =
+                ((x509->pubKeyOID == FALCON_LEVEL1_PADDEDk) ||
+                 (x509->pubKeyOID == FALCON_LEVEL5_PADDEDk));
             falcon = (falcon_key*)XMALLOC(sizeof(falcon_key), NULL,
                                           DYNAMIC_TYPE_FALCON);
             if (falcon == NULL) {
@@ -12326,14 +12331,16 @@ static int CertFromX509(Cert* cert, WOLFSSL_X509* x509)
                 return ret;
             }
 
-            if (x509->pubKeyOID == FALCON_LEVEL1k) {
+            if ((x509->pubKeyOID == FALCON_LEVEL1k) ||
+                (x509->pubKeyOID == FALCON_LEVEL1_PADDEDk)) {
                 type = FALCON_LEVEL1_TYPE;
                 wc_falcon_set_level(falcon, 1);
             }
-            else if (x509->pubKeyOID == FALCON_LEVEL5k) {
+            else {
                 type = FALCON_LEVEL5_TYPE;
                 wc_falcon_set_level(falcon, 5);
             }
+            wc_falcon_set_padded(falcon, falconPadded);
 
             ret = wc_Falcon_PublicKeyDecode(x509->pubKey.buffer, &idx, falcon,
                                             x509->pubKey.length);
@@ -12572,7 +12579,9 @@ cleanup:
     #endif
     #if defined(HAVE_FALCON)
         if ((x509->pubKeyOID == FALCON_LEVEL1k) ||
-            (x509->pubKeyOID == FALCON_LEVEL5k)) {
+            (x509->pubKeyOID == FALCON_LEVEL5k) ||
+            (x509->pubKeyOID == FALCON_LEVEL1_PADDEDk) ||
+            (x509->pubKeyOID == FALCON_LEVEL5_PADDEDk)) {
             wc_falcon_free(falcon);
             XFREE(falcon, NULL, DYNAMIC_TYPE_FALCON);
         }
