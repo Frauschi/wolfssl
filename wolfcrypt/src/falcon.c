@@ -23,7 +23,7 @@
 
 /* Based on ed448.c and Reworked for Falcon by Anthony Hu. */
 
-#if defined(HAVE_PQC) && defined(HAVE_FALCON)
+#if defined(HAVE_FALCON)
 
 #include <wolfssl/wolfcrypt/asn.h>
 
@@ -984,4 +984,4 @@ int wc_Falcon_PrivateKeyToDer(falcon_key* key, byte* output, word32 inLen)
 
     return BAD_FUNC_ARG;
 }
-#endif /* HAVE_PQC && HAVE_FALCON */
+#endif /* HAVE_FALCON */

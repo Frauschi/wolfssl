@@ -4542,30 +4542,10 @@ extern void uITRON4_free(void *p) ;
     #endif
 #endif
 
-#ifdef WOLFSSL_HAVE_MLKEM
-#define HAVE_PQC
-#endif
-
-/* Enable Post-Quantum Cryptography if we have liboqs from the OpenQuantumSafe
- * group */
-#ifdef HAVE_LIBOQS
-#define HAVE_PQC
-#define HAVE_FALCON
-#ifndef HAVE_DILITHIUM
-    #define HAVE_DILITHIUM
-#endif
-#ifndef WOLFSSL_NO_SPHINCS
-    #define HAVE_SPHINCS
-#endif
-#ifndef WOLFSSL_HAVE_MLKEM
-    #define WOLFSSL_HAVE_MLKEM
-    #define WOLFSSL_KYBER512
-    #define WOLFSSL_KYBER768
-    #define WOLFSSL_KYBER1024
-    #define WOLFSSL_WC_ML_KEM_512
-    #define WOLFSSL_WC_ML_KEM_768
-    #define WOLFSSL_WC_ML_KEM_1024
-#endif
+/* liboqs now only provides Falcon. HAVE_LIBOQS must be paired with
+ * HAVE_FALCON (set explicitly by --enable-falcon / WOLFSSL_FALCON). */
+#if defined(HAVE_LIBOQS) && !defined(HAVE_FALCON)
+#error "HAVE_LIBOQS requires HAVE_FALCON (enable Falcon via --enable-falcon)."
 #endif
 
 #if (defined(HAVE_LIBOQS) ||                                            \
@@ -4577,26 +4557,22 @@ extern void uITRON4_free(void *p) ;
     #error Experimental settings without WOLFSSL_EXPERIMENTAL_SETTINGS
 #endif
 
-#if defined(HAVE_PQC) && !defined(HAVE_LIBOQS) && !defined(WOLFSSL_HAVE_MLKEM)
-#error Please do not define HAVE_PQC yourself.
-#endif
-
 /* If no malloc then make sure the valid Dilithium settings are used */
 #if defined(HAVE_DILITHIUM) && defined(WOLFSSL_NO_MALLOC)
     #undef  WOLFSSL_DILITHIUM_VERIFY_NO_MALLOC
     #define WOLFSSL_DILITHIUM_VERIFY_NO_MALLOC
 #endif
 
-#if defined(HAVE_PQC) && defined(WOLFSSL_HAVE_MLKEM) && \
+#if defined(WOLFSSL_HAVE_MLKEM) && \
     defined(WOLFSSL_DTLS13) && !defined(WOLFSSL_DTLS_CH_FRAG)
 #define WOLFSSL_DTLS_CH_FRAG
-#warning "WOLFSSL_DTLS_CH_FRAG is enabled to support PQC in DTLS 1.3"
+#warning "WOLFSSL_DTLS_CH_FRAG is enabled to support ML-KEM in DTLS 1.3"
 #endif
 #if !defined(WOLFSSL_DTLS13) && defined(WOLFSSL_DTLS_CH_FRAG)
 #error "WOLFSSL_DTLS_CH_FRAG only works with DTLS 1.3"
 #endif
 
-#if defined(HAVE_PQC) && defined(WOLFSSL_HAVE_MLKEM) && \
+#if defined(WOLFSSL_HAVE_MLKEM) && \
     !defined(WOLFSSL_NO_ML_KEM) && !defined(WOLFSSL_PQC_HYBRIDS) && \
     defined(WOLFSSL_TLS_NO_MLKEM_STANDALONE) && !defined(WOLFCRYPT_ONLY)
 #error "Neither PQ/T hybrid combinations nor ML-KEM as standalone TLS key " \

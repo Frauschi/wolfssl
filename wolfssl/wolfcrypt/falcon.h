@@ -35,7 +35,7 @@
     #include <wolfssl/wolfcrypt/cryptocb.h>
 #endif
 
-#if defined(HAVE_PQC) && defined(HAVE_FALCON)
+#if defined(HAVE_FALCON)
 
 #ifdef HAVE_LIBOQS
 #include <oqs/oqs.h>
@@ -176,5 +176,5 @@ WOLFSSL_API int wc_Falcon_PublicKeyToDer(falcon_key* key, byte* output,
     }    /* extern "C" */
 #endif
 
-#endif /* HAVE_PQC && HAVE_FALCON */
+#endif /* HAVE_FALCON */
 #endif /* WOLF_CRYPT_FALCON_H */

@@ -1662,7 +1662,7 @@ fi
 ENABLED_LIBOQS="no"
 tryliboqsdir=""
 AC_ARG_WITH([liboqs],
-    [AS_HELP_STRING([--with-liboqs=PATH],[Path to liboqs install (default /usr/local) (requires --enable-experimental)])],
+    [AS_HELP_STRING([--with-liboqs=PATH],[Path to liboqs install (default /usr/local) (requires --enable-experimental and --enable-falcon)])],
     [
         AS_IF([ test "$ENABLED_EXPERIMENTAL" != "yes" ],[ AC_MSG_ERROR([LIBOQS requires --enable-experimental.]) ])
         AC_MSG_CHECKING([for liboqs])
@@ -1705,6 +1705,23 @@ AC_ARG_WITH([liboqs],
         ENABLED_LIBOQS="yes"
     ]
 )
+
+# Falcon (provided via liboqs)
+AC_ARG_ENABLE([falcon],
+    [AS_HELP_STRING([--enable-falcon],[Enable Falcon post-quantum signatures via liboqs (default: disabled)])],
+    [ ENABLED_FALCON=$enableval ],
+    [ ENABLED_FALCON=no ])
+
+if test "$ENABLED_FALCON" = "yes" && test "$ENABLED_LIBOQS" = "no"; then
+    AC_MSG_ERROR([--enable-falcon requires --with-liboqs.])
+fi
+if test "$ENABLED_LIBOQS" = "yes" && test "$ENABLED_FALCON" != "yes"; then
+    AC_MSG_ERROR([--with-liboqs requires --enable-falcon.])
+fi
+
+if test "$ENABLED_FALCON" = "yes"; then
+    AM_CFLAGS="$AM_CFLAGS -DHAVE_FALCON"
+fi
 
 
 # MLKEM
@@ -1851,13 +1868,11 @@ then
         AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_DILITHIUM_NO_VERIFY"
     fi
 
-    if test "$ENABLED_LIBOQS" = "no"; then
-        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_WC_DILITHIUM"
-        AM_CCASFLAGS="$AM_CCASFLAGS -DWOLFSSL_WC_DILITHIUM"
-        test "$enable_sha3" = "" && enable_sha3=yes
-        test "$enable_shake128" = "" && enable_shake128=yes
-        test "$enable_shake256" = "" && enable_shake256=yes
-    fi
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_WC_DILITHIUM"
+    AM_CCASFLAGS="$AM_CCASFLAGS -DWOLFSSL_WC_DILITHIUM"
+    test "$enable_sha3" = "" && enable_sha3=yes
+    test "$enable_shake128" = "" && enable_shake128=yes
+    test "$enable_shake256" = "" && enable_shake256=yes
     ENABLED_CERTS=yes
 fi
 
@@ -6900,12 +6915,9 @@ done
 if test "$ENABLED_MLKEM" != "no"
 then
     AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_HAVE_MLKEM"
-    # Use liboqs if specified.
-    if test "$ENABLED_LIBOQS" = "no"; then
-        ENABLED_WC_MLKEM=yes
-        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_WC_MLKEM"
-        AM_CCASFLAGS="$AM_CCASFLAGS -DWOLFSSL_WC_MLKEM"
-    fi
+    ENABLED_WC_MLKEM=yes
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_WC_MLKEM"
+    AM_CCASFLAGS="$AM_CCASFLAGS -DWOLFSSL_WC_MLKEM"
 
     if test "$ENABLED_ORIGINAL" = "yes"; then
         AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_MLKEM_KYBER"
@@ -7709,12 +7721,12 @@ then
     AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_REQUIRE_FFDHE"
 fi
 
-# TLS 1.3 Requires either ECC or (RSA/DH), or CURVE25519/ED25519 or CURVE448/ED448 or libOQS
+# TLS 1.3 Requires either ECC or (RSA/DH), or CURVE25519/ED25519 or CURVE448/ED448 or ML-KEM
 if test "x$ENABLED_PSK" = "xno" && test "x$ENABLED_ECC" = "xno" && \
     (test "x$ENABLED_RSA" = "xno" || test "x$ENABLED_DH" = "xno") && \
     (test "x$ENABLED_CURVE25519" = "xno" || test "x$ENABLED_ED25519" = "xno") && \
     (test "x$ENABLED_CURVE448" = "xno" || test "x$ENABLED_ED448" = "xno") && \
-    test "x$ENABLED_LIBOQS" = "xno"
+    test "x$ENABLED_MLKEM" = "xno"
 then
     # disable TLS 1.3
     ENABLED_TLS13=no
@@ -12190,6 +12202,7 @@ echo "   * Public Key Callbacks:       $ENABLED_PKCALLBACKS"
 echo "   * libxmss:                    $ENABLED_LIBXMSS"
 echo "   * liblms:                     $ENABLED_LIBLMS"
 echo "   * liboqs:                     $ENABLED_LIBOQS"
+echo "   * Falcon (via liboqs):        $ENABLED_FALCON"
 echo "   * Whitewood netRandom:        $ENABLED_WNR"
 echo "   * Server Name Indication:     $ENABLED_SNI"
 echo "   * ALPN:                       $ENABLED_ALPN"

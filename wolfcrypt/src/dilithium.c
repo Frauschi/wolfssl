@@ -144,10 +144,6 @@
 
 #if defined(HAVE_DILITHIUM)
 
-#ifdef HAVE_LIBOQS
-#include <oqs/oqs.h>
-#endif
-
 #include <wolfssl/wolfcrypt/dilithium.h>
 #include <wolfssl/wolfcrypt/hash.h>
 #include <wolfssl/wolfcrypt/sha3.h>
@@ -10092,178 +10088,6 @@ static int dilithium_verify_ctx_hash(dilithium_key* key, const byte* ctx,
 }
 #endif /* WOLFSSL_DILITHIUM_NO_VERIFY */
 
-#elif defined(HAVE_LIBOQS)
-
-#ifndef WOLFSSL_DILITHIUM_NO_MAKE_KEY
-static int oqs_dilithium_make_key(dilithium_key* key, WC_RNG* rng)
-{
-    int ret = 0;
-    OQS_SIG *oqssig = NULL;
-
-    if (key->level == WC_ML_DSA_44) {
-        oqssig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_44_ipd);
-    }
-    else if (key->level == WC_ML_DSA_65) {
-        oqssig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_65_ipd);
-    }
-    else if (key->level == WC_ML_DSA_87) {
-            oqssig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_87_ipd);
-    }
-    else {
-        ret = SIG_TYPE_E;
-    }
-
-
-#ifdef WOLFSSL_DILITHIUM_DYNAMIC_KEYS
-    if (ret == 0) {
-        ret = dilithium_alloc_priv_buf(key);
-    }
-    if (ret == 0) {
-        ret = dilithium_alloc_pub_buf(key);
-    }
-#endif
-
-    if (ret == 0) {
-        ret = wolfSSL_liboqsRngMutexLock(rng);
-        if (ret == 0) {
-            if (OQS_SIG_keypair(oqssig, key->p, key->k) != OQS_SUCCESS) {
-                ret = BUFFER_E;
-            }
-        }
-        wolfSSL_liboqsRngMutexUnlock();
-    }
-    if (ret == 0) {
-        key->prvKeySet = 1;
-        key->pubKeySet = 1;
-    }
-
-    if (oqssig != NULL) {
-        OQS_SIG_free(oqssig);
-    }
-
-    return ret;
-}
-#endif /* WOLFSSL_DILITHIUM_NO_MAKE_KEY */
-
-#ifndef WOLFSSL_DILITHIUM_NO_SIGN
-static int oqs_dilithium_sign_msg(const byte* msg, word32 msgLen, byte* sig,
-    word32 *sigLen, dilithium_key* key, WC_RNG* rng)
-{
-    int ret = 0;
-    OQS_SIG *oqssig = NULL;
-    size_t localOutLen = 0;
-
-    if (!key->prvKeySet) {
-        ret = BAD_FUNC_ARG;
-    }
-
-    if (ret == 0) {
-        if (key->level == WC_ML_DSA_44) {
-            oqssig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_44_ipd);
-        }
-        else if (key->level == WC_ML_DSA_65) {
-            oqssig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_65_ipd);
-        }
-        else if (key->level == WC_ML_DSA_87) {
-            oqssig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_87_ipd);
-        }
-        else {
-            ret = SIG_TYPE_E;
-        }
-    }
-
-    if ((ret == 0) && (oqssig == NULL)) {
-        ret = BUFFER_E;
-    }
-
-    /* check and set up out length */
-    if (ret == 0) {
-        if ((key->level == WC_ML_DSA_44) &&
-                (*sigLen < ML_DSA_LEVEL2_SIG_SIZE)) {
-            *sigLen = ML_DSA_LEVEL2_SIG_SIZE;
-            ret = BUFFER_E;
-        }
-        else if ((key->level == WC_ML_DSA_65) &&
-                 (*sigLen < ML_DSA_LEVEL3_SIG_SIZE)) {
-            *sigLen = ML_DSA_LEVEL3_SIG_SIZE;
-            ret = BUFFER_E;
-        }
-        else if ((key->level == WC_ML_DSA_87) &&
-                 (*sigLen < ML_DSA_LEVEL5_SIG_SIZE)) {
-            *sigLen = ML_DSA_LEVEL5_SIG_SIZE;
-            ret = BUFFER_E;
-        }
-        localOutLen = *sigLen;
-    }
-
-    if (ret == 0) {
-        ret = wolfSSL_liboqsRngMutexLock(rng);
-        if (ret == 0) {
-            if (OQS_SIG_sign(oqssig, sig, &localOutLen, msg, msgLen, key->k)
-                == OQS_ERROR) {
-                ret = BAD_FUNC_ARG;
-            }
-        }
-        if (ret == 0) {
-            *sigLen = (word32)localOutLen;
-        }
-        wolfSSL_liboqsRngMutexUnlock();
-    }
-
-    if (oqssig != NULL) {
-        OQS_SIG_free(oqssig);
-    }
-    return ret;
-}
-#endif
-
-#ifndef WOLFSSL_DILITHIUM_NO_VERIFY
-static int oqs_dilithium_verify_msg(const byte* sig, word32 sigLen,
-    const byte* msg, word32 msgLen, int* res, dilithium_key* key)
-{
-    int ret = 0;
-    OQS_SIG *oqssig = NULL;
-
-    if (!key->pubKeySet) {
-        ret = BAD_FUNC_ARG;
-    }
-
-    if (ret == 0) {
-        if (key->level == WC_ML_DSA_44) {
-            oqssig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_44_ipd);
-        }
-        else if (key->level == WC_ML_DSA_65) {
-            oqssig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_65_ipd);
-        }
-        else if (key->level == WC_ML_DSA_87) {
-            oqssig = OQS_SIG_new(OQS_SIG_alg_ml_dsa_87_ipd);
-        }
-        else {
-            ret = SIG_TYPE_E;
-        }
-    }
-
-    if ((ret == 0) && (oqssig == NULL)) {
-        ret = BUFFER_E;
-    }
-
-    if ((ret == 0) &&
-        (OQS_SIG_verify(oqssig, msg, msgLen, sig, sigLen, key->p)
-         == OQS_ERROR)) {
-         ret = SIG_VERIFY_E;
-    }
-
-    if (ret == 0) {
-        *res = 1;
-    }
-
-    if (oqssig != NULL) {
-        OQS_SIG_free(oqssig);
-    }
-    return ret;
-}
-#endif /* !WOLFSSL_DILITHIUM_NO_VERIFY */
-
 #else
     #error "No dilithium implementation chosen."
 #endif
@@ -10295,7 +10119,6 @@ int wc_dilithium_make_key(dilithium_key* key, WC_RNG* rng)
 #endif
 
     if (ret == 0) {
-#ifdef WOLFSSL_WC_DILITHIUM
         /* Check the level or parameters have been set. */
         if (key->params == NULL) {
             ret = BAD_STATE_E;
@@ -10304,10 +10127,6 @@ int wc_dilithium_make_key(dilithium_key* key, WC_RNG* rng)
             /* Make the key. */
             ret = dilithium_make_key(key, rng);
         }
-#elif defined(HAVE_LIBOQS)
-        /* Make the key. */
-        ret = oqs_dilithium_make_key(key, rng);
-#endif
     }
 
     return ret;
@@ -10323,7 +10142,6 @@ int wc_dilithium_make_key_from_seed(dilithium_key* key, const byte* seed)
     }
 
     if (ret == 0) {
-#ifdef WOLFSSL_WC_DILITHIUM
         /* Check the level or parameters have been set. */
         if (key->params == NULL) {
             ret = BAD_STATE_E;
@@ -10332,10 +10150,6 @@ int wc_dilithium_make_key_from_seed(dilithium_key* key, const byte* seed)
             /* Make the key. */
             ret = dilithium_make_key_from_seed(key, seed);
         }
-#elif defined(HAVE_LIBOQS)
-        /* Make the key. */
-        ret = NOT_COMPILED_IN;
-#endif
     }
 
     return ret;
@@ -10392,12 +10206,8 @@ int wc_dilithium_sign_ctx_msg(const byte* ctx, byte ctxLen, const byte* msg,
 
     if (ret == 0) {
         /* Sign message. */
-    #ifdef WOLFSSL_WC_DILITHIUM
         ret = dilithium_sign_ctx_msg(key, rng, ctx, ctxLen, msg, msgLen, sig,
             sigLen);
-    #elif defined(HAVE_LIBOQS)
-        ret = oqs_dilithium_sign_msg(msg, msgLen, sig, sigLen, key, rng);
-    #endif
     }
 
     return ret;
@@ -10446,11 +10256,7 @@ int wc_dilithium_sign_msg(const byte* msg, word32 msgLen, byte* sig,
 
     if (ret == 0) {
         /* Sign message. */
-    #ifdef WOLFSSL_WC_DILITHIUM
         ret = dilithium_sign_msg(key, rng, msg, msgLen, sig, sigLen);
-    #elif defined(HAVE_LIBOQS)
-        ret = oqs_dilithium_sign_msg(msg, msgLen, sig, sigLen, key, rng);
-    #endif
     }
 
     return ret;
@@ -10505,16 +10311,8 @@ int wc_dilithium_sign_ctx_hash(const byte* ctx, byte ctxLen, int hashAlg,
 
     if (ret == 0) {
         /* Sign message. */
-    #ifdef WOLFSSL_WC_DILITHIUM
         ret = dilithium_sign_ctx_hash(key, rng, ctx, ctxLen, hashAlg, hash,
             hashLen, sig, sigLen);
-    #elif defined(HAVE_LIBOQS)
-        ret = NOT_COMPILED_IN;
-        (void)hashAlg;
-        (void)hash;
-        (void)hashLen;
-        (void)rng;
-    #endif
     }
 
     return ret;
@@ -10551,14 +10349,8 @@ int wc_dilithium_sign_ctx_msg_with_seed(const byte* ctx, byte ctxLen,
 
     if (ret == 0) {
         /* Sign message. */
-    #ifdef WOLFSSL_WC_DILITHIUM
         ret = dilithium_sign_ctx_msg_with_seed(key, seed, ctx, ctxLen, msg,
             msgLen, sig, sigLen);
-    #elif defined(HAVE_LIBOQS)
-        ret = NOT_COMPILED_IN;
-        (void)msgLen;
-        (void)seed;
-    #endif
     }
 
     return ret;
@@ -10591,13 +10383,7 @@ int wc_dilithium_sign_msg_with_seed(const byte* msg, word32 msgLen, byte* sig,
 
     if (ret == 0) {
         /* Sign message. */
-    #ifdef WOLFSSL_WC_DILITHIUM
         ret = dilithium_sign_msg_with_seed(key, seed, msg, msgLen, sig, sigLen);
-    #elif defined(HAVE_LIBOQS)
-        ret = NOT_COMPILED_IN;
-        (void)msgLen;
-        (void)seed;
-    #endif
     }
 
     return ret;
@@ -10636,16 +10422,8 @@ int wc_dilithium_sign_ctx_hash_with_seed(const byte* ctx, byte ctxLen,
 
     if (ret == 0) {
         /* Sign message. */
-    #ifdef WOLFSSL_WC_DILITHIUM
         ret = dilithium_sign_ctx_hash_with_seed(key, seed, ctx, ctxLen,
             hashAlg, hash, hashLen, sig, sigLen);
-    #elif defined(HAVE_LIBOQS)
-        ret = NOT_COMPILED_IN;
-        (void)hashAlg;
-        (void)hash;
-        (void)hashLen;
-        (void)seed;
-    #endif
     }
 
     return ret;
@@ -10703,12 +10481,8 @@ int wc_dilithium_verify_ctx_msg(const byte* sig, word32 sigLen, const byte* ctx,
 
     if (ret == 0) {
         /* Verify message with signature. */
-    #ifdef WOLFSSL_WC_DILITHIUM
         ret = dilithium_verify_ctx_msg(key, ctx, ctxLen, msg, msgLen, sig,
             sigLen, res);
-    #elif defined(HAVE_LIBOQS)
-        ret = oqs_dilithium_verify_msg(sig, sigLen, msg, msgLen, res, key);
-    #endif
     }
 
     return ret;
@@ -10757,11 +10531,7 @@ int wc_dilithium_verify_msg(const byte* sig, word32 sigLen, const byte* msg,
 
     if (ret == 0) {
         /* Verify message with signature. */
-    #ifdef WOLFSSL_WC_DILITHIUM
         ret = dilithium_verify_msg(key, msg, msgLen, sig, sigLen, res);
-    #elif defined(HAVE_LIBOQS)
-        ret = oqs_dilithium_verify_msg(sig, sigLen, msg, msgLen, res, key);
-    #endif
     }
 
     return ret;
@@ -10816,16 +10586,8 @@ int wc_dilithium_verify_ctx_hash(const byte* sig, word32 sigLen,
 
     if (ret == 0) {
         /* Verify message with signature. */
-    #ifdef WOLFSSL_WC_DILITHIUM
         ret = dilithium_verify_ctx_hash(key, ctx, ctxLen, hashAlg, hash,
             hashLen, sig, sigLen, res);
-    #elif defined(HAVE_LIBOQS)
-        ret = NOT_COMPILED_IN;
-        (void)sigLen;
-        (void)hashAlg;
-        (void)hash;
-        (void)hashLen;
-    #endif
     }
 
     return ret;
