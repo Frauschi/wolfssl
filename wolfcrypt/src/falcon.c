@@ -844,12 +844,29 @@ int wc_Falcon_PrivateKeyDecode(const byte* input, word32* inOutIdx,
     ret = DecodeAsymKey(input, inOutIdx, inSz, privKey, &privKeyLen,
                         pubKey, &pubKeyLen, keytype);
     if (ret == 0) {
-        if (pubKeyLen == 0) {
-            ret = wc_falcon_import_private_key(input, inSz, NULL, 0, key);
+        word32 skSz = (key->level == 1) ? FALCON_LEVEL1_KEY_SIZE
+                                        : FALCON_LEVEL5_KEY_SIZE;
+        word32 pkSz = (key->level == 1) ? FALCON_LEVEL1_PUB_KEY_SIZE
+                                        : FALCON_LEVEL5_PUB_KEY_SIZE;
+
+        /* Legacy wolfSSL layout: privateKey OCTET STRING carries priv||pub
+         * concatenated and there is no separate publicKey field. Split the
+         * buffer so the size validation below handles both layouts. */
+        if (pubKeyLen == 0 && privKeyLen == skSz + pkSz) {
+            XMEMCPY(pubKey, privKey + skSz, pkSz);
+            pubKeyLen = pkSz;
+            privKeyLen = skSz;
+        }
+
+        if (privKeyLen != skSz || pubKeyLen != pkSz) {
+            ret = BAD_FUNC_ARG;
         }
         else {
-            ret = wc_falcon_import_private_key(input, inSz, pubKey,
-                                               pubKeyLen, key);
+            ret = wc_falcon_import_public(pubKey, pubKeyLen, key);
+            if (ret == 0) {
+                XMEMCPY(key->k, privKey, privKeyLen);
+                key->prvKeySet = 1;
+            }
         }
     }
 
@@ -955,12 +972,12 @@ int wc_Falcon_KeyToDer(falcon_key* key, byte* output, word32 inLen)
 
     if (key->level == 1) {
         return SetAsymKeyDer(key->k, FALCON_LEVEL1_KEY_SIZE, key->p,
-                             FALCON_LEVEL1_KEY_SIZE, output, inLen,
+                             FALCON_LEVEL1_PUB_KEY_SIZE, output, inLen,
                              FALCON_LEVEL1k);
     }
     else if (key->level == 5) {
         return SetAsymKeyDer(key->k, FALCON_LEVEL5_KEY_SIZE, key->p,
-                             FALCON_LEVEL5_KEY_SIZE, output, inLen,
+                             FALCON_LEVEL5_PUB_KEY_SIZE, output, inLen,
                              FALCON_LEVEL5k);
     }
 

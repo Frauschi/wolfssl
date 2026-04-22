@@ -201,6 +201,10 @@ sub print_header {
 #ifndef WOLF_CRYPT_OID_SUM_H
 #define WOLF_CRYPT_OID_SUM_H
 
+/* Note for some CPUs smaller than 32 bit, the upper 16 bits of new OID
+ * values may be ignored. If collisions are encountered, consider WC_16BIT_CPU
+ * and/or WOLFSSL_OLD_OID_SUM to force smaller, old OID values. */
+
 "
 }
 
