@@ -179,19 +179,11 @@
 #endif
 #if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_VERIFY_ONLY)
     #include <wolfssl/wolfcrypt/lms.h>
-    #ifdef HAVE_LIBLMS
-        #include <wolfssl/wolfcrypt/ext_lms.h>
-    #else
-        #include <wolfssl/wolfcrypt/wc_lms.h>
-    #endif
+    #include <wolfssl/wolfcrypt/wc_lms.h>
 #endif
 #if defined(WOLFSSL_HAVE_XMSS) && !defined(WOLFSSL_XMSS_VERIFY_ONLY)
     #include <wolfssl/wolfcrypt/xmss.h>
-    #ifdef HAVE_LIBXMSS
-        #include <wolfssl/wolfcrypt/ext_xmss.h>
-    #else
-        #include <wolfssl/wolfcrypt/wc_xmss.h>
-    #endif
+    #include <wolfssl/wolfcrypt/wc_xmss.h>
 #endif
 #if defined(WOLFSSL_HAVE_SLHDSA)
     #include <wolfssl/wolfcrypt/wc_slhdsa.h>
@@ -11443,9 +11435,6 @@ static void bench_lms_sign_verify(enum wc_LmsParm parm, byte* pub)
             printf("wc_LmsKey_GetPrivLen failed: %d\n", ret);
             goto exit_lms_sign_verify;
         }
-    #ifdef HAVE_LIBLMS
-        break;
-    #endif
     } while (bench_stats_check(start)
 #ifdef MULTI_VALUE_STATISTICS
        || runs < minimum_runs

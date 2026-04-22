@@ -89,17 +89,13 @@
 #define XMSSMT_NAME_MIN_LEN (20) /* strlen("XMSSMT-SHA2_20/2_256") */
 #define XMSSMT_NAME_MAX_LEN (21) /* strlen("XMSSMT-SHA2_60/12_256") */
 
-#if defined(HAVE_FIPS) || defined(HAVE_LIBXMSS)
+#if defined(HAVE_FIPS)
     #undef WOLFSSL_WC_XMSS_NO_SHA512
     #define WOLFSSL_WC_XMSS_NO_SHA512
     #undef WOLFSSL_WC_XMSS_NO_SHAKE128
     #define WOLFSSL_WC_XMSS_NO_SHAKE128
     #undef WOLFSSL_WC_XMSS_MAX_HASH_SIZE
-    #ifdef HAVE_LIBXMSS
-        #define WOLFSSL_WC_XMSS_MIN_HASH_SIZE       256
-    #else
-        #define WOLFSSL_WC_XMSS_MIN_HASH_SIZE       192
-    #endif
+    #define WOLFSSL_WC_XMSS_MIN_HASH_SIZE       192
     #define WOLFSSL_WC_XMSS_MAX_HASH_SIZE       256
 #endif
 

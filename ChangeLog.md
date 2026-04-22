@@ -1,3 +1,14 @@
+# wolfSSL (unreleased)
+
+## Removals
+
+* Removed support for the external `hash-sigs` (`liblms`) and `xmss-reference`
+  (`libxmss`) libraries. The `--with-liblms` and `--with-libxmss` configure
+  options, and the `HAVE_LIBLMS` and `HAVE_LIBXMSS` macros, are no longer
+  recognized. wolfSSL's own wolfCrypt implementations (`wc_lms` / `wc_xmss`)
+  are now the only supported LMS/HSS and XMSS/XMSS^MT backends and are
+  selected automatically by `--enable-lms` and `--enable-xmss`.
+
 # wolfSSL Release 5.9.1 (Apr. 8, 2026)
 
 Release 5.9.1 has been developed according to wolfSSL's development and QA

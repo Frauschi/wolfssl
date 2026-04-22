@@ -1888,69 +1888,10 @@ do
   esac
 done
 
-# libxmss
-# Get the path to xmss-reference.
-ENABLED_LIBXMSS="no"
-trylibxmssdir=""
-AC_ARG_WITH([libxmss],
-    [AS_HELP_STRING([--with-libxmss=PATH],[PATH to xmss-reference root dir. (requires --enable-experimental)!])],
-    [
-        AS_IF([ test "$ENABLED_EXPERIMENTAL" != "yes" ],[ AC_MSG_ERROR([libxmss requires --enable-experimental.]) ])
-        AC_MSG_CHECKING([for libxmss])
-
-        trylibxmssdir=$withval
-
-        if test -e $trylibxmssdir; then
-            libxmss_linked=yes
-        else
-            AC_MSG_ERROR([libxmss isn't found.
-            If it's already installed, specify its path using --with-libxmss=/dir/])
-        fi
-        if test "$XMSS_VERIFY_ONLY" = "yes"; then
-            if test -e $trylibxmssdir/xmss_verify_lib.a; then
-                CPPFLAGS="$AM_CPPFLAGS -DHAVE_LIBXMSS -I$trylibxmssdir"
-                LIB_STATIC_ADD="$LIB_STATIC_ADD $trylibxmssdir/xmss_verify_lib.a"
-                enable_shared=no
-                enable_static=yes
-                libxmss_linked=yes
-            else
-                AC_MSG_ERROR([xmss_verify_lib.a isn't found.
-                If it's already installed, specify its path using --with-libxmss=/dir/])
-            fi
-        elif test -e $trylibxmssdir/xmss_lib.a; then
-            CPPFLAGS="$AM_CPPFLAGS -DHAVE_LIBXMSS -I$trylibxmssdir"
-            LIB_STATIC_ADD="$LIB_STATIC_ADD $trylibxmssdir/xmss_lib.a"
-            enable_shared=no
-            enable_static=yes
-            libxmss_linked=yes
-        else
-            AC_MSG_ERROR([libxmss isn't found.
-            If it's already installed, specify its path using --with-libxmss=/dir/])
-        fi
-
-        XMSS_ROOT=$trylibxmssdir
-
-        AC_MSG_RESULT([yes])
-        AM_CPPFLAGS="$CPPFLAGS"
-
-        AM_CFLAGS="$AM_CFLAGS -DHAVE_LIBXMSS -I$trylibxmssdir"
-        ENABLED_LIBXMSS="yes"
-        AC_SUBST([XMSS_ROOT])
-    ],
-    [XMSS_ROOT=""]
-)
-
 if test "$ENABLED_XMSS" != "no"
 then
-    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_HAVE_XMSS"
-
-    # Use hash-sigs XMSS lib if enabled.
-    if test "$ENABLED_LIBXMSS" = "yes"; then
-        ENABLED_WC_XMSS=no
-    else
-        ENABLED_WC_XMSS=yes
-        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_WC_XMSS"
-    fi
+    ENABLED_WC_XMSS=yes
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_HAVE_XMSS -DWOLFSSL_WC_XMSS"
 fi
 
 # LMS
@@ -1986,85 +1927,10 @@ do
   esac
 done
 
-# liblms
-# Get the path to the hash-sigs LMS HSS lib.
-ENABLED_LIBLMS="no"
-tryliblmsdir=""
-AC_ARG_WITH([liblms],
-    [AS_HELP_STRING([--with-liblms=PATH],[PATH to hash-sigs LMS/HSS install (default /usr/local) (requires --enable-experimental)!])],
-    [
-        AS_IF([ test "$ENABLED_EXPERIMENTAL" != "yes" ],[ AC_MSG_ERROR([liblms requires --enable-experimental.]) ])
-        AC_MSG_CHECKING([for liblms])
-
-        AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <hss.h>]], [[ param_set_t lm_type; param_set_t lm_ots_type; hss_get_public_key_len(4, &lm_type, &lm_ots_type); ]])], [ liblms_linked=yes ],[ liblms_linked=no ])
-
-        if test "x$liblms_linked" = "xno" ; then
-            if test "x$withval" != "xno" ; then
-                tryliblmsdir=$withval
-            fi
-            if test "x$withval" = "xyes" ; then
-                tryliblmsdir="/usr/local"
-            fi
-
-            # 1. If verify only build, use hss_verify.a
-            # 2. If normal build, by default use single-threaded hss_lib.a
-            # 3. If 2 not found, then use the multi-threaded hss_lib_thread.a
-            if test "$LMS_VERIFY_ONLY" = "yes"; then
-                if test -e $tryliblmsdir/hss_verify.a; then
-                    CPPFLAGS="$AM_CPPFLAGS -DHAVE_LIBLMS -I$tryliblmsdir"
-                    LIB_STATIC_ADD="$LIB_STATIC_ADD $tryliblmsdir/hss_verify.a"
-                    enable_shared=no
-                    enable_static=yes
-                    liblms_linked=yes
-                else
-                    AC_MSG_ERROR([hss_verify.a isn't found.
-                    If it's already installed, specify its path using --with-liblms=/dir/])
-                fi
-            elif test -e $tryliblmsdir/hss_lib.a; then
-                CPPFLAGS="$AM_CPPFLAGS -DHAVE_LIBLMS -I$tryliblmsdir"
-                LIB_STATIC_ADD="$LIB_STATIC_ADD $tryliblmsdir/hss_lib.a"
-                enable_shared=no
-                enable_static=yes
-                liblms_linked=yes
-            elif test -e $tryliblmsdir/hss_lib_thread.a; then
-                CPPFLAGS="$AM_CPPFLAGS -DHAVE_LIBLMS -I$tryliblmsdir"
-                LIB_STATIC_ADD="$LIB_STATIC_ADD $tryliblmsdir/hss_lib_thread.a"
-                enable_shared=no
-                enable_static=yes
-                liblms_linked=yes
-            else
-                AC_MSG_ERROR([liblms isn't found.
-                If it's already installed, specify its path using --with-liblms=/dir/])
-            fi
-
-            if test "x$liblms_linked" = "xno" ; then
-                AC_MSG_ERROR([liblms isn't found.
-                If it's already installed, specify its path using --with-liblms=/dir/])
-            fi
-
-            AC_MSG_RESULT([yes])
-            AM_CPPFLAGS="$CPPFLAGS"
-            AM_LDFLAGS="$LDFLAGS"
-        else
-            AC_MSG_RESULT([yes])
-        fi
-
-        AM_CFLAGS="$AM_CFLAGS -DHAVE_LIBLMS"
-        ENABLED_LIBLMS="yes"
-    ]
-)
-
 if test "$ENABLED_LMS" != "no"
 then
-    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_HAVE_LMS"
-
-    # Use hash-sigs LMS lib if enabled.
-    if test "$ENABLED_LIBLMS" = "yes"; then
-        ENABLED_WC_LMS=no
-    else
-        ENABLED_WC_LMS=yes
-        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_WC_LMS"
-    fi
+    ENABLED_WC_LMS=yes
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_HAVE_LMS -DWOLFSSL_WC_LMS"
 fi
 
 # SLH-DSA
@@ -11620,8 +11486,6 @@ AM_CONDITIONAL([BUILD_OCSP_STAPLING_MULTI],[test "x$ENABLED_CERTIFICATE_STATUS_R
 AM_CONDITIONAL([BUILD_OCSP_STAPLING_V2],[test "x$ENABLED_CERTIFICATE_STATUS_REQUEST_V2" = "xyes"])
 AM_CONDITIONAL([BUILD_CRL],[test "x$ENABLED_CRL" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_CRL_MONITOR],[test "x$ENABLED_CRL_MONITOR" = "xyes"])
-AM_CONDITIONAL([BUILD_LIBLMS],[test "x$ENABLED_LIBLMS" = "xyes"])
-AM_CONDITIONAL([BUILD_LIBXMSS],[test "x$ENABLED_LIBXMSS" = "xyes"])
 AM_CONDITIONAL([BUILD_LIBOQS],[test "x$ENABLED_LIBOQS" = "xyes"])
 AM_CONDITIONAL([BUILD_WNR],[test "x$ENABLED_WNR" = "xyes"])
 AM_CONDITIONAL([BUILD_SRP],[test "x$ENABLED_SRP" = "xyes" || test "x$ENABLED_USERSETTINGS" = "xyes"])
@@ -12124,9 +11988,6 @@ echo "   * LMS:                        $ENABLED_LMS"
 echo "   * LMS wolfSSL impl:           $ENABLED_WC_LMS"
 echo "   * XMSS:                       $ENABLED_XMSS"
 echo "   * XMSS wolfSSL impl:          $ENABLED_WC_XMSS"
-if test "$ENABLED_LIBXMSS" = "yes"; then
-echo "   * XMSS_ROOT:                  $XMSS_ROOT"
-fi
 echo "   * SLH-DSA                     $ENABLED_SLHDSA"
 echo "   * MLKEM:                      $ENABLED_MLKEM"
 echo "   * MLKEM wolfSSL impl:         $ENABLED_WC_MLKEM"
@@ -12187,8 +12048,6 @@ echo "   * Persistent session cache:   $ENABLED_SAVESESSION"
 echo "   * Persistent cert    cache:   $ENABLED_SAVECERT"
 echo "   * Atomic User Record Layer:   $ENABLED_ATOMICUSER"
 echo "   * Public Key Callbacks:       $ENABLED_PKCALLBACKS"
-echo "   * libxmss:                    $ENABLED_LIBXMSS"
-echo "   * liblms:                     $ENABLED_LIBLMS"
 echo "   * liboqs:                     $ENABLED_LIBOQS"
 echo "   * Whitewood netRandom:        $ENABLED_WNR"
 echo "   * Server Name Indication:     $ENABLED_SNI"
