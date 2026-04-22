@@ -1765,11 +1765,14 @@ enum Misc {
     FALCON_SA_MAJOR     = 0xFE,/* Most significant byte used with falcon sig algs */
     DILITHIUM_SA_MAJOR  = 0x09,/* Most significant byte used with dilithium sig algs */
 
-    /* These values for falcon match what OQS has defined. */
+    /* Falcon TLS SignatureAlgorithm codepoints; aligned with the values
+     * oqs-provider registers (0xFED7 and 0xFEDA). All Falcon-related TLS
+     * codepoints live under the experimental 0xFExx range reserved for
+     * OQS until FN-DSA gets an official IANA allocation. */
     FALCON_LEVEL1_SA_MAJOR = 0xFE,
-    FALCON_LEVEL1_SA_MINOR = 0xAE,
+    FALCON_LEVEL1_SA_MINOR = 0xD7,
     FALCON_LEVEL5_SA_MAJOR = 0xFE,
-    FALCON_LEVEL5_SA_MINOR = 0xB1,
+    FALCON_LEVEL5_SA_MINOR = 0xDA,
 
     /* these values for MLDSA (Dilithium) correspond to what is proposed in the
      * IETF. */
