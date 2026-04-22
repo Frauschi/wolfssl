@@ -920,7 +920,6 @@
     #ifdef CONFIG_ESP_WOLFSSL_ENABLE_MLKEM
         /* Kyber typically needs a minimum 10K stack */
         #define WOLFSSL_HAVE_MLKEM
-        #define WOLFSSL_WC_MLKEM
         #define WOLFSSL_SHA3
         #if defined(CONFIG_IDF_TARGET_ESP8266)
             /* With limited RAM, we'll disable some of the Kyber sizes: */
@@ -4661,7 +4660,7 @@ extern void uITRON4_free(void *p) ;
 #if defined(WOLFSSL_SHA3) && \
     ((defined(HAVE_FIPS) && FIPS_VERSION_LE(5,2)) || \
      (defined(HAVE_SELFTEST) && \
-      !defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_WC_DILITHIUM)))
+      !defined(WOLFSSL_HAVE_MLKEM) && !defined(HAVE_DILITHIUM)))
     #undef  WOLFSSL_NO_SHAKE128
     #define WOLFSSL_NO_SHAKE128
     #undef  WOLFSSL_NO_SHAKE256

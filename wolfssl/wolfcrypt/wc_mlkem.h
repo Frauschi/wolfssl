@@ -428,7 +428,7 @@ WOLFSSL_API int  wc_MlKemKey_Delete(MlKemKey* key, MlKemKey** key_p);
 WOLFSSL_API int wc_MlKemKey_Init(MlKemKey* key, int type, void* heap,
     int devId);
 WOLFSSL_API int wc_MlKemKey_Free(MlKemKey* key);
-#if defined(WOLF_PRIVATE_KEY_ID) && defined(WOLFSSL_WC_MLKEM)
+#if defined(WOLF_PRIVATE_KEY_ID) && defined(WOLFSSL_HAVE_MLKEM)
 WOLFSSL_API int wc_MlKemKey_Init_Id(MlKemKey* key, int type,
     const unsigned char* id, int len, void* heap, int devId);
 WOLFSSL_API int wc_MlKemKey_Init_Label(MlKemKey* key, int type,
@@ -467,7 +467,7 @@ WOLFSSL_API int wc_MlKemKey_EncodePublicKey(MlKemKey* key, unsigned char* out,
 #define wc_KyberKey_Init(type, key, heap, devId) \
         wc_MlKemKey_Init(key, type, heap, devId)
 #define wc_KyberKey_Free                    wc_MlKemKey_Free
-#if defined(WOLF_PRIVATE_KEY_ID) && defined(WOLFSSL_WC_MLKEM)
+#if defined(WOLF_PRIVATE_KEY_ID) && defined(WOLFSSL_HAVE_MLKEM)
 #define wc_KyberKey_Init_Id                 wc_MlKemKey_Init_Id
 #define wc_KyberKey_Init_Label              wc_MlKemKey_Init_Label
 #endif

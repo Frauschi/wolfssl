@@ -1868,8 +1868,6 @@ then
         AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_DILITHIUM_NO_VERIFY"
     fi
 
-    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_WC_DILITHIUM"
-    AM_CCASFLAGS="$AM_CCASFLAGS -DWOLFSSL_WC_DILITHIUM"
     test "$enable_sha3" = "" && enable_sha3=yes
     test "$enable_shake128" = "" && enable_shake128=yes
     test "$enable_shake256" = "" && enable_shake256=yes
@@ -6845,7 +6843,6 @@ then
     fi
 fi
 
-ENABLED_WC_MLKEM=no
 ENABLED_ML_KEM=unset
 ENABLED_MLKEM_MAKE_KEY=no
 ENABLED_MLKEM_ENCAPSULATE=no
@@ -6915,9 +6912,6 @@ done
 if test "$ENABLED_MLKEM" != "no"
 then
     AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_HAVE_MLKEM"
-    ENABLED_WC_MLKEM=yes
-    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_WC_MLKEM"
-    AM_CCASFLAGS="$AM_CCASFLAGS -DWOLFSSL_WC_MLKEM"
 
     if test "$ENABLED_ORIGINAL" = "yes"; then
         AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_MLKEM_KYBER"
@@ -6960,12 +6954,9 @@ then
         AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_MLKEM_NO_DECAPSULATE"
     fi
 
-    if test "$ENABLED_WC_MLKEM" = "yes"
-    then
-        test "$enable_sha3" = "" && enable_sha3=yes
-        test "$enable_shake128" = "" && enable_shake128=yes
-        test "$enable_shake256" = "" && enable_shake256=yes
-    fi
+    test "$enable_sha3" = "" && enable_sha3=yes
+    test "$enable_shake128" = "" && enable_shake128=yes
+    test "$enable_shake256" = "" && enable_shake256=yes
 fi
 
 AS_IF([ test "$ENABLED_MLKEM_STANDALONE" = "yes" && test "$ENABLED_ML_KEM" = "no" ],[AC_MSG_ERROR([ML-KEM as standalone TLS key exchange (non-hybrid) requires ML-KEM.])])
@@ -11586,7 +11577,7 @@ AM_CONDITIONAL([BUILD_CURVE448_SMALL],[test "x$ENABLED_CURVE448_SMALL" = "xyes" 
 AM_CONDITIONAL([BUILD_WC_LMS],[test "x$ENABLED_WC_LMS" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_WC_XMSS],[test "x$ENABLED_WC_XMSS" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_WC_SLHDSA],[test "x$ENABLED_SLHDSA" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
-AM_CONDITIONAL([BUILD_WC_MLKEM],[test "x$ENABLED_WC_MLKEM" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
+AM_CONDITIONAL([BUILD_WC_MLKEM],[test "x$ENABLED_MLKEM" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_DILITHIUM],[test "x$ENABLED_DILITHIUM" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_ECCSI],[test "x$ENABLED_ECCSI" = "xyes" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_SAKKE],[test "x$ENABLED_SAKKE" = "xyes" || test "x$ENABLED_USERSETTINGS" = "xyes"])
@@ -12141,7 +12132,6 @@ echo "   * XMSS_ROOT:                  $XMSS_ROOT"
 fi
 echo "   * SLH-DSA                     $ENABLED_SLHDSA"
 echo "   * MLKEM:                      $ENABLED_MLKEM"
-echo "   * MLKEM wolfSSL impl:         $ENABLED_WC_MLKEM"
 echo "   * DILITHIUM:                  $ENABLED_DILITHIUM"
 echo "   * ECCSI                       $ENABLED_ECCSI"
 echo "   * SAKKE                       $ENABLED_SAKKE"

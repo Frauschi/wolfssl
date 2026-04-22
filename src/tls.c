@@ -76,7 +76,7 @@
  *
  * Post-Quantum:
  * WOLFSSL_HAVE_MLKEM:       Enable ML-KEM (Kyber) support         default: off
- * WOLFSSL_WC_MLKEM:         Use wolfCrypt ML-KEM implementation   default: off
+ * WOLFSSL_HAVE_MLKEM:         Use wolfCrypt ML-KEM implementation   default: off
  * WOLFSSL_MLKEM_KYBER:      Use Kyber round 3 parameters          default: off
  * WOLFSSL_KYBER512:         Enable Kyber/ML-KEM-512               default: off
  * WOLFSSL_KYBER768:         Enable Kyber/ML-KEM-768               default: off
@@ -4677,7 +4677,7 @@ int TLSX_IsGroupSupported(int namedGroup)
     #endif
 #ifdef WOLFSSL_HAVE_MLKEM
 #ifndef WOLFSSL_NO_ML_KEM
-    #ifdef WOLFSSL_WC_MLKEM
+    #ifdef WOLFSSL_HAVE_MLKEM
         #ifndef WOLFSSL_NO_ML_KEM_512
             #ifndef WOLFSSL_TLS_NO_MLKEM_STANDALONE
             case WOLFSSL_ML_KEM_512:
@@ -4731,7 +4731,7 @@ int TLSX_IsGroupSupported(int namedGroup)
     #endif
 #endif /* WOLFSSL_NO_ML_KEM */
 #ifdef WOLFSSL_MLKEM_KYBER
-    #ifdef WOLFSSL_WC_MLKEM
+    #ifdef WOLFSSL_HAVE_MLKEM
         #ifdef WOLFSSL_KYBER512
             case WOLFSSL_KYBER_LEVEL1:
             case WOLFSSL_P256_KYBER_LEVEL1:
@@ -8531,7 +8531,7 @@ static int TLSX_KeyShare_GenEccKey(WOLFSSL *ssl, KeyShareEntry* kse)
 
 #ifdef WOLFSSL_HAVE_MLKEM
 #if (defined(WOLFSSL_MLKEM_CACHE_A) || \
-    (defined(HAVE_PKCS11) && defined(WOLFSSL_WC_MLKEM) && \
+    (defined(HAVE_PKCS11) && defined(WOLFSSL_HAVE_MLKEM) && \
      !defined(NO_PKCS11_MLKEM))) && \
     !defined(WOLFSSL_TLSX_PQC_MLKEM_STORE_PRIV_KEY)
     /* Store KyberKey object rather than private key bytes in key share entry.

@@ -43343,7 +43343,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t ed448_test(void)
 #endif /* HAVE_ED448 */
 
 #ifdef WOLFSSL_HAVE_MLKEM
-#ifdef WOLFSSL_WC_MLKEM /* OQS does not support KATs */
+#ifdef WOLFSSL_HAVE_MLKEM /* OQS does not support KATs */
 #if !defined(WOLFSSL_NO_KYBER512) && !defined(WOLFSSL_NO_ML_KEM_512)
 static wc_test_ret_t mlkem512_kat(void)
 {
@@ -47724,7 +47724,7 @@ out:
     return ret;
 }
 #endif /* !WOLFSSL_NO_KYBER1024 && !WOLFSSL_NO_ML_KEM_1024 */
-#endif /* WOLFSSL_WC_MLKEM */
+#endif /* WOLFSSL_HAVE_MLKEM */
 
 WOLFSSL_TEST_SUBROUTINE wc_test_ret_t mlkem_test(void)
 {
@@ -47765,7 +47765,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t mlkem_test(void)
 #endif
 #endif
 #endif
-#if defined(WOLFSSL_WC_MLKEM) && !defined(WOLFSSL_NO_MALLOC) && \
+#if defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_NO_MALLOC) && \
     !defined(WOLFSSL_MLKEM_NO_MAKE_KEY)
     MlKemKey *tmpKey = NULL;
 #endif
@@ -47954,7 +47954,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t mlkem_test(void)
         if (XMEMCMP(priv, priv2, testData[i][2]) != 0)
             ERROR_OUT(WC_TEST_RET_ENC_I(i), out);
 
-#if defined(WOLFSSL_WC_MLKEM) && !defined(WOLFSSL_NO_MALLOC)
+#if defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_NO_MALLOC)
         tmpKey = wc_MlKemKey_New(testData[i][0], HEAP_HINT, devId);
         if (tmpKey == NULL)
             ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
@@ -47965,7 +47965,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t mlkem_test(void)
 #endif
     }
 
-#ifdef WOLFSSL_WC_MLKEM
+#ifdef WOLFSSL_HAVE_MLKEM
 #if !defined(WOLFSSL_NO_KYBER512) && !defined(WOLFSSL_NO_ML_KEM_512)
     ret = mlkem512_kat();
     if (ret != 0)
@@ -47981,7 +47981,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t mlkem_test(void)
     if (ret != 0)
         goto out;
 #endif
-#endif /* WOLFSSL_WC_MLKEM */
+#endif /* WOLFSSL_HAVE_MLKEM */
 
 out:
 
@@ -51520,7 +51520,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t dilithium_test(void)
     }
 
 #ifndef WOLFSSL_NO_ML_DSA_44
-#ifdef WOLFSSL_WC_DILITHIUM
+#ifdef HAVE_DILITHIUM
 #ifndef WOLFSSL_DILITHIUM_NO_VERIFY
     ret = dilithium_param_44_vfy_test();
     if (ret != 0)
@@ -51534,7 +51534,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t dilithium_test(void)
 #endif
 #endif
 #ifndef WOLFSSL_NO_ML_DSA_65
-#ifdef WOLFSSL_WC_DILITHIUM
+#ifdef HAVE_DILITHIUM
 #ifndef WOLFSSL_DILITHIUM_NO_VERIFY
     ret = dilithium_param_65_vfy_test();
     if (ret != 0)
@@ -51548,7 +51548,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t dilithium_test(void)
 #endif
 #endif
 #ifndef WOLFSSL_NO_ML_DSA_87
-#ifdef WOLFSSL_WC_DILITHIUM
+#ifdef HAVE_DILITHIUM
 #ifndef WOLFSSL_DILITHIUM_NO_VERIFY
     ret = dilithium_param_87_vfy_test();
     if (ret != 0)
@@ -66467,14 +66467,14 @@ static int myCryptoDevCb(int devIdArg, wc_CryptoInfo* info, void* ctx)
             if ((info->pk.pqc_kem_kg.type == WC_PQC_KEM_TYPE_KYBER) &&
                 (info->pk.pqc_kem_kg.key != NULL)) {
                 MlKemKey* key = (MlKemKey*)info->pk.pqc_kem_kg.key;
-#ifdef WOLFSSL_WC_MLKEM
+#ifdef WOLFSSL_HAVE_MLKEM
                 int hashDevId = key->hash.devId;
                 int prfDevId = key->prf.devId;
 #endif
 
                 /* set devId to invalid, so software is used */
                 key->devId = INVALID_DEVID;
-#ifdef WOLFSSL_WC_MLKEM
+#ifdef WOLFSSL_HAVE_MLKEM
                 key->hash.devId = INVALID_DEVID;
                 key->prf.devId = INVALID_DEVID;
 #endif
@@ -66483,7 +66483,7 @@ static int myCryptoDevCb(int devIdArg, wc_CryptoInfo* info, void* ctx)
 
                 /* reset devId */
                 key->devId = devIdArg;
-#ifdef WOLFSSL_WC_MLKEM
+#ifdef WOLFSSL_HAVE_MLKEM
                 key->hash.devId = hashDevId;
                 key->prf.devId = prfDevId;
 #endif
@@ -66493,14 +66493,14 @@ static int myCryptoDevCb(int devIdArg, wc_CryptoInfo* info, void* ctx)
             if ((info->pk.pqc_encaps.type == WC_PQC_KEM_TYPE_KYBER) &&
                 (info->pk.pqc_encaps.key != NULL)) {
                 MlKemKey* key = (MlKemKey*)info->pk.pqc_encaps.key;
-#ifdef WOLFSSL_WC_MLKEM
+#ifdef WOLFSSL_HAVE_MLKEM
                 int hashDevId = key->hash.devId;
                 int prfDevId = key->prf.devId;
 #endif
 
                 /* set devId to invalid, so software is used */
                 key->devId = INVALID_DEVID;
-#ifdef WOLFSSL_WC_MLKEM
+#ifdef WOLFSSL_HAVE_MLKEM
                 key->hash.devId = INVALID_DEVID;
                 key->prf.devId = INVALID_DEVID;
 #endif
@@ -66512,7 +66512,7 @@ static int myCryptoDevCb(int devIdArg, wc_CryptoInfo* info, void* ctx)
 
                 /* reset devId */
                 key->devId = devIdArg;
-#ifdef WOLFSSL_WC_MLKEM
+#ifdef WOLFSSL_HAVE_MLKEM
                 key->hash.devId = hashDevId;
                 key->prf.devId = prfDevId;
 #endif
@@ -66522,14 +66522,14 @@ static int myCryptoDevCb(int devIdArg, wc_CryptoInfo* info, void* ctx)
             if ((info->pk.pqc_decaps.type == WC_PQC_KEM_TYPE_KYBER) &&
                 (info->pk.pqc_decaps.key != NULL)) {
                 MlKemKey* key = (MlKemKey*)info->pk.pqc_decaps.key;
-#ifdef WOLFSSL_WC_MLKEM
+#ifdef WOLFSSL_HAVE_MLKEM
                 int hashDevId = key->hash.devId;
                 int prfDevId = key->prf.devId;
 #endif
 
                 /* set devId to invalid, so software is used */
                 key->devId = INVALID_DEVID;
-#ifdef WOLFSSL_WC_MLKEM
+#ifdef WOLFSSL_HAVE_MLKEM
                 key->hash.devId = INVALID_DEVID;
                 key->prf.devId = INVALID_DEVID;
 #endif
@@ -66541,7 +66541,7 @@ static int myCryptoDevCb(int devIdArg, wc_CryptoInfo* info, void* ctx)
 
                 /* reset devId */
                 key->devId = devIdArg;
-#ifdef WOLFSSL_WC_MLKEM
+#ifdef WOLFSSL_HAVE_MLKEM
                 key->hash.devId = hashDevId;
                 key->prf.devId = prfDevId;
 #endif
@@ -67268,7 +67268,7 @@ static int myCryptoDevCb(int devIdArg, wc_CryptoInfo* info, void* ctx)
                     if (info->free.subType == WC_PQC_KEM_TYPE_KYBER) {
                         MlKemKey* mlkem = (MlKemKey*)info->free.obj;
                         mlkem->devId = INVALID_DEVID;
-#ifdef WOLFSSL_WC_MLKEM
+#ifdef WOLFSSL_HAVE_MLKEM
                         mlkem->hash.devId = INVALID_DEVID;
                         mlkem->prf.devId = INVALID_DEVID;
 #endif

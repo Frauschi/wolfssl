@@ -27,7 +27,7 @@
  *
  * HAVE_DILITHIUM                                             Default: OFF
  *   Enables the code in this file to be compiled.
- * WOLFSSL_WC_DILITHIUM                                       Default: OFF
+ * HAVE_DILITHIUM                                       Default: OFF
  *   Compiles the wolfSSL implementation of dilithium.
  *
  * WOLFSSL_NO_ML_DSA_44                                       Default: OFF
@@ -168,7 +168,7 @@
     #endif
 #endif
 
-#ifdef WOLFSSL_WC_DILITHIUM
+#ifdef HAVE_DILITHIUM
 
 #if defined(USE_INTEL_SPEEDUP)
 static cpuid_flags_t cpuid_flags = WC_CPUID_INITIALIZER;
@@ -10685,7 +10685,7 @@ int wc_dilithium_init_ex(dilithium_key* key, void* heap, int devId)
         key->heap = heap;
     }
 
-#if defined(WOLFSSL_WC_DILITHIUM) && defined(USE_INTEL_SPEEDUP)
+#if defined(HAVE_DILITHIUM) && defined(USE_INTEL_SPEEDUP)
     cpuid_get_flags_ex(&cpuid_flags);
 #endif
 
@@ -10779,7 +10779,7 @@ int wc_dilithium_set_level(dilithium_key* key, byte level)
     }
 
     if (ret == 0) {
-#ifdef WOLFSSL_WC_DILITHIUM
+#ifdef HAVE_DILITHIUM
         /* Get the parameters for level into key. */
         ret = dilithium_get_params(level, &key->params);
     }
@@ -10804,7 +10804,7 @@ int wc_dilithium_set_level(dilithium_key* key, byte level)
         key->pubVecSet = 0;
     #endif
 #endif
-#endif /* WOLFSSL_WC_DILITHIUM */
+#endif /* HAVE_DILITHIUM */
 
 #ifdef WOLFSSL_DILITHIUM_DYNAMIC_KEYS
         if (key->k != NULL) {
@@ -10871,7 +10871,7 @@ void wc_dilithium_free(dilithium_key* key)
             /* always continue to software cleanup */
         }
 #endif
-#ifdef WOLFSSL_WC_DILITHIUM
+#ifdef HAVE_DILITHIUM
 #ifndef WC_DILITHIUM_FIXED_ARRAY
         /* Dispose of cached items. */
     #ifdef WC_DILITHIUM_CACHE_PUB_VECTORS
@@ -11140,7 +11140,7 @@ int wc_MlDsaKey_GetSigLen(MlDsaKey* key, int* len)
 int wc_dilithium_check_key(dilithium_key* key)
 {
     int ret = 0;
-#ifdef WOLFSSL_WC_DILITHIUM
+#ifdef HAVE_DILITHIUM
     const wc_dilithium_params* params = NULL;
     sword32* a  = NULL;
     sword32* s1 = NULL;
@@ -11291,7 +11291,7 @@ int wc_dilithium_check_key(dilithium_key* key)
             ret = PUBLIC_KEY_E;
         }
     }
-#endif /* WOLFSSL_WC_DILITHIUM */
+#endif /* HAVE_DILITHIUM */
     return ret;
 }
 #endif /* WOLFSSL_DILITHIUM_CHECK_KEY */
@@ -12036,7 +12036,7 @@ int wc_Dilithium_PrivateKeyDecode(const byte* input, word32* inOutIdx,
     if (ret == 0) {
         /* Generate a key pair if seed exists and decoded key pair is ignored */
         if (seedLen != 0) {
-#if defined(WOLFSSL_WC_DILITHIUM) && !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY)
+#if defined(HAVE_DILITHIUM) && !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY)
             if (seedLen == DILITHIUM_SEED_SZ) {
                 ret = wc_dilithium_make_key_from_seed(key, seed);
             }
@@ -12272,7 +12272,7 @@ int wc_Dilithium_PublicKeyDecode(const byte* input, word32* inOutIdx,
                                                  &pubKey, &pubKeyLen,
                                                  &keyType);
                 if (ret == 0
-#ifdef WOLFSSL_WC_DILITHIUM
+#ifdef HAVE_DILITHIUM
                     && key->params == NULL
 #endif
                 ) {

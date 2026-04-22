@@ -1559,7 +1559,7 @@ static int test_dual_alg_ecdsa_mldsa(void)
     EXPECT_DECLS;
 #if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_DILITHIUM) && \
     defined(HAVE_ECC) && !defined(WC_NO_RNG) && \
-    defined(WOLFSSL_WC_DILITHIUM) && \
+    defined(HAVE_DILITHIUM) && \
     !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY) && \
     !defined(WOLFSSL_DILITHIUM_NO_SIGN) && \
     !defined(WOLFSSL_DILITHIUM_NO_VERIFY) && !defined(WOLFSSL_SMALL_STACK)
@@ -35325,7 +35325,7 @@ static int test_DhAgree_rejects_p_minus_1(void)
 static int test_mldsa_verify_hash(void)
 {
     EXPECT_DECLS;
-#if defined(HAVE_DILITHIUM) && defined(WOLFSSL_WC_DILITHIUM) && \
+#if defined(HAVE_DILITHIUM) && defined(HAVE_DILITHIUM) && \
     !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY) && \
     !defined(WOLFSSL_DILITHIUM_NO_VERIFY)
     dilithium_key key;
@@ -35543,7 +35543,7 @@ static int test_pkcs7_ori_oversized_oid(void)
 static int test_dilithium_hash(void)
 {
     EXPECT_DECLS;
-#if defined(HAVE_DILITHIUM) && defined(WOLFSSL_WC_DILITHIUM) && \
+#if defined(HAVE_DILITHIUM) && defined(HAVE_DILITHIUM) && \
     !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY) && \
     !defined(WOLFSSL_DILITHIUM_NO_VERIFY)
     dilithium_key key;
