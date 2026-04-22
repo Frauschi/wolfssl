@@ -21,7 +21,7 @@
 
 #include <wolfssl/wolfcrypt/libwolfssl_sources.h>
 
-#if defined(WOLFSSL_HAVE_LMS) && defined(WOLFSSL_WC_LMS)
+#ifdef WOLFSSL_HAVE_LMS
 #include <wolfssl/wolfcrypt/wc_lms.h>
 
 #ifdef NO_INLINE
@@ -1358,4 +1358,4 @@ const byte * wc_LmsKey_GetKidFromPrivRaw(const byte * priv, word32 privSz)
 
 #endif
 
-#endif /* WOLFSSL_HAVE_LMS && WOLFSSL_WC_LMS */
+#endif /* WOLFSSL_HAVE_LMS */

@@ -11411,10 +11411,8 @@ static void bench_lms_sign_verify(enum wc_LmsParm parm, byte* pub)
 
 #ifndef WOLFSSL_WC_LMS_SMALL
     do {
-    #ifdef WOLFSSL_WC_LMS
         key.priv.inited = 0;
         key.state = WC_LMS_STATE_PARMSET;
-    #endif
         ret = wc_LmsKey_Reload(&key);
         if (ret) {
             printf("wc_LmsKey_Reload failed: %d\n", ret);
@@ -11553,7 +11551,7 @@ void bench_lms(void)
 
 #ifndef WOLFSSL_NO_LMS_SHA256_256
 #ifdef BENCH_LMS_SLOW_KEYGEN
-#if !defined(WOLFSSL_WC_LMS) || (LMS_MAX_HEIGHT >= 15)
+#if (LMS_MAX_HEIGHT >= 15)
     bench_lms_keygen(WC_LMS_PARM_L1_H15_W2, pub);
     bench_lms_sign_verify(WC_LMS_PARM_L1_H15_W2, pub);
     bench_lms_keygen(WC_LMS_PARM_L1_H15_W4, pub);
@@ -11562,8 +11560,7 @@ void bench_lms(void)
     #define LMS_PARAMS_BENCHED
 #endif
 #endif
-#if !defined(WOLFSSL_WC_LMS) || ((LMS_MAX_LEVELS >= 2) && \
-        (LMS_MAX_HEIGHT >= 10))
+#if (LMS_MAX_LEVELS >= 2) && (LMS_MAX_HEIGHT >= 10)
     bench_lms_keygen(WC_LMS_PARM_L2_H10_W2, pub);
     bench_lms_sign_verify(WC_LMS_PARM_L2_H10_W2, pub);
     bench_lms_keygen(WC_LMS_PARM_L2_H10_W4, pub);
@@ -11575,7 +11572,7 @@ void bench_lms(void)
     bench_lms_sign_verify(WC_LMS_PARM_L2_H10_W8, pub);
 #endif
 #endif
-#if !defined(WOLFSSL_WC_LMS) || (LMS_MAX_LEVELS >= 3)
+#if (LMS_MAX_LEVELS >= 3)
     bench_lms_keygen(WC_LMS_PARM_L3_H5_W4, pub);
     bench_lms_sign_verify(WC_LMS_PARM_L3_H5_W4, pub);
     bench_lms_keygen(WC_LMS_PARM_L3_H5_W8, pub);
@@ -11583,17 +11580,16 @@ void bench_lms(void)
     #undef LMS_PARAMS_BENCHED
     #define LMS_PARAMS_BENCHED
 #endif
-#if !defined(WOLFSSL_WC_LMS) || ((LMS_MAX_LEVELS >= 3) && \
-        (LMS_MAX_HEIGHT >= 10))
+#if (LMS_MAX_LEVELS >= 3) && (LMS_MAX_HEIGHT >= 10)
     bench_lms_keygen(WC_LMS_PARM_L3_H10_W4, pub);
     bench_lms_sign_verify(WC_LMS_PARM_L3_H10_W4, pub);
 #endif
-#if !defined(WOLFSSL_WC_LMS) || (LMS_MAX_LEVELS >= 4)
+#if (LMS_MAX_LEVELS >= 4)
     bench_lms_keygen(WC_LMS_PARM_L4_H5_W8, pub);
     bench_lms_sign_verify(WC_LMS_PARM_L4_H5_W8, pub);
 #endif
 
-#if defined(WOLFSSL_WC_LMS) && !defined(LMS_PARAMS_BENCHED)
+#ifndef LMS_PARAMS_BENCHED
     bench_lms_keygen(WC_LMS_PARM_L1_H5_W1, pub);
     bench_lms_sign_verify(WC_LMS_PARM_L1_H5_W1, pub);
 #endif
@@ -11601,7 +11597,7 @@ void bench_lms(void)
 
 #ifdef WOLFSSL_LMS_SHA256_192
 #ifdef BENCH_LMS_SLOW_KEYGEN
-#if !defined(WOLFSSL_WC_LMS) || (LMS_MAX_HEIGHT >= 15)
+#if (LMS_MAX_HEIGHT >= 15)
     bench_lms_keygen(WC_LMS_PARM_SHA256_192_L1_H15_W2, pub);
     bench_lms_sign_verify(WC_LMS_PARM_SHA256_192_L1_H15_W2, pub);
     bench_lms_keygen(WC_LMS_PARM_SHA256_192_L1_H15_W4, pub);
@@ -11610,8 +11606,7 @@ void bench_lms(void)
     #define LMS_PARAMS_BENCHED
 #endif
 #endif
-#if !defined(WOLFSSL_WC_LMS) || ((LMS_MAX_LEVELS >= 2) && \
-        (LMS_MAX_HEIGHT >= 10))
+#if (LMS_MAX_LEVELS >= 2) && (LMS_MAX_HEIGHT >= 10)
     bench_lms_keygen(WC_LMS_PARM_SHA256_192_L2_H10_W2, pub);
     bench_lms_sign_verify(WC_LMS_PARM_SHA256_192_L2_H10_W2, pub);
     bench_lms_keygen(WC_LMS_PARM_SHA256_192_L2_H10_W4, pub);
@@ -11623,7 +11618,7 @@ void bench_lms(void)
     bench_lms_sign_verify(WC_LMS_PARM_SHA256_192_L2_H10_W8, pub);
 #endif
 #endif
-#if !defined(WOLFSSL_WC_LMS) || (LMS_MAX_LEVELS >= 3)
+#if (LMS_MAX_LEVELS >= 3)
     bench_lms_keygen(WC_LMS_PARM_SHA256_192_L3_H5_W4, pub);
     bench_lms_sign_verify(WC_LMS_PARM_SHA256_192_L3_H5_W4, pub);
     bench_lms_keygen(WC_LMS_PARM_SHA256_192_L3_H5_W8, pub);
@@ -11631,17 +11626,16 @@ void bench_lms(void)
     #undef LMS_PARAMS_BENCHED
     #define LMS_PARAMS_BENCHED
 #endif
-#if !defined(WOLFSSL_WC_LMS) || ((LMS_MAX_LEVELS >= 3) && \
-        (LMS_MAX_HEIGHT >= 10))
+#if (LMS_MAX_LEVELS >= 3) && (LMS_MAX_HEIGHT >= 10)
     bench_lms_keygen(WC_LMS_PARM_SHA256_192_L3_H10_W4, pub);
     bench_lms_sign_verify(WC_LMS_PARM_SHA256_192_L3_H10_W4, pub);
 #endif
-#if !defined(WOLFSSL_WC_LMS) || (LMS_MAX_LEVELS >= 4)
+#if (LMS_MAX_LEVELS >= 4)
     bench_lms_keygen(WC_LMS_PARM_SHA256_192_L4_H5_W8, pub);
     bench_lms_sign_verify(WC_LMS_PARM_SHA256_192_L4_H5_W8, pub);
 #endif
 
-#if defined(WOLFSSL_WC_LMS) && !defined(LMS_PARAMS_BENCHED)
+#ifndef LMS_PARAMS_BENCHED
     bench_lms_keygen(WC_LMS_PARM_SHA256_192_L1_H5_W1, pub);
     bench_lms_sign_verify(WC_LMS_PARM_SHA256_192_L1_H5_W1, pub);
 #endif
@@ -11722,13 +11716,6 @@ static void bench_xmss_sign_verify(const char * params)
         printf("wc_XmssKey_GetPubLen failed: %d\n", ret);
         goto exit_xmss_sign_verify;
     }
-#ifndef WOLFSSL_WC_XMSS
-    if (pkSz != XMSS_SHA256_PUBLEN) {
-        printf("error: xmss pub len: got %u, expected %d\n", pkSz,
-                XMSS_SHA256_PUBLEN);
-        goto exit_xmss_sign_verify;
-    }
-#endif
 
     ret = wc_XmssKey_GetPrivLen(&key, &skSz);
     if (ret != 0 || skSz <= 0) {

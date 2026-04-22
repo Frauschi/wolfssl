@@ -35037,8 +35037,7 @@ int stopOnFail = 0;
 int test_wc_LmsKey_sign_verify(void);
 int test_wc_LmsKey_reload_cache(void);
 
-#if defined(WOLFSSL_HAVE_LMS) && defined(WOLFSSL_WC_LMS) && \
-    !defined(WOLFSSL_LMS_VERIFY_ONLY)
+#if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_VERIFY_ONLY)
 
 #include <wolfssl/wolfcrypt/wc_lms.h>
 #include <wolfssl/wolfcrypt/lms.h>
@@ -35094,7 +35093,7 @@ static int test_lms_init_key(LmsKey* key, WC_RNG* rng)
     return 0;
 }
 
-#endif /* WOLFSSL_HAVE_LMS && WOLFSSL_WC_LMS && !WOLFSSL_LMS_VERIFY_ONLY */
+#endif /* WOLFSSL_HAVE_LMS && !WOLFSSL_LMS_VERIFY_ONLY */
 
 /*
  * Test basic LMS sign/verify with multiple signings.
@@ -35103,8 +35102,7 @@ static int test_lms_init_key(LmsKey* key, WC_RNG* rng)
 int test_wc_LmsKey_sign_verify(void)
 {
     EXPECT_DECLS;
-#if defined(WOLFSSL_HAVE_LMS) && defined(WOLFSSL_WC_LMS) && \
-    !defined(WOLFSSL_LMS_VERIFY_ONLY)
+#if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_VERIFY_ONLY)
     LmsKey  key;
     WC_RNG  rng;
     byte    msg[] = "test message for LMS signing";
@@ -35153,8 +35151,7 @@ int test_wc_LmsKey_sign_verify(void)
 int test_wc_LmsKey_reload_cache(void)
 {
     EXPECT_DECLS;
-#if defined(WOLFSSL_HAVE_LMS) && defined(WOLFSSL_WC_LMS) && \
-    !defined(WOLFSSL_LMS_VERIFY_ONLY)
+#if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_VERIFY_ONLY)
     LmsKey  key;
     LmsKey  vkey;
     WC_RNG  rng;

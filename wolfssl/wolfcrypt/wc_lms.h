@@ -90,7 +90,7 @@
 
 #include <wolfssl/wolfcrypt/types.h>
 
-#if defined(WOLFSSL_HAVE_LMS) && defined(WOLFSSL_WC_LMS)
+#ifdef WOLFSSL_HAVE_LMS
 
 #include <wolfssl/wolfcrypt/lms.h>
 #include <wolfssl/wolfcrypt/sha256.h>
@@ -507,6 +507,6 @@ int wc_hss_sigsleft(const LmsParams* params, const byte* priv_raw);
 int wc_hss_verify(LmsState* state, const byte* pub, const byte* msg,
     word32 msgSz, const byte* sig);
 
-#endif /* WOLFSSL_HAVE_LMS && WOLFSSL_WC_LMS */
+#endif /* WOLFSSL_HAVE_LMS */
 
 #endif /* WC_LMS_H */

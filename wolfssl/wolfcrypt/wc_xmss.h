@@ -40,10 +40,6 @@
     #define WC_XMSS_FULL_HASH
 #endif
 
-#if !defined(WOLFSSL_WC_XMSS)
-    #error "This code is incompatible with external implementation of XMSS."
-#endif
-
 #if (defined(WC_XMSS_SHA512) || defined(WC_XMSS_SHAKE256)) && \
         (WOLFSSL_WC_XMSS_MAX_HASH_SIZE >= 512)
     #define WC_XMSS_MAX_N               64

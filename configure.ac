@@ -1862,7 +1862,6 @@ then
 fi
 
 # XMSS
-ENABLED_WC_XMSS=no
 AC_ARG_ENABLE([xmss],
     [AS_HELP_STRING([--enable-xmss],[Enable stateful XMSS/XMSS^MT signatures (default: disabled)])],
     [ ENABLED_XMSS=$enableval ],
@@ -1890,12 +1889,10 @@ done
 
 if test "$ENABLED_XMSS" != "no"
 then
-    ENABLED_WC_XMSS=yes
-    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_HAVE_XMSS -DWOLFSSL_WC_XMSS"
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_HAVE_XMSS"
 fi
 
 # LMS
-ENABLED_WC_LMS=no
 AC_ARG_ENABLE([lms],
     [AS_HELP_STRING([--enable-lms],[Enable stateful LMS/HSS signatures (default: disabled)])],
     [ ENABLED_LMS=$enableval ],
@@ -1929,8 +1926,7 @@ done
 
 if test "$ENABLED_LMS" != "no"
 then
-    ENABLED_WC_LMS=yes
-    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_HAVE_LMS -DWOLFSSL_WC_LMS"
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_HAVE_LMS"
 fi
 
 # SLH-DSA
@@ -11437,8 +11433,8 @@ AM_CONDITIONAL([BUILD_FE448], [test "x$ENABLED_FE448" = "xyes" || test "x$ENABLE
 AM_CONDITIONAL([BUILD_GE448], [test "x$ENABLED_GE448" = "xyes" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_CURVE448],[test "x$ENABLED_CURVE448" = "xyes" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_CURVE448_SMALL],[test "x$ENABLED_CURVE448_SMALL" = "xyes" || test "x$ENABLED_USERSETTINGS" = "xyes"])
-AM_CONDITIONAL([BUILD_WC_LMS],[test "x$ENABLED_WC_LMS" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
-AM_CONDITIONAL([BUILD_WC_XMSS],[test "x$ENABLED_WC_XMSS" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
+AM_CONDITIONAL([BUILD_LMS],[test "x$ENABLED_LMS" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
+AM_CONDITIONAL([BUILD_XMSS],[test "x$ENABLED_XMSS" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_WC_SLHDSA],[test "x$ENABLED_SLHDSA" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_WC_MLKEM],[test "x$ENABLED_WC_MLKEM" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_DILITHIUM],[test "x$ENABLED_DILITHIUM" != "xno" || test "x$ENABLED_USERSETTINGS" = "xyes"])
@@ -11985,9 +11981,7 @@ echo "   * CURVE448:                   $ENABLED_CURVE448"
 echo "   * ED448:                      $ENABLED_ED448"
 echo "   * ED448 streaming:            $ENABLED_ED448_STREAM"
 echo "   * LMS:                        $ENABLED_LMS"
-echo "   * LMS wolfSSL impl:           $ENABLED_WC_LMS"
 echo "   * XMSS:                       $ENABLED_XMSS"
-echo "   * XMSS wolfSSL impl:          $ENABLED_WC_XMSS"
 echo "   * SLH-DSA                     $ENABLED_SLHDSA"
 echo "   * MLKEM:                      $ENABLED_MLKEM"
 echo "   * MLKEM wolfSSL impl:         $ENABLED_WC_MLKEM"
