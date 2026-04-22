@@ -836,23 +836,17 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
         }
 
         if (level != 0) {
-            /* Caller told us the level via the OID sum - decode directly. */
+            /* Caller told us the level via the OID sum. */
             ret = wc_falcon_set_level(key, level);
             if (ret == 0) {
                 idx = 0;
                 ret = wc_Falcon_PrivateKeyDecode(der->buffer, &idx, key,
                                                   der->length);
-                if (ret != 0) {
-                    /* Accept raw priv||pub blob for the declared level. */
-                    ret = wc_falcon_import_private_only(der->buffer,
-                                                        der->length, key);
-                }
             }
         }
         else if (*keyFormat == 0) {
-            /* Key format unknown. Try both levels as a PKCS8-wrapped key
-             * (OID drives the choice inside wc_Falcon_PrivateKeyDecode); if
-             * that fails, try raw blob matching on length. */
+            /* Key format unknown. Try both levels; the expected OID inside
+             * wc_Falcon_PrivateKeyDecode rejects non-matching DER. */
             idx = 0;
             if (wc_falcon_set_level(key, 1) == 0 &&
                 wc_Falcon_PrivateKeyDecode(der->buffer, &idx, key,
@@ -864,24 +858,6 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
                 if (wc_falcon_set_level(key, 5) == 0 &&
                     wc_Falcon_PrivateKeyDecode(der->buffer, &idx, key,
                                                der->length) == 0) {
-                    level = 5;
-                }
-            }
-            if (level == 0 &&
-                (der->length == FALCON_LEVEL1_KEY_SIZE ||
-                 der->length == FALCON_LEVEL1_PRV_KEY_SIZE)) {
-                if (wc_falcon_set_level(key, 1) == 0 &&
-                    wc_falcon_import_private_only(der->buffer, der->length,
-                                                    key) == 0) {
-                    level = 1;
-                }
-            }
-            if (level == 0 &&
-                (der->length == FALCON_LEVEL5_KEY_SIZE ||
-                 der->length == FALCON_LEVEL5_PRV_KEY_SIZE)) {
-                if (wc_falcon_set_level(key, 5) == 0 &&
-                    wc_falcon_import_private_only(der->buffer, der->length,
-                                                    key) == 0) {
                     level = 5;
                 }
             }

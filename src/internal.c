@@ -30759,9 +30759,9 @@ static int DecodePrivateKey_ex(WOLFSSL *ssl, byte keyType, const DerBuffer* key,
         /* Set start of data to beginning of buffer. */
         idx = 0;
         /* Decode the key assuming it is a Falcon private key. */
-        ret = wc_falcon_import_private_only(key->buffer,
-                                            key->length,
-                                            (falcon_key*)*hsKey);
+        ret = wc_Falcon_PrivateKeyDecode(key->buffer, &idx,
+                                          (falcon_key*)*hsKey,
+                                          key->length);
         if (ret == 0) {
             WOLFSSL_MSG("Using Falcon private key");
 
