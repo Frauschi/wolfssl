@@ -4541,10 +4541,14 @@ extern void uITRON4_free(void *p) ;
     #endif
 #endif
 
-/* liboqs now only provides Falcon. HAVE_LIBOQS must be paired with
- * HAVE_FALCON (set explicitly by --enable-falcon / WOLFSSL_FALCON). */
+/* Falcon is the only algorithm we still pull from liboqs, so the two options
+ * go together: Falcon cannot be built without liboqs, and enabling liboqs
+ * without Falcon leaves nothing for it to do. */
 #if defined(HAVE_LIBOQS) && !defined(HAVE_FALCON)
-#error "HAVE_LIBOQS requires HAVE_FALCON (enable Falcon via --enable-falcon)."
+#error "HAVE_LIBOQS without HAVE_FALCON has no effect; enable Falcon or drop liboqs."
+#endif
+#if defined(HAVE_FALCON) && !defined(HAVE_LIBOQS)
+#error "HAVE_FALCON requires HAVE_LIBOQS (enable liboqs via --with-liboqs)."
 #endif
 
 #if (defined(HAVE_LIBOQS) ||                                            \

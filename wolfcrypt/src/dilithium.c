@@ -27,8 +27,6 @@
  *
  * HAVE_DILITHIUM                                             Default: OFF
  *   Enables the code in this file to be compiled.
- * HAVE_DILITHIUM                                       Default: OFF
- *   Compiles the wolfSSL implementation of dilithium.
  *
  * WOLFSSL_NO_ML_DSA_44                                       Default: OFF
  *   Does not compile in parameter set ML-DSA-44 and any code specific to that
@@ -167,8 +165,6 @@
         #error "PRECALC and PRECALC_A are equivalent to non small mem"
     #endif
 #endif
-
-#ifdef HAVE_DILITHIUM
 
 #if defined(USE_INTEL_SPEEDUP)
 static cpuid_flags_t cpuid_flags = WC_CPUID_INITIALIZER;
@@ -10088,10 +10084,6 @@ static int dilithium_verify_ctx_hash(dilithium_key* key, const byte* ctx,
 }
 #endif /* WOLFSSL_DILITHIUM_NO_VERIFY */
 
-#else
-    #error "No dilithium implementation chosen."
-#endif
-
 #ifndef WOLFSSL_DILITHIUM_NO_MAKE_KEY
 int wc_dilithium_make_key(dilithium_key* key, WC_RNG* rng)
 {
@@ -10685,7 +10677,7 @@ int wc_dilithium_init_ex(dilithium_key* key, void* heap, int devId)
         key->heap = heap;
     }
 
-#if defined(HAVE_DILITHIUM) && defined(USE_INTEL_SPEEDUP)
+#if defined(USE_INTEL_SPEEDUP)
     cpuid_get_flags_ex(&cpuid_flags);
 #endif
 
@@ -10779,7 +10771,6 @@ int wc_dilithium_set_level(dilithium_key* key, byte level)
     }
 
     if (ret == 0) {
-#ifdef HAVE_DILITHIUM
         /* Get the parameters for level into key. */
         ret = dilithium_get_params(level, &key->params);
     }
@@ -10804,7 +10795,6 @@ int wc_dilithium_set_level(dilithium_key* key, byte level)
         key->pubVecSet = 0;
     #endif
 #endif
-#endif /* HAVE_DILITHIUM */
 
 #ifdef WOLFSSL_DILITHIUM_DYNAMIC_KEYS
         if (key->k != NULL) {
@@ -10871,7 +10861,6 @@ void wc_dilithium_free(dilithium_key* key)
             /* always continue to software cleanup */
         }
 #endif
-#ifdef HAVE_DILITHIUM
 #ifndef WC_DILITHIUM_FIXED_ARRAY
         /* Dispose of cached items. */
     #ifdef WC_DILITHIUM_CACHE_PUB_VECTORS
@@ -10888,7 +10877,6 @@ void wc_dilithium_free(dilithium_key* key)
 #ifndef USE_INTEL_SPEEDUP
         /* Free the SHAKE-128/256 object. */
         wc_Shake256_Free(&key->shake);
-#endif
 #endif
 #ifdef WOLFSSL_DILITHIUM_DYNAMIC_KEYS
         if (key->k != NULL) {
@@ -11140,7 +11128,6 @@ int wc_MlDsaKey_GetSigLen(MlDsaKey* key, int* len)
 int wc_dilithium_check_key(dilithium_key* key)
 {
     int ret = 0;
-#ifdef HAVE_DILITHIUM
     const wc_dilithium_params* params = NULL;
     sword32* a  = NULL;
     sword32* s1 = NULL;
@@ -11266,32 +11253,6 @@ int wc_dilithium_check_key(dilithium_key* key)
         /* Dispose of allocated memory. */
         XFREE(s1, key->heap, DYNAMIC_TYPE_DILITHIUM);
     }
-#else
-    /* Validate parameter. */
-    if (key == NULL) {
-        ret = BAD_FUNC_ARG;
-    }
-    if ((ret == 0) && (!key->prvKeySet)) {
-        ret = BAD_FUNC_ARG;
-    }
-    if ((ret == 0) && (!key->pubKeySet)) {
-        ret = PUBLIC_KEY_E;
-    }
-
-    if (ret == 0) {
-        int i;
-        sword32 x = 0;
-
-        /* Check the public seed is the same in private and public key. */
-        for (i = 0; i < 32; i++) {
-            x |= key->p[i] ^ key->k[i];
-        }
-
-        if (x != 0) {
-            ret = PUBLIC_KEY_E;
-        }
-    }
-#endif /* HAVE_DILITHIUM */
     return ret;
 }
 #endif /* WOLFSSL_DILITHIUM_CHECK_KEY */
@@ -12036,7 +11997,7 @@ int wc_Dilithium_PrivateKeyDecode(const byte* input, word32* inOutIdx,
     if (ret == 0) {
         /* Generate a key pair if seed exists and decoded key pair is ignored */
         if (seedLen != 0) {
-#if defined(HAVE_DILITHIUM) && !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY)
+#if !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY)
             if (seedLen == DILITHIUM_SEED_SZ) {
                 ret = wc_dilithium_make_key_from_seed(key, seed);
             }
@@ -12271,11 +12232,7 @@ int wc_Dilithium_PublicKeyDecode(const byte* input, word32* inOutIdx,
                 ret = DecodeAsymKeyPublic_Assign(input, inOutIdx, inSz,
                                                  &pubKey, &pubKeyLen,
                                                  &keyType);
-                if (ret == 0
-#ifdef HAVE_DILITHIUM
-                    && key->params == NULL
-#endif
-                ) {
+                if (ret == 0 && key->params == NULL) {
                     /* Set the security level based on the decoded key. */
                     ret = mapOidToSecLevel(keyType);
                     if (ret > 0) {

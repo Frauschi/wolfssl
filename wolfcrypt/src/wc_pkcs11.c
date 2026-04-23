@@ -69,7 +69,7 @@
 #if defined(NO_PKCS11_MLDSA) && defined(HAVE_DILITHIUM)
     #undef HAVE_DILITHIUM
 #endif
-#if defined(WOLFSSL_HAVE_MLKEM) && defined(WOLFSSL_HAVE_MLKEM)
+#if defined(WOLFSSL_HAVE_MLKEM)
     #define HAVE_PKCS11_MLKEM
 #endif
 #if defined(NO_PKCS11_MLKEM) && defined(HAVE_PKCS11_MLKEM)

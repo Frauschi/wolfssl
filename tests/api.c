@@ -35325,7 +35325,7 @@ static int test_DhAgree_rejects_p_minus_1(void)
 static int test_mldsa_verify_hash(void)
 {
     EXPECT_DECLS;
-#if defined(HAVE_DILITHIUM) && defined(HAVE_DILITHIUM) && \
+#if defined(HAVE_DILITHIUM) && \
     !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY) && \
     !defined(WOLFSSL_DILITHIUM_NO_VERIFY)
     dilithium_key key;
@@ -35543,7 +35543,7 @@ static int test_pkcs7_ori_oversized_oid(void)
 static int test_dilithium_hash(void)
 {
     EXPECT_DECLS;
-#if defined(HAVE_DILITHIUM) && defined(HAVE_DILITHIUM) && \
+#if defined(HAVE_DILITHIUM) && \
     !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY) && \
     !defined(WOLFSSL_DILITHIUM_NO_VERIFY)
     dilithium_key key;

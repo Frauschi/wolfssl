@@ -68,11 +68,9 @@
     #define WOLFSSL_DILITHIUM_CHECK_KEY
 #endif
 
-#ifdef HAVE_DILITHIUM
     #include <wolfssl/wolfcrypt/sha3.h>
 #ifndef WOLFSSL_DILITHIUM_VERIFY_ONLY
     #include <wolfssl/wolfcrypt/random.h>
-#endif
 #endif
 
 #if defined(WC_DILITHIUM_CACHE_PRIV_VECTORS) && \
@@ -89,8 +87,6 @@
 #endif
 
 /* Macros Definitions */
-
-#ifdef HAVE_DILITHIUM
 
 #ifndef WOLFSSL_DILITHIUM_ALIGNMENT
     #if defined(__arch64__)
@@ -584,8 +580,6 @@
 
 #endif
 
-#endif /* HAVE_DILITHIUM */
-
 
 #ifdef WOLF_PRIVATE_KEY_ID
 #define DILITHIUM_MAX_ID_LEN    32
@@ -594,7 +588,6 @@
 
 /* Structs */
 
-#ifdef HAVE_DILITHIUM
 typedef struct wc_dilithium_params {
     byte level;
     byte k;
@@ -617,7 +610,6 @@ typedef struct wc_dilithium_params {
     word16 pkSz;
     word16 sigSz;
 } wc_dilithium_params;
-#endif
 
 struct dilithium_key {
     byte pubKeySet;
@@ -656,7 +648,6 @@ struct dilithium_key {
     const byte* k;
 #endif
 
-#ifdef HAVE_DILITHIUM
     const wc_dilithium_params* params;
     wc_Shake shake;
 #ifndef WC_DILITHIUM_FIXED_ARRAY
@@ -704,7 +695,6 @@ struct dilithium_key {
     byte block[DILITHIUM_GEN_C_BLOCK_BYTES];
 #endif /* WOLFSSL_DILITHIUM_VERIFY_NO_MALLOC &&
         * WOLFSSL_DILITHIUM_VERIFY_SMALL_MEM */
-#endif /* HAVE_DILITHIUM */
 };
 
 #ifndef WC_DILITHIUMKEY_TYPE_DEFINED

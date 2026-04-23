@@ -302,7 +302,6 @@
 
 
 enum {
-    /* Types of Kyber keys. */
     WC_ML_KEM_512  = 0,
     WC_ML_KEM_768  = 1,
     WC_ML_KEM_1024 = 2,
