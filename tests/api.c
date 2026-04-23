@@ -1559,7 +1559,6 @@ static int test_dual_alg_ecdsa_mldsa(void)
     EXPECT_DECLS;
 #if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_DILITHIUM) && \
     defined(HAVE_ECC) && !defined(WC_NO_RNG) && \
-    defined(HAVE_DILITHIUM) && \
     !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY) && \
     !defined(WOLFSSL_DILITHIUM_NO_SIGN) && \
     !defined(WOLFSSL_DILITHIUM_NO_VERIFY) && !defined(WOLFSSL_SMALL_STACK)

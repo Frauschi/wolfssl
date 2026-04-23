@@ -68,7 +68,7 @@
     #define WOLFSSL_DILITHIUM_CHECK_KEY
 #endif
 
-    #include <wolfssl/wolfcrypt/sha3.h>
+#include <wolfssl/wolfcrypt/sha3.h>
 #ifndef WOLFSSL_DILITHIUM_VERIFY_ONLY
     #include <wolfssl/wolfcrypt/random.h>
 #endif

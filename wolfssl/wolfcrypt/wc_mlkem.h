@@ -32,6 +32,10 @@
 
 #ifdef WOLFSSL_HAVE_MLKEM
 
+#ifdef __cplusplus
+    extern "C" {
+#endif
+
 #ifdef WOLFSSL_KYBER_NO_MAKE_KEY
     #define WOLFSSL_MLKEM_NO_MAKE_KEY
 #endif
@@ -416,10 +420,6 @@ typedef struct MlKemKey {
 #endif
 } MlKemKey;
 
-
-#ifdef __cplusplus
-    extern "C" {
-#endif
 
 WOLFSSL_API MlKemKey* wc_MlKemKey_New(int type, void* heap, int devId);
 WOLFSSL_API int  wc_MlKemKey_Delete(MlKemKey* key, MlKemKey** key_p);
