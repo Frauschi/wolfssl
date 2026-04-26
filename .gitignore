@@ -57,6 +57,7 @@ ctaocrypt/benchmark/benchmark
 ctaocrypt/test/testctaocrypt
 wolfcrypt/benchmark/benchmark
 wolfcrypt/test/testwolfcrypt
+wolfcrypt/test/slhdsa_interop_one
 examples/async/async_client
 examples/async/async_server
 examples/benchmark/tls_bench
