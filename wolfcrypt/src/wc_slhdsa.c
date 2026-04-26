@@ -8470,31 +8470,31 @@ static int slhdsa_param_to_keytype(enum SlhDsaParam param)
         case SLHDSA_SHAKE256F: return SLH_DSA_SHAKE_256Fk;
     #endif
 #endif
+/* Gate SHA-2 SLH-DSA dispatch on the same per-variant macros that
+ * SlhDsaParams[] (~line 386) uses. Going through axis macros
+ * (WOLFSSL_SLHDSA_PARAM_NO_SHA2_{128,192,256,SMALL,FAST}) would let
+ * the dispatch fall through to a parameter set that the table no
+ * longer contains when a user_settings.h disables a variant via the
+ * per-variant macro alone. */
 #ifdef WOLFSSL_SLHDSA_SHA2
-#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128S
         case SLHDSA_SHA2_128S: return SLH_DSA_SHA2_128Sk;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128F
         case SLHDSA_SHA2_128F: return SLH_DSA_SHA2_128Fk;
     #endif
-#endif
-#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192S
         case SLHDSA_SHA2_192S: return SLH_DSA_SHA2_192Sk;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192F
         case SLHDSA_SHA2_192F: return SLH_DSA_SHA2_192Fk;
     #endif
-#endif
-#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256S
         case SLHDSA_SHA2_256S: return SLH_DSA_SHA2_256Sk;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256F
         case SLHDSA_SHA2_256F: return SLH_DSA_SHA2_256Fk;
     #endif
-#endif
 #endif /* WOLFSSL_SLHDSA_SHA2 */
         default:
             return BAD_FUNC_ARG;
@@ -8535,42 +8535,33 @@ static int slhdsa_keytype_to_param(int keytype)
     #endif
 #endif
 #ifdef WOLFSSL_SLHDSA_SHA2
-#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
+    /* Per-variant gating mirrors SlhDsaParams[] table; see comment on
+     * slhdsa_param_to_keytype for rationale. */
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128S
         case SLH_DSA_SHA2_128Sk: return SLHDSA_SHA2_128S;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128F
         case SLH_DSA_SHA2_128Fk: return SLHDSA_SHA2_128F;
     #endif
-#endif
-#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192S
         case SLH_DSA_SHA2_192Sk: return SLHDSA_SHA2_192S;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192F
         case SLH_DSA_SHA2_192Fk: return SLHDSA_SHA2_192F;
     #endif
-#endif
-#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256S
         case SLH_DSA_SHA2_256Sk: return SLHDSA_SHA2_256S;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256F
         case SLH_DSA_SHA2_256Fk: return SLHDSA_SHA2_256F;
     #endif
-#endif
 #endif /* WOLFSSL_SLHDSA_SHA2 */
 #ifndef WOLFSSL_SLHDSA_SHA2
         /* SHA-2 OIDs are valid SLH-DSA OIDs but the SHA-2 backend was
          * not built. Report NOT_COMPILED_IN rather than falling through
          * to the BAD_FUNC_ARG path so the caller (asn.c, x509.c, ...)
          * can render a "variant not built" diagnostic. */
-        case SLH_DSA_SHA2_128Sk:
-        case SLH_DSA_SHA2_128Fk:
-        case SLH_DSA_SHA2_192Sk:
-        case SLH_DSA_SHA2_192Fk:
-        case SLH_DSA_SHA2_256Sk:
-        case SLH_DSA_SHA2_256Fk:
+        SLHDSA_SHA2_OID_CASE_LABELS
             return NOT_COMPILED_IN;
 #endif
         default:

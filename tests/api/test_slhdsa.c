@@ -34,7 +34,6 @@
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/wolfcrypt/asn.h>
 #include <wolfssl/wolfcrypt/asn_public.h>
-#include <wolfssl/ssl.h>
 #include <tests/api/api.h>
 #include <tests/api/test_slhdsa.h>
 
@@ -1816,11 +1815,13 @@ int test_wc_slhdsa_der_decode_files(void)
 #if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
     defined(WOLFSSL_CERT_GEN) && defined(WC_ENABLE_ASYM_KEY_EXPORT) && \
     !defined(NO_CERTS)
-/* Mint a self-signed leaf cert with the given SLH-DSA key, then load it
- * into a CertManager as a trusted root and verify the cert through the
- * CertManager. The verify path drives ConfirmSignature() which is the
- * SHA-2 dispatch arm exercised by this commit, so this is the actual
- * end-to-end cert-layer integration test. */
+/* Mint a self-signed leaf cert with the given SLH-DSA key, parse it,
+ * and call ConfirmSignature() directly with the parsed components.
+ *
+ * Sister function: wolfcrypt/test/slhdsa_interop_one.c::run_one() does
+ * the same procedure out-of-process for one variant per invocation.
+ * If the cert-gen / parse / confirm-signature API surface evolves,
+ * both copies must be updated together. */
 static int slhdsa_cert_roundtrip_one(enum SlhDsaParam param, int certKeyType,
     int sigType)
 {

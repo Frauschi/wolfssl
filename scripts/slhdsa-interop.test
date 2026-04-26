@@ -15,39 +15,59 @@
 # stacks and is out of scope for this script.
 #
 # Exits 0 if every wolfSSL-side variant either PASSes or is logged as
-# SKIPPED-LOCAL (variant not compiled in). External skips never fail.
+# SKIP-LOCAL (variant not compiled in). External skips never fail.
+#
+# Build-tree layout: the helper binary may live in $builddir (out-of-tree
+# build) or under the source root (in-tree). We honour the standard
+# automake $builddir / $srcdir env vars when set; otherwise we infer
+# in-tree from the script's own location.
 
 set -u
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-cd "${ROOT_DIR}"
+if [ -n "${builddir:-}" ]; then
+    BUILD_DIR="${builddir}"
+elif [ -n "${top_builddir:-}" ]; then
+    BUILD_DIR="${top_builddir}"
+else
+    BUILD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+if [ -n "${srcdir:-}" ]; then
+    SRC_DIR="${srcdir}"
+elif [ -n "${top_srcdir:-}" ]; then
+    SRC_DIR="${top_srcdir}"
+else
+    SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+
+# Run from the source root so the helper finds certs/slhdsa/ via the
+# relative paths embedded in test_wc_slhdsa_der_decode_files (kept here
+# for parity even though slhdsa_interop_one itself does not read fixtures).
+cd "${SRC_DIR}"
 
 VARIANTS=(
     shake_128s shake_128f shake_192s shake_192f shake_256s shake_256f
     sha2_128s  sha2_128f  sha2_192s  sha2_192f  sha2_256s  sha2_256f
 )
 
-INTEROP_ONE="${ROOT_DIR}/wolfcrypt/test/slhdsa_interop_one"
+INTEROP_ONE="${BUILD_DIR}/wolfcrypt/test/slhdsa_interop_one"
 LOG_DIR="$(mktemp -d)"
 trap 'rm -rf "${LOG_DIR}"' EXIT
 
+# Counters live in this shell's variable scope. The note_* helpers below
+# mutate them in place; callers must NOT wrap stages in a subshell
+# (e.g. `( … ) | tee log`) or the counters will silently reset.
 pass=0
 fail=0
 skipped_local=0
 skipped_external=0
+probe_ok=0
 declare -a fail_list=()
 
-note_pass() { pass=$((pass + 1)); printf '  PASS:  %s\n' "$1"; }
-note_fail() { fail=$((fail + 1)); fail_list+=("$1"); printf '  FAIL:  %s\n' "$1"; }
-note_skip_local() {
-    skipped_local=$((skipped_local + 1))
-    printf '  SKIP-LOCAL:    %s\n' "$1"
-}
-note_skip_external() {
-    skipped_external=$((skipped_external + 1))
-    printf '  SKIP-EXTERNAL: %s\n' "$1"
-}
+note_pass()           { pass=$((pass + 1)); printf '  PASS:           %s\n' "$1"; }
+note_fail()           { fail=$((fail + 1)); fail_list+=("$1"); printf '  FAIL:           %s\n' "$1"; }
+note_skip_local()     { skipped_local=$((skipped_local + 1)); printf '  SKIP-LOCAL:     %s\n' "$1"; }
+note_skip_external()  { skipped_external=$((skipped_external + 1)); printf '  SKIP-EXTERNAL:  %s\n' "$1"; }
+note_probe_ok()       { probe_ok=$((probe_ok + 1)); printf '  PROBE-OK:       %s\n' "$1"; }
 
 if [ ! -x "${INTEROP_ONE}" ]; then
     echo "ERROR: ${INTEROP_ONE} missing or not executable -- did you build?" >&2
@@ -58,7 +78,8 @@ fi
 
 echo "============================================================"
 echo "  SLH-DSA cert-layer interop - per-variant"
-echo "  log dir: ${LOG_DIR}"
+echo "  log dir:    ${LOG_DIR}"
+echo "  helper:     ${INTEROP_ONE}"
 echo "============================================================"
 
 # ----- Stage 1: per-variant cert mint + verify ------------------------
@@ -70,6 +91,11 @@ for v in "${VARIANTS[@]}"; do
     case "${rc}" in
         0)  note_pass "${v}" ;;
         77) note_skip_local "${v}: $(tail -n 1 "${log}")" ;;
+        99) # Hard framework error (helper invoked wrong); abort.
+            echo "  framework error from helper: rc=99" >&2
+            cat "${log}" >&2
+            exit 1
+            ;;
         *)  note_fail "${v} (rc=${rc}): $(tail -n 1 "${log}")" ;;
     esac
 done
@@ -104,7 +130,7 @@ else
                 tail="${size: -1}"       # s or f
                 alg="sphincs${hash}${lvl}${tail}simple"
                 if printf '%s\n' "${algs}" | grep -qi "${alg}"; then
-                    printf '  PROBE-OK:      %s -> %s\n' "${v}" "${alg}"
+                    note_probe_ok "${v} -> ${alg}"
                 else
                     note_skip_external "${v}: oqs-provider lacks ${alg} (${ver})"
                 fi
@@ -114,8 +140,13 @@ else
 fi
 
 echo "============================================================"
-printf '  Summary: %d PASS, %d FAIL, %d SKIP-LOCAL, %d SKIP-EXTERNAL\n' \
-    "${pass}" "${fail}" "${skipped_local}" "${skipped_external}"
+printf '  Summary: %d PASS, %d FAIL, %d SKIP-LOCAL, %d PROBE-OK, %d SKIP-EXTERNAL\n' \
+    "${pass}" "${fail}" "${skipped_local}" "${probe_ok}" "${skipped_external}"
+total=$((pass + fail + skipped_local + probe_ok + skipped_external))
+expected=$((${#VARIANTS[@]} * 2))
+if [ "${total}" -ne "${expected}" ]; then
+    echo "  WARN: expected ${expected} per-variant outcomes, counted ${total}" >&2
+fi
 echo "============================================================"
 if [ "${fail}" -gt 0 ]; then
     printf '  Failures:\n'

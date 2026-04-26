@@ -152,6 +152,10 @@ static const struct variant_map variants[] = {
     { NULL, (enum SlhDsaParam)0, 0, 0, 0 }
 };
 
+/* Sister function: tests/api/test_slhdsa.c::slhdsa_cert_roundtrip_one()
+ * runs the same mint-parse-confirm flow in-process for the unit test
+ * harness. Keep the two in step when the cert-gen / parse / confirm
+ * APIs change. */
 static int run_one(const struct variant_map* v)
 {
     SlhDsaKey key;
@@ -260,7 +264,10 @@ int main(int argc, char** argv)
         for (v = variants; v->name != NULL; v++) {
             fprintf(stderr, "%s%s", v->name, (v + 1)->name ? " " : "\n");
         }
-        return 2;
+        /* Automake convention: 99 == hard error (test framework
+         * problem, not a regular FAIL). Wrong usage is a framework
+         * bug, not a per-variant verification failure. */
+        return 99;
     }
 
     for (v = variants; v->name != NULL; v++) {
@@ -275,7 +282,7 @@ int main(int argc, char** argv)
         }
     }
     fprintf(stderr, "%s: unknown variant\n", argv[1]);
-    return 2;
+    return 99;
 }
 
 #endif

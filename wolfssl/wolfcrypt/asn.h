@@ -2697,6 +2697,20 @@ enum cert_enums {
 
 #endif /* WOLFSSL_CERT_GEN */
 
+/* Convenience macro: emits all six RFC 9909 SHA-2 SLH-DSA OID enum
+ * values as case labels (with trailing colons), suitable for use at
+ * the head of a switch arm. Used by ConfirmSignature() and the
+ * slhdsa_keytype_to_param() NOT_COMPILED_IN dispatch arm so that
+ * adding a thirteenth OID (or removing one) requires editing this
+ * one definition rather than four open-coded case lists. */
+#define SLHDSA_SHA2_OID_CASE_LABELS \
+    case SLH_DSA_SHA2_128Sk:        \
+    case SLH_DSA_SHA2_128Fk:        \
+    case SLH_DSA_SHA2_192Sk:        \
+    case SLH_DSA_SHA2_192Fk:        \
+    case SLH_DSA_SHA2_256Sk:        \
+    case SLH_DSA_SHA2_256Fk:
+
 /* hashes type for asn */
 typedef struct AsnHashes {
     #if !defined(NO_MD5)

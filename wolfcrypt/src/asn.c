@@ -16847,21 +16847,11 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                  * specific NOT_COMPILED_IN so callers can render a
                  * "variant unavailable" diagnostic instead of the
                  * generic ASN_UNKNOWN_OID_E for "malformed DER". */
-                case SLH_DSA_SHA2_128Fk:
-                case SLH_DSA_SHA2_192Fk:
-                case SLH_DSA_SHA2_256Fk:
-                case SLH_DSA_SHA2_128Sk:
-                case SLH_DSA_SHA2_192Sk:
-                case SLH_DSA_SHA2_256Sk:
+                SLHDSA_SHA2_OID_CASE_LABELS
                     WOLFSSL_MSG("SHA2-SLH-DSA recognised but not compiled in");
                     ERROR_OUT(NOT_COMPILED_IN, exit_cs);
             #else
-                case SLH_DSA_SHA2_128Fk:
-                case SLH_DSA_SHA2_192Fk:
-                case SLH_DSA_SHA2_256Fk:
-                case SLH_DSA_SHA2_128Sk:
-                case SLH_DSA_SHA2_192Sk:
-                case SLH_DSA_SHA2_256Sk:
+                SLHDSA_SHA2_OID_CASE_LABELS
             #endif
                 case SLH_DSA_SHAKE_128Fk:
                 case SLH_DSA_SHAKE_192Fk:
@@ -16870,7 +16860,6 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                 case SLH_DSA_SHAKE_192Sk:
                 case SLH_DSA_SHAKE_256Sk:
                 {
-                    word32 idx = 0;
                     int slhDsaParam = -1;
                     sigCtx->verify = 0;
 
@@ -16920,12 +16909,14 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                         WOLFSSL_MSG("ASN Key init err: SLH-DSA");
                         goto exit_cs;
                     }
-                    /* StoreKey stashes the BIT STRING contents (the raw
-                     * public key bytes) in cert->publicKey, not the
-                     * SPKI envelope, so use ImportPublic which takes
-                     * raw bytes. _PublicKeyDecode would expect an SPKI
-                     * SEQUENCE and fail with ASN_PARSE_E here. */
-                    (void)idx;
+                    /* StoreKey() stashes the BIT STRING contents (raw
+                     * public-key bytes) in cert->publicKey, not the
+                     * SPKI envelope. Use ImportPublic which accepts
+                     * raw bytes; _PublicKeyDecode would expect an SPKI
+                     * SEQUENCE and fail with ASN_PARSE_E. The SHAKE
+                     * arms above hit the same path, so this changes
+                     * verify behaviour for every SLH-DSA variant, not
+                     * just SHA-2. */
                     if ((ret = wc_SlhDsaKey_ImportPublic(sigCtx->key.slhdsa,
                         key, keySz)) < 0) {
                         WOLFSSL_MSG("ASN Key import err: SLH-DSA");
@@ -17123,12 +17114,7 @@ int ConfirmSignature(SignatureCtx* sigCtx,
             #endif /* HAVE_DILITHIUM */
             #if defined(WOLFSSL_HAVE_SLHDSA)
             #ifdef WOLFSSL_SLHDSA_SHA2
-                case SLH_DSA_SHA2_128Fk:
-                case SLH_DSA_SHA2_192Fk:
-                case SLH_DSA_SHA2_256Fk:
-                case SLH_DSA_SHA2_128Sk:
-                case SLH_DSA_SHA2_192Sk:
-                case SLH_DSA_SHA2_256Sk:
+                SLHDSA_SHA2_OID_CASE_LABELS
             #endif
                 case SLH_DSA_SHAKE_128Fk:
                 case SLH_DSA_SHAKE_192Fk:
@@ -17344,12 +17330,7 @@ int ConfirmSignature(SignatureCtx* sigCtx,
             #endif /* HAVE_DILITHIUM */
             #ifdef WOLFSSL_HAVE_SLHDSA
             #ifdef WOLFSSL_SLHDSA_SHA2
-                case SLH_DSA_SHA2_128Fk:
-                case SLH_DSA_SHA2_192Fk:
-                case SLH_DSA_SHA2_256Fk:
-                case SLH_DSA_SHA2_128Sk:
-                case SLH_DSA_SHA2_192Sk:
-                case SLH_DSA_SHA2_256Sk:
+                SLHDSA_SHA2_OID_CASE_LABELS
             #endif
                 case SLH_DSA_SHAKE_128Fk:
                 case SLH_DSA_SHAKE_192Fk:

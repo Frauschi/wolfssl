@@ -19,6 +19,7 @@ noinst_PROGRAMS+= wolfcrypt/test/slhdsa_interop_one
 wolfcrypt_test_slhdsa_interop_one_SOURCES      = wolfcrypt/test/slhdsa_interop_one.c
 wolfcrypt_test_slhdsa_interop_one_LDADD        = src/libwolfssl@LIBSUFFIX@.la $(LIB_STATIC_ADD)
 wolfcrypt_test_slhdsa_interop_one_DEPENDENCIES = src/libwolfssl@LIBSUFFIX@.la
+DISTCLEANFILES+= wolfcrypt/test/.libs/slhdsa_interop_one
 endif
 
 endif

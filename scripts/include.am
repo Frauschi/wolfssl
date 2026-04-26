@@ -153,8 +153,12 @@ endif
 
 if BUILD_WC_SLHDSA
 dist_noinst_SCRIPTS+= scripts/slhdsa-interop.test
+noinst_PROGRAMS+= scripts/gen-slhdsa-fixtures
+scripts_gen_slhdsa_fixtures_SOURCES      = scripts/gen-slhdsa-fixtures.c
+scripts_gen_slhdsa_fixtures_LDADD        = src/libwolfssl@LIBSUFFIX@.la $(LIB_STATIC_ADD)
+scripts_gen_slhdsa_fixtures_DEPENDENCIES = src/libwolfssl@LIBSUFFIX@.la
+DISTCLEANFILES+= scripts/.libs/gen-slhdsa-fixtures
 endif
-EXTRA_DIST += scripts/gen-slhdsa-fixtures.c
 
 EXTRA_DIST += scripts/bench/bench_functions.sh
 EXTRA_DIST += scripts/benchmark_compare.sh

@@ -2,36 +2,41 @@
  *
  * Copyright (C) 2006-2026 wolfSSL Inc.
  *
- * Generator for the bench_slhdsa_*_key.der fixture files under
- * certs/slhdsa/ used by tests/api/test_slhdsa.c::
+ * Deterministic generator for the bench_slhdsa_*_key.der fixture files
+ * under certs/slhdsa/, used by tests/api/test_slhdsa.c::
  * test_wc_slhdsa_der_decode_files.
  *
- * The fixtures contain raw RFC 9909 PKCS#8 OneAsymmetricKey encodings
- * of newly-generated SLH-DSA keys. The keys themselves are random, so
- * each invocation of this generator produces different bytes; the
- * tests only check that auto-detect parses each fixture back into the
- * expected parameter set, so the actual key bits do not matter.
+ * Each fixture is produced by wc_SlhDsaKey_MakeKeyWithRandom() using
+ * fixed per-variant byte patterns for SK.seed, SK.prf, and PK.seed,
+ * so re-running this generator is byte-stable and reviewers can
+ * reproduce the committed .der bytes exactly.
  *
- * Build (from the wolfSSL source root, after ./configure --enable-slhdsa
- * --enable-keygen --enable-certgen and make):
- *
- *   gcc -DWOLFSSL_USE_OPTIONS_H -I. \
- *       scripts/gen-slhdsa-fixtures.c src/.libs/libwolfssl.a \
- *       -lpthread -lm -o scripts/gen-slhdsa-fixtures
- *
+ * This program is built as part of the wolfSSL noinst test programs
+ * when --enable-slhdsa --enable-keygen --enable-certgen are set.
  * Run from the source root:
  *
  *   ./scripts/gen-slhdsa-fixtures
- *
- * Re-running overwrites the fixtures with fresh random keys; commit
- * the resulting .der files. The generator is not built by `make` --
- * it is a one-shot tool kept under scripts/ so reviewers can always
- * regenerate the fixtures.
  */
 
+#ifdef HAVE_CONFIG_H
+    #include <config.h>
+#endif
 #include <wolfssl/options.h>
+#include <wolfssl/wolfcrypt/settings.h>
+
+#if !defined(WOLFSSL_HAVE_SLHDSA) || defined(WOLFSSL_SLHDSA_VERIFY_ONLY) || \
+    !defined(WC_ENABLE_ASYM_KEY_EXPORT)
+#include <stdio.h>
+int main(void)
+{
+    fprintf(stderr,
+        "gen-slhdsa-fixtures: build needs --enable-slhdsa --enable-keygen "
+        "--enable-certgen with wc_SlhDsaKey_PrivateKeyToDer enabled.\n");
+    return 77;
+}
+#else
+
 #include <wolfssl/wolfcrypt/wc_slhdsa.h>
-#include <wolfssl/wolfcrypt/random.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -39,11 +44,18 @@
 struct fixture {
     const char*      path;
     enum SlhDsaParam param;
+    byte             seed_byte;   /* fill byte for SK.seed */
+    byte             prf_byte;    /* fill byte for SK.prf */
+    byte             pk_byte;     /* fill byte for PK.seed */
     int              enabled;
 };
 
+/* Per-variant fill-bytes are arbitrary but distinct so each fixture
+ * gets a unique key. They are part of the on-disk fixture contract:
+ * changing them changes the committed .der bytes. */
 static const struct fixture FIXTURES[] = {
     { "certs/slhdsa/bench_slhdsa_shake128s_key.der", SLHDSA_SHAKE128S,
+      0x01, 0x02, 0x03,
 #ifdef WOLFSSL_SLHDSA_PARAM_128S
       1
 #else
@@ -51,6 +63,7 @@ static const struct fixture FIXTURES[] = {
 #endif
     },
     { "certs/slhdsa/bench_slhdsa_shake128f_key.der", SLHDSA_SHAKE128F,
+      0x11, 0x12, 0x13,
 #ifdef WOLFSSL_SLHDSA_PARAM_128F
       1
 #else
@@ -58,6 +71,7 @@ static const struct fixture FIXTURES[] = {
 #endif
     },
     { "certs/slhdsa/bench_slhdsa_shake192s_key.der", SLHDSA_SHAKE192S,
+      0x21, 0x22, 0x23,
 #ifdef WOLFSSL_SLHDSA_PARAM_192S
       1
 #else
@@ -65,6 +79,7 @@ static const struct fixture FIXTURES[] = {
 #endif
     },
     { "certs/slhdsa/bench_slhdsa_shake192f_key.der", SLHDSA_SHAKE192F,
+      0x31, 0x32, 0x33,
 #ifdef WOLFSSL_SLHDSA_PARAM_192F
       1
 #else
@@ -72,6 +87,7 @@ static const struct fixture FIXTURES[] = {
 #endif
     },
     { "certs/slhdsa/bench_slhdsa_shake256s_key.der", SLHDSA_SHAKE256S,
+      0x41, 0x42, 0x43,
 #ifdef WOLFSSL_SLHDSA_PARAM_256S
       1
 #else
@@ -79,6 +95,7 @@ static const struct fixture FIXTURES[] = {
 #endif
     },
     { "certs/slhdsa/bench_slhdsa_shake256f_key.der", SLHDSA_SHAKE256F,
+      0x51, 0x52, 0x53,
 #ifdef WOLFSSL_SLHDSA_PARAM_256F
       1
 #else
@@ -87,6 +104,7 @@ static const struct fixture FIXTURES[] = {
     },
 #ifdef WOLFSSL_SLHDSA_SHA2
     { "certs/slhdsa/bench_slhdsa_sha2_128s_key.der", SLHDSA_SHA2_128S,
+      0x61, 0x62, 0x63,
 #ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128S
       1
 #else
@@ -94,6 +112,7 @@ static const struct fixture FIXTURES[] = {
 #endif
     },
     { "certs/slhdsa/bench_slhdsa_sha2_128f_key.der", SLHDSA_SHA2_128F,
+      0x71, 0x72, 0x73,
 #ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128F
       1
 #else
@@ -101,6 +120,7 @@ static const struct fixture FIXTURES[] = {
 #endif
     },
     { "certs/slhdsa/bench_slhdsa_sha2_192s_key.der", SLHDSA_SHA2_192S,
+      0x81, 0x82, 0x83,
 #ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192S
       1
 #else
@@ -108,6 +128,7 @@ static const struct fixture FIXTURES[] = {
 #endif
     },
     { "certs/slhdsa/bench_slhdsa_sha2_192f_key.der", SLHDSA_SHA2_192F,
+      0x91, 0x92, 0x93,
 #ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192F
       1
 #else
@@ -115,6 +136,7 @@ static const struct fixture FIXTURES[] = {
 #endif
     },
     { "certs/slhdsa/bench_slhdsa_sha2_256s_key.der", SLHDSA_SHA2_256S,
+      0xa1, 0xa2, 0xa3,
 #ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256S
       1
 #else
@@ -122,6 +144,7 @@ static const struct fixture FIXTURES[] = {
 #endif
     },
     { "certs/slhdsa/bench_slhdsa_sha2_256f_key.der", SLHDSA_SHA2_256F,
+      0xb1, 0xb2, 0xb3,
 #ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256F
       1
 #else
@@ -131,11 +154,43 @@ static const struct fixture FIXTURES[] = {
 #endif
 };
 
+/* SLH-DSA seed length n bytes per variant; SK.seed, SK.prf, PK.seed
+ * are each n bytes. Categories 1/3/5 have n = 16 / 24 / 32. */
+static word32 seed_len_for(enum SlhDsaParam p)
+{
+    switch (p) {
+        case SLHDSA_SHAKE128S:
+        case SLHDSA_SHAKE128F:
+            return 16;
+        case SLHDSA_SHAKE192S:
+        case SLHDSA_SHAKE192F:
+            return 24;
+        case SLHDSA_SHAKE256S:
+        case SLHDSA_SHAKE256F:
+            return 32;
+#ifdef WOLFSSL_SLHDSA_SHA2
+        case SLHDSA_SHA2_128S:
+        case SLHDSA_SHA2_128F:
+            return 16;
+        case SLHDSA_SHA2_192S:
+        case SLHDSA_SHA2_192F:
+            return 24;
+        case SLHDSA_SHA2_256S:
+        case SLHDSA_SHA2_256F:
+            return 32;
+#endif
+    }
+    return 0;
+}
+
 static int gen_one(const struct fixture* f)
 {
     SlhDsaKey key;
-    WC_RNG rng;
+    byte sk_seed[WC_SLHDSA_MAX_SEED];
+    byte sk_prf[WC_SLHDSA_MAX_SEED];
+    byte pk_seed[WC_SLHDSA_MAX_SEED];
     byte der[64 * 1024];
+    word32 n;
     int derSz;
     int ret;
     FILE* fp;
@@ -145,17 +200,23 @@ static int gen_one(const struct fixture* f)
         return 0;
     }
 
-    if ((ret = wc_InitRng(&rng)) != 0) {
-        fprintf(stderr, "%s: wc_InitRng=%d\n", f->path, ret);
-        return ret;
+    n = seed_len_for(f->param);
+    if (n == 0) {
+        fprintf(stderr, "%s: unknown param %d\n", f->path, (int)f->param);
+        return -1;
     }
+    XMEMSET(sk_seed, f->seed_byte, n);
+    XMEMSET(sk_prf,  f->prf_byte,  n);
+    XMEMSET(pk_seed, f->pk_byte,   n);
+
     if ((ret = wc_SlhDsaKey_Init(&key, f->param, NULL, INVALID_DEVID)) != 0) {
         fprintf(stderr, "%s: wc_SlhDsaKey_Init=%d\n", f->path, ret);
-        wc_FreeRng(&rng);
         return ret;
     }
-    if ((ret = wc_SlhDsaKey_MakeKey(&key, &rng)) != 0) {
-        fprintf(stderr, "%s: wc_SlhDsaKey_MakeKey=%d\n", f->path, ret);
+    if ((ret = wc_SlhDsaKey_MakeKeyWithRandom(&key,
+            sk_seed, n, sk_prf, n, pk_seed, n)) != 0) {
+        fprintf(stderr, "%s: wc_SlhDsaKey_MakeKeyWithRandom=%d\n",
+                f->path, ret);
         goto out;
     }
     derSz = wc_SlhDsaKey_PrivateKeyToDer(&key, der, (word32)sizeof(der));
@@ -181,7 +242,6 @@ static int gen_one(const struct fixture* f)
     fclose(fp);
 out:
     wc_SlhDsaKey_Free(&key);
-    wc_FreeRng(&rng);
     return ret;
 }
 
@@ -197,3 +257,5 @@ int main(void)
     }
     return rc;
 }
+
+#endif
