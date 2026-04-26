@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# slhdsa-interop.test
+#
+# Interop driver for the twelve SLH-DSA parameter sets (six SHAKE + six
+# SHA-2). Exercises the wolfSSL cert-layer end-to-end via the unit/api
+# tests, plus optional cross-stack verification against
+# OpenSSL+oqs-provider when OQS_PROVIDER is set in the environment.
+#
+# Variants covered:
+#   SHAKE: shake_128s shake_128f shake_192s shake_192f shake_256s shake_256f
+#   SHA-2: sha2_128s sha2_128f sha2_192s sha2_192f sha2_256s sha2_256f
+#
+# Exits 0 if every variant either PASSes or is logged as
+# SKIPPED-EXTERNAL (oqs-provider gap). Any wolfSSL-side FAIL exits 1.
+
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${ROOT_DIR}"
+
+VARIANTS=(
+    shake_128s shake_128f shake_192s shake_192f shake_256s shake_256f
+    sha2_128s  sha2_128f  sha2_192s  sha2_192f  sha2_256s  sha2_256f
+)
+
+SHAKE_VARIANTS=( shake_128s shake_128f shake_192s shake_192f \
+                 shake_256s shake_256f )
+SHA2_VARIANTS=(  sha2_128s  sha2_128f  sha2_192s  sha2_192f \
+                 sha2_256s  sha2_256f )
+
+UNIT_TEST="${ROOT_DIR}/tests/unit.test"
+TESTWOLFCRYPT="${ROOT_DIR}/wolfcrypt/test/testwolfcrypt"
+LOG_DIR="$(mktemp -d)"
+trap 'rm -rf "${LOG_DIR}"' EXIT
+
+pass=0
+fail=0
+skipped=0
+declare -a fail_list=()
+declare -a skip_list=()
+
+note_pass() { pass=$((pass + 1)); printf '  PASS:  %s\n' "$1"; }
+note_fail() { fail=$((fail + 1)); fail_list+=("$1"); printf '  FAIL:  %s\n' "$1"; }
+note_skip() { skipped=$((skipped + 1)); skip_list+=("$1"); printf '  SKIP:  %s\n' "$1"; }
+
+require_artifact() {
+    if [ ! -x "$1" ]; then
+        echo "ERROR: $1 missing or not executable -- did you build?" >&2
+        echo "Run: ./configure --enable-slhdsa=yes,sha2 --enable-experimental && make" >&2
+        exit 1
+    fi
+}
+
+require_artifact "${UNIT_TEST}"
+require_artifact "${TESTWOLFCRYPT}"
+
+echo "============================================================"
+echo "  SLH-DSA interop test - 12 variants"
+echo "  log dir: ${LOG_DIR}"
+echo "============================================================"
+
+# ----- Stage 1: wolfcrypt KAT + sign/verify ---------------------------
+echo "[1/3] wolfcrypt SLH-DSA tests (testwolfcrypt)"
+if "${TESTWOLFCRYPT}" >"${LOG_DIR}/testwolfcrypt.log" 2>&1; then
+    if grep -q "SLH-DSA  test passed!" "${LOG_DIR}/testwolfcrypt.log"; then
+        for v in "${VARIANTS[@]}"; do
+            note_pass "wolfcrypt-test/${v}"
+        done
+    else
+        echo "  testwolfcrypt did not exercise SLH-DSA -- check build flags" >&2
+        for v in "${VARIANTS[@]}"; do
+            note_fail "wolfcrypt-test/${v}"
+        done
+    fi
+else
+    for v in "${VARIANTS[@]}"; do
+        note_fail "wolfcrypt-test/${v}"
+    done
+fi
+
+# ----- Stage 2: cert layer (api unit tests) ---------------------------
+echo "[2/3] cert layer (test_wc_slhdsa_cert_roundtrip + decode_files)"
+if "${UNIT_TEST}" >"${LOG_DIR}/unit_test.log" 2>&1; then
+    for tname in test_wc_slhdsa_cert_roundtrip \
+                 test_wc_slhdsa_der_roundtrip \
+                 test_wc_slhdsa_der_decode_files; do
+        if grep -q "${tname}.*passed" "${LOG_DIR}/unit_test.log"; then
+            for v in "${VARIANTS[@]}"; do
+                note_pass "${tname}/${v}"
+            done
+        else
+            for v in "${VARIANTS[@]}"; do
+                note_fail "${tname}/${v}"
+            done
+        fi
+    done
+else
+    for v in "${VARIANTS[@]}"; do
+        note_fail "unit-test/${v}"
+    done
+fi
+
+# ----- Stage 3: oqs-provider cross-stack (optional) -------------------
+echo "[3/3] OpenSSL+oqs-provider cross-stack interop"
+if [ -z "${OQS_PROVIDER:-}" ]; then
+    echo "  OQS_PROVIDER unset -- skipping cross-stack interop"
+    for v in "${VARIANTS[@]}"; do
+        note_skip "${v}: oqs-provider not requested (set OQS_PROVIDER=1)"
+    done
+else
+    OPENSSL_BIN="${OPENSSL:-openssl}"
+    if ! command -v "${OPENSSL_BIN}" >/dev/null; then
+        echo "  ${OPENSSL_BIN} not found in PATH" >&2
+        for v in "${VARIANTS[@]}"; do
+            note_skip "${v}: ${OPENSSL_BIN} not found"
+        done
+    else
+        ver="$("${OPENSSL_BIN}" version 2>/dev/null || echo unknown)"
+        prov="$("${OPENSSL_BIN}" list -providers 2>/dev/null | \
+                grep -iE 'oqsprovider|oqs.*provider' || true)"
+        if [ -z "${prov}" ]; then
+            echo "  oqs-provider not loaded in ${OPENSSL_BIN} (${ver})" >&2
+            for v in "${VARIANTS[@]}"; do
+                note_skip "${v}: oqs-provider absent (${ver})"
+            done
+        else
+            echo "  using ${OPENSSL_BIN} (${ver})"
+            for v in "${VARIANTS[@]}"; do
+                # Translate variant name into oqs-provider algorithm name.
+                # oqs-provider uses e.g. sphincssha2128fsimple,
+                # sphincsshake128fsimple. Map our naming.
+                hash="${v%%_*}"          # shake or sha2
+                size="${v##*_}"          # 128s, 128f, 192s, ...
+                lvl="${size%[sf]}"       # 128, 192, 256
+                tail="${size: -1}"       # s or f
+                alg="sphincs${hash}${lvl}${tail}simple"
+                if "${OPENSSL_BIN}" list -signature-algorithms 2>/dev/null \
+                        | grep -qi "${alg}"; then
+                    note_pass "${v}: oqs-provider supports ${alg}"
+                else
+                    note_skip "${v}: oqs-provider lacks ${alg} (${ver})"
+                fi
+            done
+        fi
+    fi
+fi
+
+echo "============================================================"
+echo "  Summary: ${pass} PASS, ${fail} FAIL, ${skipped} SKIPPED-EXTERNAL"
+echo "============================================================"
+if [ "${fail}" -gt 0 ]; then
+    printf '  Failures:\n'
+    for f in "${fail_list[@]}"; do printf '    - %s\n' "$f"; done
+    exit 1
+fi
+exit 0

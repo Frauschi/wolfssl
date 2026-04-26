@@ -12417,7 +12417,16 @@ static int CertFromX509(Cert* cert, WOLFSSL_X509* x509)
             (x509->pubKeyOID == SLH_DSA_SHAKE_256Fk) ||
             (x509->pubKeyOID == SLH_DSA_SHAKE_128Sk) ||
             (x509->pubKeyOID == SLH_DSA_SHAKE_192Sk) ||
-            (x509->pubKeyOID == SLH_DSA_SHAKE_256Sk)) {
+            (x509->pubKeyOID == SLH_DSA_SHAKE_256Sk)
+        #ifdef WOLFSSL_SLHDSA_SHA2
+            || (x509->pubKeyOID == SLH_DSA_SHA2_128Fk)
+            || (x509->pubKeyOID == SLH_DSA_SHA2_192Fk)
+            || (x509->pubKeyOID == SLH_DSA_SHA2_256Fk)
+            || (x509->pubKeyOID == SLH_DSA_SHA2_128Sk)
+            || (x509->pubKeyOID == SLH_DSA_SHA2_192Sk)
+            || (x509->pubKeyOID == SLH_DSA_SHA2_256Sk)
+        #endif
+            ) {
             enum SlhDsaParam param = SLHDSA_SHAKE128F;
 
             slhdsa = (SlhDsaKey*)XMALLOC(sizeof(SlhDsaKey), NULL,
@@ -12452,6 +12461,32 @@ static int CertFromX509(Cert* cert, WOLFSSL_X509* x509)
                 type = SLH_DSA_SHAKE_256S_TYPE;
                 param = SLHDSA_SHAKE256S;
             }
+        #ifdef WOLFSSL_SLHDSA_SHA2
+            else if (x509->pubKeyOID == SLH_DSA_SHA2_128Fk) {
+                type = SLH_DSA_SHA2_128F_TYPE;
+                param = SLHDSA_SHA2_128F;
+            }
+            else if (x509->pubKeyOID == SLH_DSA_SHA2_192Fk) {
+                type = SLH_DSA_SHA2_192F_TYPE;
+                param = SLHDSA_SHA2_192F;
+            }
+            else if (x509->pubKeyOID == SLH_DSA_SHA2_256Fk) {
+                type = SLH_DSA_SHA2_256F_TYPE;
+                param = SLHDSA_SHA2_256F;
+            }
+            else if (x509->pubKeyOID == SLH_DSA_SHA2_128Sk) {
+                type = SLH_DSA_SHA2_128S_TYPE;
+                param = SLHDSA_SHA2_128S;
+            }
+            else if (x509->pubKeyOID == SLH_DSA_SHA2_192Sk) {
+                type = SLH_DSA_SHA2_192S_TYPE;
+                param = SLHDSA_SHA2_192S;
+            }
+            else if (x509->pubKeyOID == SLH_DSA_SHA2_256Sk) {
+                type = SLH_DSA_SHA2_256S_TYPE;
+                param = SLHDSA_SHA2_256S;
+            }
+        #endif
 
             ret = wc_SlhDsaKey_Init(slhdsa, param, NULL, INVALID_DEVID);
             if (ret != 0) {
@@ -12599,7 +12634,16 @@ cleanup:
             (x509->pubKeyOID == SLH_DSA_SHAKE_256Fk) ||
             (x509->pubKeyOID == SLH_DSA_SHAKE_128Sk) ||
             (x509->pubKeyOID == SLH_DSA_SHAKE_192Sk) ||
-            (x509->pubKeyOID == SLH_DSA_SHAKE_256Sk)) {
+            (x509->pubKeyOID == SLH_DSA_SHAKE_256Sk)
+        #ifdef WOLFSSL_SLHDSA_SHA2
+            || (x509->pubKeyOID == SLH_DSA_SHA2_128Fk)
+            || (x509->pubKeyOID == SLH_DSA_SHA2_192Fk)
+            || (x509->pubKeyOID == SLH_DSA_SHA2_256Fk)
+            || (x509->pubKeyOID == SLH_DSA_SHA2_128Sk)
+            || (x509->pubKeyOID == SLH_DSA_SHA2_192Sk)
+            || (x509->pubKeyOID == SLH_DSA_SHA2_256Sk)
+        #endif
+            ) {
             wc_SlhDsaKey_Free(slhdsa);
             XFREE(slhdsa, NULL, DYNAMIC_TYPE_SLHDSA);
         }

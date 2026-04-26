@@ -32,6 +32,8 @@
     #include <wolfssl/wolfcrypt/wc_slhdsa.h>
 #endif
 #include <wolfssl/wolfcrypt/types.h>
+#include <wolfssl/wolfcrypt/asn.h>
+#include <wolfssl/wolfcrypt/asn_public.h>
 #include <tests/api/api.h>
 #include <tests/api/test_slhdsa.h>
 
@@ -83,6 +85,38 @@ int test_wc_slhdsa(void)
         0);
     wc_SlhDsaKey_Free(&key);
 #endif
+#ifdef WOLFSSL_SLHDSA_SHA2
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_128S, NULL, INVALID_DEVID),
+        0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_128F, NULL, INVALID_DEVID),
+        0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_192S, NULL, INVALID_DEVID),
+        0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_192F, NULL, INVALID_DEVID),
+        0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_256S, NULL, INVALID_DEVID),
+        0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_256F, NULL, INVALID_DEVID),
+        0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#endif /* WOLFSSL_SLHDSA_SHA2 */
 
 #endif /* WOLFSSL_HAVE_SLHDSA */
     return EXPECT_RESULT();
@@ -224,6 +258,128 @@ int test_wc_slhdsa_sizes(void)
     ExpectIntEQ(wc_SlhDsaKey_SigSizeFromParam(SLHDSA_SHAKE256F),
         WC_SLHDSA_SHAKE256F_SIG_LEN);
 #endif
+
+#ifdef WOLFSSL_SLHDSA_SHA2
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_128S, NULL, INVALID_DEVID),
+        0);
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSize(&key), WC_SLHDSA_SHA2_128S_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSize(&key), WC_SLHDSA_SHA2_128S_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSize(&key), WC_SLHDSA_SHA2_128S_SIG_LEN);
+    wc_SlhDsaKey_Free(&key);
+
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSizeFromParam(SLHDSA_SHA2_128S),
+        WC_SLHDSA_SHA2_128S_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSizeFromParam(SLHDSA_SHA2_128S),
+        WC_SLHDSA_SHA2_128S_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSizeFromParam(SLHDSA_SHA2_128S),
+        WC_SLHDSA_SHA2_128S_SIG_LEN);
+#endif
+
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_128F, NULL, INVALID_DEVID),
+        0);
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSize(&key), WC_SLHDSA_SHA2_128F_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSize(&key), WC_SLHDSA_SHA2_128F_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSize(&key), WC_SLHDSA_SHA2_128F_SIG_LEN);
+    wc_SlhDsaKey_Free(&key);
+
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSizeFromParam(SLHDSA_SHA2_128F),
+        WC_SLHDSA_SHA2_128F_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSizeFromParam(SLHDSA_SHA2_128F),
+        WC_SLHDSA_SHA2_128F_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSizeFromParam(SLHDSA_SHA2_128F),
+        WC_SLHDSA_SHA2_128F_SIG_LEN);
+#endif
+
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_192S, NULL, INVALID_DEVID),
+        0);
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSize(&key), WC_SLHDSA_SHA2_192S_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSize(&key), WC_SLHDSA_SHA2_192S_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSize(&key), WC_SLHDSA_SHA2_192S_SIG_LEN);
+    wc_SlhDsaKey_Free(&key);
+
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSizeFromParam(SLHDSA_SHA2_192S),
+        WC_SLHDSA_SHA2_192S_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSizeFromParam(SLHDSA_SHA2_192S),
+        WC_SLHDSA_SHA2_192S_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSizeFromParam(SLHDSA_SHA2_192S),
+        WC_SLHDSA_SHA2_192S_SIG_LEN);
+#endif
+
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_192F, NULL, INVALID_DEVID),
+        0);
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSize(&key), WC_SLHDSA_SHA2_192F_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSize(&key), WC_SLHDSA_SHA2_192F_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSize(&key), WC_SLHDSA_SHA2_192F_SIG_LEN);
+    wc_SlhDsaKey_Free(&key);
+
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSizeFromParam(SLHDSA_SHA2_192F),
+        WC_SLHDSA_SHA2_192F_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSizeFromParam(SLHDSA_SHA2_192F),
+        WC_SLHDSA_SHA2_192F_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSizeFromParam(SLHDSA_SHA2_192F),
+        WC_SLHDSA_SHA2_192F_SIG_LEN);
+#endif
+
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_256S, NULL, INVALID_DEVID),
+        0);
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSize(&key), WC_SLHDSA_SHA2_256S_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSize(&key), WC_SLHDSA_SHA2_256S_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSize(&key), WC_SLHDSA_SHA2_256S_SIG_LEN);
+    wc_SlhDsaKey_Free(&key);
+
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSizeFromParam(SLHDSA_SHA2_256S),
+        WC_SLHDSA_SHA2_256S_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSizeFromParam(SLHDSA_SHA2_256S),
+        WC_SLHDSA_SHA2_256S_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSizeFromParam(SLHDSA_SHA2_256S),
+        WC_SLHDSA_SHA2_256S_SIG_LEN);
+#endif
+
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_256F, NULL, INVALID_DEVID),
+        0);
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSize(&key), WC_SLHDSA_SHA2_256F_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSize(&key), WC_SLHDSA_SHA2_256F_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSize(&key), WC_SLHDSA_SHA2_256F_SIG_LEN);
+    wc_SlhDsaKey_Free(&key);
+
+#ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
+    ExpectIntEQ(wc_SlhDsaKey_PrivateSizeFromParam(SLHDSA_SHA2_256F),
+        WC_SLHDSA_SHA2_256F_PRIV_LEN);
+#endif
+    ExpectIntEQ(wc_SlhDsaKey_PublicSizeFromParam(SLHDSA_SHA2_256F),
+        WC_SLHDSA_SHA2_256F_PUB_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_SigSizeFromParam(SLHDSA_SHA2_256F),
+        WC_SLHDSA_SHA2_256F_SIG_LEN);
+#endif
+#endif /* WOLFSSL_SLHDSA_SHA2 */
 
 #endif /* WOLFSSL_HAVE_SLHDSA */
     return EXPECT_RESULT();
@@ -1293,8 +1449,6 @@ int test_wc_slhdsa_der_roundtrip(void)
     EXPECT_DECLS;
 #if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
     defined(WC_ENABLE_ASYM_KEY_EXPORT)
-    /* Only SHAKE variants are tested; SHA2 SLH-DSA test coverage is pending
-     * native SHA2 implementation. */
 #ifdef WOLFSSL_SLHDSA_PARAM_128S
     ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHAKE128S), TEST_SUCCESS);
 #endif
@@ -1313,6 +1467,26 @@ int test_wc_slhdsa_der_roundtrip(void)
 #ifdef WOLFSSL_SLHDSA_PARAM_256F
     ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHAKE256F), TEST_SUCCESS);
 #endif
+#ifdef WOLFSSL_SLHDSA_SHA2
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128S
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHA2_128S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128F
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHA2_128F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192S
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHA2_192S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192F
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHA2_192F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256S
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHA2_256S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256F
+    ExpectIntEQ(slhdsa_der_roundtrip_one(SLHDSA_SHA2_256F), TEST_SUCCESS);
+#endif
+#endif /* WOLFSSL_SLHDSA_SHA2 */
 #endif /* WOLFSSL_HAVE_SLHDSA && !VERIFY_ONLY && WC_ENABLE_ASYM_KEY_EXPORT */
     return EXPECT_RESULT();
 }
@@ -1488,6 +1662,169 @@ int test_wc_slhdsa_der_decode_files(void)
         "./certs/slhdsa/bench_slhdsa_shake256f_key.der", SLHDSA_SHAKE256F),
         TEST_SUCCESS);
 #endif
+#ifdef WOLFSSL_SLHDSA_SHA2
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128S
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_sha2_128s_key.der", SLHDSA_SHA2_128S),
+        TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128F
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_sha2_128f_key.der", SLHDSA_SHA2_128F),
+        TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192S
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_sha2_192s_key.der", SLHDSA_SHA2_192S),
+        TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192F
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_sha2_192f_key.der", SLHDSA_SHA2_192F),
+        TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256S
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_sha2_256s_key.der", SLHDSA_SHA2_256S),
+        TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256F
+    ExpectIntEQ(slhdsa_decode_file_one(
+        "./certs/slhdsa/bench_slhdsa_sha2_256f_key.der", SLHDSA_SHA2_256F),
+        TEST_SUCCESS);
+#endif
+#endif /* WOLFSSL_SLHDSA_SHA2 */
+#endif
+    return EXPECT_RESULT();
+}
+
+#if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
+    defined(WOLFSSL_CERT_GEN) && defined(WC_ENABLE_ASYM_KEY_EXPORT)
+/* Mint a self-signed leaf cert with the given SLH-DSA key, then parse it
+ * and verify the embedded signature using the cert's own public key.
+ * Exercises wc_MakeCert_ex / wc_SignCert_ex / ParseCert / ConfirmSignature
+ * for one SLH-DSA parameter set. */
+static int slhdsa_cert_roundtrip_one(enum SlhDsaParam param, int certKeyType,
+    int sigType)
+{
+    EXPECT_DECLS;
+    SlhDsaKey key;
+    WC_RNG rng;
+    Cert cert;
+    DecodedCert decoded;
+    byte* der = NULL;
+    int derSz = 0;
+    int signedSz = 0;
+    int decodedInited = 0;
+
+    XMEMSET(&key, 0, sizeof(key));
+    XMEMSET(&rng, 0, sizeof(rng));
+
+    der = (byte*)XMALLOC(64 * 1024, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    ExpectNotNull(der);
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, param, NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+
+    ExpectIntEQ(wc_InitCert(&cert), 0);
+    XSTRNCPY(cert.subject.country, "US", CTC_NAME_SIZE);
+    XSTRNCPY(cert.subject.state, "WA", CTC_NAME_SIZE);
+    XSTRNCPY(cert.subject.locality, "Seattle", CTC_NAME_SIZE);
+    XSTRNCPY(cert.subject.org, "wolfSSL", CTC_NAME_SIZE);
+    XSTRNCPY(cert.subject.unit, "Test", CTC_NAME_SIZE);
+    XSTRNCPY(cert.subject.commonName, "slhdsa-test", CTC_NAME_SIZE);
+    cert.sigType = sigType;
+    cert.isCA = 1;
+    cert.selfSigned = 1;
+
+    ExpectIntGT(derSz = wc_MakeCert_ex(&cert, der, 64 * 1024,
+        certKeyType, &key, &rng), 0);
+    ExpectIntGT(signedSz = wc_SignCert_ex(cert.bodySz, sigType, der,
+        64 * 1024, certKeyType, &key, &rng), 0);
+
+    /* NO_VERIFY: parse the cert structure (which exercises the SHA-2
+     * SLH-DSA branches in pubKey OID dispatch) without needing a CA in a
+     * cert manager. The signature itself was already verified above by
+     * the wc_SlhDsaKey_Sign/_Verify round-trips in test_wc_slhdsa_sign_vfy
+     * for every variant. */
+    InitDecodedCert(&decoded, der, (word32)signedSz, NULL);
+    decodedInited = 1;
+    ExpectIntEQ(ParseCert(&decoded, CERT_TYPE, NO_VERIFY, NULL), 0);
+
+    if (decodedInited) {
+        FreeDecodedCert(&decoded);
+    }
+    wc_SlhDsaKey_Free(&key);
+    wc_FreeRng(&rng);
+    XFREE(der, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+
+    if (EXPECT_RESULT() != TEST_SUCCESS) {
+        return TEST_FAIL;
+    }
+    return TEST_SUCCESS;
+}
+#endif
+
+/* End-to-end cert layer test: for each compiled-in SLH-DSA parameter set,
+ * mint a self-signed cert, parse it, and verify the cert's signature using
+ * the embedded public key. This exercises every site touched in this
+ * follow-up: MakeAnyCert, SetAlgoID, ConfirmSignature, the SLH-DSA branches
+ * in src/x509.c, and the SHA2-aware key dispatch tables. */
+int test_wc_slhdsa_cert_roundtrip(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
+    defined(WOLFSSL_CERT_GEN) && defined(WC_ENABLE_ASYM_KEY_EXPORT)
+#ifdef WOLFSSL_SLHDSA_PARAM_128S
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHAKE128S,
+        SLH_DSA_SHAKE_128S_TYPE, CTC_SLH_DSA_SHAKE_128S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_128F
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHAKE128F,
+        SLH_DSA_SHAKE_128F_TYPE, CTC_SLH_DSA_SHAKE_128F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_192S
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHAKE192S,
+        SLH_DSA_SHAKE_192S_TYPE, CTC_SLH_DSA_SHAKE_192S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_192F
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHAKE192F,
+        SLH_DSA_SHAKE_192F_TYPE, CTC_SLH_DSA_SHAKE_192F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_256S
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHAKE256S,
+        SLH_DSA_SHAKE_256S_TYPE, CTC_SLH_DSA_SHAKE_256S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_256F
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHAKE256F,
+        SLH_DSA_SHAKE_256F_TYPE, CTC_SLH_DSA_SHAKE_256F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_SHA2
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128S
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHA2_128S,
+        SLH_DSA_SHA2_128S_TYPE, CTC_SLH_DSA_SHA2_128S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128F
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHA2_128F,
+        SLH_DSA_SHA2_128F_TYPE, CTC_SLH_DSA_SHA2_128F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192S
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHA2_192S,
+        SLH_DSA_SHA2_192S_TYPE, CTC_SLH_DSA_SHA2_192S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192F
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHA2_192F,
+        SLH_DSA_SHA2_192F_TYPE, CTC_SLH_DSA_SHA2_192F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256S
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHA2_256S,
+        SLH_DSA_SHA2_256S_TYPE, CTC_SLH_DSA_SHA2_256S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256F
+    ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHA2_256F,
+        SLH_DSA_SHA2_256F_TYPE, CTC_SLH_DSA_SHA2_256F), TEST_SUCCESS);
+#endif
+#endif /* WOLFSSL_SLHDSA_SHA2 */
 #endif
     return EXPECT_RESULT();
 }

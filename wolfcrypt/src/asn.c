@@ -9165,7 +9165,16 @@ int wc_CheckPrivateKey(const byte* privKey, word32 privKeySz,
         (ks == SLH_DSA_SHAKE_256Fk) ||
         (ks == SLH_DSA_SHAKE_128Sk) ||
         (ks == SLH_DSA_SHAKE_192Sk) ||
-        (ks == SLH_DSA_SHAKE_256Sk)) {
+        (ks == SLH_DSA_SHAKE_256Sk)
+    #ifdef WOLFSSL_SLHDSA_SHA2
+        || (ks == SLH_DSA_SHA2_128Fk)
+        || (ks == SLH_DSA_SHA2_192Fk)
+        || (ks == SLH_DSA_SHA2_256Fk)
+        || (ks == SLH_DSA_SHA2_128Sk)
+        || (ks == SLH_DSA_SHA2_192Sk)
+        || (ks == SLH_DSA_SHA2_256Sk)
+    #endif
+        ) {
         WC_DECLARE_VAR(key_pair, SlhDsaKey, 1, 0);
         word32     keyIdx = 0;
         int        slhDsaParam = -1;
@@ -9191,6 +9200,26 @@ int wc_CheckPrivateKey(const byte* privKey, word32 privKeySz,
         else if (ks == SLH_DSA_SHAKE_256Sk) {
             slhDsaParam = SLHDSA_SHAKE256S;
         }
+    #ifdef WOLFSSL_SLHDSA_SHA2
+        else if (ks == SLH_DSA_SHA2_128Fk) {
+            slhDsaParam = SLHDSA_SHA2_128F;
+        }
+        else if (ks == SLH_DSA_SHA2_192Fk) {
+            slhDsaParam = SLHDSA_SHA2_192F;
+        }
+        else if (ks == SLH_DSA_SHA2_256Fk) {
+            slhDsaParam = SLHDSA_SHA2_256F;
+        }
+        else if (ks == SLH_DSA_SHA2_128Sk) {
+            slhDsaParam = SLHDSA_SHA2_128S;
+        }
+        else if (ks == SLH_DSA_SHA2_192Sk) {
+            slhDsaParam = SLHDSA_SHA2_192S;
+        }
+        else if (ks == SLH_DSA_SHA2_256Sk) {
+            slhDsaParam = SLHDSA_SHA2_256S;
+        }
+    #endif
 
         if (slhDsaParam < 0) {
             WC_FREE_VAR_EX(key_pair, NULL, DYNAMIC_TYPE_SLHDSA);
@@ -9672,12 +9701,11 @@ int wc_GetKeyOID(byte* key, word32 keySz, const byte** curveOID, word32* oidSz,
             return MEMORY_E;
 
         /* wc_SlhDsaKey_PrivateKeyDecode auto-detects the parameter set from
-         * the OID in the DER encoding, so a single call handles all six
-         * SHAKE variants. SHA2 variants are not supported by the native
-         * implementation. The initial parameter is only a placeholder; it is
-         * overwritten by the decoder. Pick whichever variant is compiled in
-         * so wc_SlhDsaKey_Init does not fail with NOT_COMPILED_IN when a
-         * specific variant (like 128F) is disabled. */
+         * the OID in the DER encoding, so a single call handles all twelve
+         * SLH-DSA variants. The initial parameter is only a placeholder;
+         * it is overwritten by the decoder. Pick whichever variant is
+         * compiled in so wc_SlhDsaKey_Init does not fail with
+         * NOT_COMPILED_IN when a specific variant (like 128F) is disabled. */
     #if defined(WOLFSSL_SLHDSA_PARAM_128F)
         placeholder = SLHDSA_SHAKE128F;
     #elif defined(WOLFSSL_SLHDSA_PARAM_128S)
@@ -9714,6 +9742,26 @@ int wc_GetKeyOID(byte* key, word32 keySz, const byte** curveOID, word32* oidSz,
                     case SLHDSA_SHAKE256F:
                         *algoID = SLH_DSA_SHAKE_256Fk;
                         break;
+                #ifdef WOLFSSL_SLHDSA_SHA2
+                    case SLHDSA_SHA2_128S:
+                        *algoID = SLH_DSA_SHA2_128Sk;
+                        break;
+                    case SLHDSA_SHA2_128F:
+                        *algoID = SLH_DSA_SHA2_128Fk;
+                        break;
+                    case SLHDSA_SHA2_192S:
+                        *algoID = SLH_DSA_SHA2_192Sk;
+                        break;
+                    case SLHDSA_SHA2_192F:
+                        *algoID = SLH_DSA_SHA2_192Fk;
+                        break;
+                    case SLHDSA_SHA2_256S:
+                        *algoID = SLH_DSA_SHA2_256Sk;
+                        break;
+                    case SLHDSA_SHA2_256F:
+                        *algoID = SLH_DSA_SHA2_256Fk;
+                        break;
+                #endif
                     default:
                         WOLFSSL_MSG("Unexpected SLH-DSA parameter set");
                         break;
@@ -16794,19 +16842,14 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                 }
             #endif /* HAVE_DILITHIUM */
             #if defined(WOLFSSL_HAVE_SLHDSA)
+            #ifdef WOLFSSL_SLHDSA_SHA2
                 case SLH_DSA_SHA2_128Fk:
                 case SLH_DSA_SHA2_192Fk:
                 case SLH_DSA_SHA2_256Fk:
                 case SLH_DSA_SHA2_128Sk:
                 case SLH_DSA_SHA2_192Sk:
                 case SLH_DSA_SHA2_256Sk:
-                    /* SHA2-SLH-DSA OIDs are recognized by the ASN layer but
-                     * not implemented by the native backend. Return a
-                     * specific error instead of falling through to the
-                     * generic unknown-OID path so callers can distinguish
-                     * "unsupported variant" from "malformed DER". */
-                    WOLFSSL_MSG("SHA2-SLH-DSA not supported by native backend");
-                    ERROR_OUT(NOT_COMPILED_IN, exit_cs);
+            #endif
                 case SLH_DSA_SHAKE_128Fk:
                 case SLH_DSA_SHAKE_192Fk:
                 case SLH_DSA_SHAKE_256Fk:
@@ -16830,6 +16873,20 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                         slhDsaParam = SLHDSA_SHAKE192S;
                     else if (keyOID == SLH_DSA_SHAKE_256Sk)
                         slhDsaParam = SLHDSA_SHAKE256S;
+                #ifdef WOLFSSL_SLHDSA_SHA2
+                    else if (keyOID == SLH_DSA_SHA2_128Fk)
+                        slhDsaParam = SLHDSA_SHA2_128F;
+                    else if (keyOID == SLH_DSA_SHA2_192Fk)
+                        slhDsaParam = SLHDSA_SHA2_192F;
+                    else if (keyOID == SLH_DSA_SHA2_256Fk)
+                        slhDsaParam = SLHDSA_SHA2_256F;
+                    else if (keyOID == SLH_DSA_SHA2_128Sk)
+                        slhDsaParam = SLHDSA_SHA2_128S;
+                    else if (keyOID == SLH_DSA_SHA2_192Sk)
+                        slhDsaParam = SLHDSA_SHA2_192S;
+                    else if (keyOID == SLH_DSA_SHA2_256Sk)
+                        slhDsaParam = SLHDSA_SHA2_256S;
+                #endif
 
                     if (slhDsaParam < 0) {
                         ERROR_OUT(ASN_UNKNOWN_OID_E, exit_cs);
@@ -17046,6 +17103,14 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                 }
             #endif /* HAVE_DILITHIUM */
             #if defined(WOLFSSL_HAVE_SLHDSA)
+            #ifdef WOLFSSL_SLHDSA_SHA2
+                case SLH_DSA_SHA2_128Fk:
+                case SLH_DSA_SHA2_192Fk:
+                case SLH_DSA_SHA2_256Fk:
+                case SLH_DSA_SHA2_128Sk:
+                case SLH_DSA_SHA2_192Sk:
+                case SLH_DSA_SHA2_256Sk:
+            #endif
                 case SLH_DSA_SHAKE_128Fk:
                 case SLH_DSA_SHAKE_192Fk:
                 case SLH_DSA_SHAKE_256Fk:
@@ -17259,6 +17324,14 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                     break;
             #endif /* HAVE_DILITHIUM */
             #ifdef WOLFSSL_HAVE_SLHDSA
+            #ifdef WOLFSSL_SLHDSA_SHA2
+                case SLH_DSA_SHA2_128Fk:
+                case SLH_DSA_SHA2_192Fk:
+                case SLH_DSA_SHA2_256Fk:
+                case SLH_DSA_SHA2_128Sk:
+                case SLH_DSA_SHA2_192Sk:
+                case SLH_DSA_SHA2_256Sk:
+            #endif
                 case SLH_DSA_SHAKE_128Fk:
                 case SLH_DSA_SHAKE_192Fk:
                 case SLH_DSA_SHAKE_256Fk:
@@ -23214,6 +23287,21 @@ static wcchar END_PUB_KEY          = "-----END PUBLIC KEY-----";
     static wcchar END_SLH_DSA_SHAKE_192S_PRIV   = "-----END SLH_DSA_SHAKE_192S PRIVATE KEY-----";
     static wcchar BEGIN_SLH_DSA_SHAKE_256S_PRIV = "-----BEGIN SLH_DSA_SHAKE_256S PRIVATE KEY-----";
     static wcchar END_SLH_DSA_SHAKE_256S_PRIV   = "-----END SLH_DSA_SHAKE_256S PRIVATE KEY-----";
+#ifdef WOLFSSL_SLHDSA_SHA2
+    static wcchar BEGIN_SLH_DSA_SHA2_128F_PRIV = "-----BEGIN SLH_DSA_SHA2_128F PRIVATE KEY-----";
+    static wcchar END_SLH_DSA_SHA2_128F_PRIV   = "-----END SLH_DSA_SHA2_128F PRIVATE KEY-----";
+    static wcchar BEGIN_SLH_DSA_SHA2_192F_PRIV = "-----BEGIN SLH_DSA_SHA2_192F PRIVATE KEY-----";
+    static wcchar END_SLH_DSA_SHA2_192F_PRIV   = "-----END SLH_DSA_SHA2_192F PRIVATE KEY-----";
+    static wcchar BEGIN_SLH_DSA_SHA2_256F_PRIV = "-----BEGIN SLH_DSA_SHA2_256F PRIVATE KEY-----";
+    static wcchar END_SLH_DSA_SHA2_256F_PRIV   = "-----END SLH_DSA_SHA2_256F PRIVATE KEY-----";
+
+    static wcchar BEGIN_SLH_DSA_SHA2_128S_PRIV = "-----BEGIN SLH_DSA_SHA2_128S PRIVATE KEY-----";
+    static wcchar END_SLH_DSA_SHA2_128S_PRIV   = "-----END SLH_DSA_SHA2_128S PRIVATE KEY-----";
+    static wcchar BEGIN_SLH_DSA_SHA2_192S_PRIV = "-----BEGIN SLH_DSA_SHA2_192S PRIVATE KEY-----";
+    static wcchar END_SLH_DSA_SHA2_192S_PRIV   = "-----END SLH_DSA_SHA2_192S PRIVATE KEY-----";
+    static wcchar BEGIN_SLH_DSA_SHA2_256S_PRIV = "-----BEGIN SLH_DSA_SHA2_256S PRIVATE KEY-----";
+    static wcchar END_SLH_DSA_SHA2_256S_PRIV   = "-----END SLH_DSA_SHA2_256S PRIVATE KEY-----";
+#endif /* WOLFSSL_SLHDSA_SHA2 */
 #endif /* WOLFSSL_HAVE_SLHDSA */
 
 const int pem_struct_min_sz = XSTR_SIZEOF("-----BEGIN X509 CRL-----"
@@ -23413,6 +23501,38 @@ int wc_PemGetHeaderFooter(int type, const char** header, const char** footer)
             if (footer) *footer = END_SLH_DSA_SHAKE_256S_PRIV;
             ret = 0;
             break;
+    #ifdef WOLFSSL_SLHDSA_SHA2
+        case SLH_DSA_SHA2_128F_TYPE:
+            if (header) *header = BEGIN_SLH_DSA_SHA2_128F_PRIV;
+            if (footer) *footer = END_SLH_DSA_SHA2_128F_PRIV;
+            ret = 0;
+            break;
+        case SLH_DSA_SHA2_192F_TYPE:
+            if (header) *header = BEGIN_SLH_DSA_SHA2_192F_PRIV;
+            if (footer) *footer = END_SLH_DSA_SHA2_192F_PRIV;
+            ret = 0;
+            break;
+        case SLH_DSA_SHA2_256F_TYPE:
+            if (header) *header = BEGIN_SLH_DSA_SHA2_256F_PRIV;
+            if (footer) *footer = END_SLH_DSA_SHA2_256F_PRIV;
+            ret = 0;
+            break;
+        case SLH_DSA_SHA2_128S_TYPE:
+            if (header) *header = BEGIN_SLH_DSA_SHA2_128S_PRIV;
+            if (footer) *footer = END_SLH_DSA_SHA2_128S_PRIV;
+            ret = 0;
+            break;
+        case SLH_DSA_SHA2_192S_TYPE:
+            if (header) *header = BEGIN_SLH_DSA_SHA2_192S_PRIV;
+            if (footer) *footer = END_SLH_DSA_SHA2_192S_PRIV;
+            ret = 0;
+            break;
+        case SLH_DSA_SHA2_256S_TYPE:
+            if (header) *header = BEGIN_SLH_DSA_SHA2_256S_PRIV;
+            if (footer) *footer = END_SLH_DSA_SHA2_256S_PRIV;
+            ret = 0;
+            break;
+    #endif /* WOLFSSL_SLHDSA_SHA2 */
 #endif /* WOLFSSL_HAVE_SLHDSA */
         case PUBLICKEY_TYPE:
         case ECC_PUBLICKEY_TYPE:
@@ -26335,6 +26455,14 @@ static int EncodePublicKey(int keyType, byte* output, int outLen,
         case SLH_DSA_SHAKE_128S_KEY:
         case SLH_DSA_SHAKE_192S_KEY:
         case SLH_DSA_SHAKE_256S_KEY:
+        #ifdef WOLFSSL_SLHDSA_SHA2
+        case SLH_DSA_SHA2_128F_KEY:
+        case SLH_DSA_SHA2_192F_KEY:
+        case SLH_DSA_SHA2_256F_KEY:
+        case SLH_DSA_SHA2_128S_KEY:
+        case SLH_DSA_SHA2_192S_KEY:
+        case SLH_DSA_SHA2_256S_KEY:
+        #endif
             ret = wc_SlhDsaKey_PublicKeyToDer(slhDsaKey, output,
                                             (word32)outLen, 1);
             if (ret <= 0) {
@@ -27085,8 +27213,13 @@ static int InternalSignCb(const byte* in, word32 inLen,
 #if defined(WOLFSSL_HAVE_SLHDSA)
     if ((keyType == SLH_DSA_SHAKE_128F_TYPE || keyType == SLH_DSA_SHAKE_192F_TYPE ||
         keyType == SLH_DSA_SHAKE_256F_TYPE || keyType == SLH_DSA_SHAKE_128S_TYPE ||
-        keyType == SLH_DSA_SHAKE_192S_TYPE || keyType == SLH_DSA_SHAKE_256S_TYPE) &&
-        signCtx->key) {
+        keyType == SLH_DSA_SHAKE_192S_TYPE || keyType == SLH_DSA_SHAKE_256S_TYPE
+    #ifdef WOLFSSL_SLHDSA_SHA2
+        || keyType == SLH_DSA_SHA2_128F_TYPE || keyType == SLH_DSA_SHA2_192F_TYPE ||
+        keyType == SLH_DSA_SHA2_256F_TYPE || keyType == SLH_DSA_SHA2_128S_TYPE ||
+        keyType == SLH_DSA_SHA2_192S_TYPE || keyType == SLH_DSA_SHA2_256S_TYPE
+    #endif
+        ) && signCtx->key) {
         /* SLH-DSA signs messages, not hashes - cannot use callback path */
         ret = SIG_TYPE_E;
     }
@@ -27466,6 +27599,32 @@ static int MakeAnyCert(Cert* cert, byte* derBuffer, word32 derSz,
                     (slhDsaKey->params->param == SLHDSA_SHAKE256S)) {
             cert->keyType = SLH_DSA_SHAKE_256S_KEY;
         }
+    #ifdef WOLFSSL_SLHDSA_SHA2
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_128F)) {
+            cert->keyType = SLH_DSA_SHA2_128F_KEY;
+        }
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_192F)) {
+            cert->keyType = SLH_DSA_SHA2_192F_KEY;
+        }
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_256F)) {
+            cert->keyType = SLH_DSA_SHA2_256F_KEY;
+        }
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_128S)) {
+            cert->keyType = SLH_DSA_SHA2_128S_KEY;
+        }
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_192S)) {
+            cert->keyType = SLH_DSA_SHA2_192S_KEY;
+        }
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_256S)) {
+            cert->keyType = SLH_DSA_SHA2_256S_KEY;
+        }
+    #endif /* WOLFSSL_SLHDSA_SHA2 */
 #endif /* WOLFSSL_HAVE_SLHDSA */
         else {
             ret = BAD_FUNC_ARG;
@@ -27788,6 +27947,20 @@ int wc_MakeCert_ex(Cert* cert, byte* derBuffer, word32 derSz, int keyType,
         slhDsaKey = (SlhDsaKey*)key;
     else if (keyType == SLH_DSA_SHAKE_256S_TYPE)
         slhDsaKey = (SlhDsaKey*)key;
+#ifdef WOLFSSL_SLHDSA_SHA2
+    else if (keyType == SLH_DSA_SHA2_128F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_192F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_256F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_128S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_192S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_256S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+#endif
 
     return MakeAnyCert(cert, derBuffer, derSz, rsaKey, eccKey, rng, dsaKey,
                        ed25519Key, ed448Key, falconKey, dilithiumKey,
@@ -27965,6 +28138,32 @@ static int MakeCertReq(Cert* cert, byte* derBuffer, word32 derSz,
                     (slhDsaKey->params->param == SLHDSA_SHAKE256S)) {
             cert->keyType = SLH_DSA_SHAKE_256S_KEY;
         }
+    #ifdef WOLFSSL_SLHDSA_SHA2
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_128F)) {
+            cert->keyType = SLH_DSA_SHA2_128F_KEY;
+        }
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_192F)) {
+            cert->keyType = SLH_DSA_SHA2_192F_KEY;
+        }
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_256F)) {
+            cert->keyType = SLH_DSA_SHA2_256F_KEY;
+        }
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_128S)) {
+            cert->keyType = SLH_DSA_SHA2_128S_KEY;
+        }
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_192S)) {
+            cert->keyType = SLH_DSA_SHA2_192S_KEY;
+        }
+        else if ((slhDsaKey != NULL) && (slhDsaKey->params != NULL) &&
+                    (slhDsaKey->params->param == SLHDSA_SHA2_256S)) {
+            cert->keyType = SLH_DSA_SHA2_256S_KEY;
+        }
+    #endif /* WOLFSSL_SLHDSA_SHA2 */
 #endif /* WOLFSSL_HAVE_SLHDSA */
         else {
             ret = BAD_FUNC_ARG;
@@ -28183,6 +28382,20 @@ int wc_MakeCertReq_ex(Cert* cert, byte* derBuffer, word32 derSz, int keyType,
         slhDsaKey = (SlhDsaKey*)key;
     else if (keyType == SLH_DSA_SHAKE_256S_TYPE)
         slhDsaKey = (SlhDsaKey*)key;
+#ifdef WOLFSSL_SLHDSA_SHA2
+    else if (keyType == SLH_DSA_SHA2_128F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_192F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_256F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_128S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_192S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_256S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+#endif
 
     return MakeCertReq(cert, derBuffer, derSz, rsaKey, dsaKey, eccKey,
                        ed25519Key, ed448Key, falconKey, dilithiumKey,
@@ -28485,6 +28698,14 @@ int wc_MakeSigWithBitStr(byte *sig, int sigSz, int sType, byte* buf,
         case SLH_DSA_SHAKE_128S_TYPE:
         case SLH_DSA_SHAKE_192S_TYPE:
         case SLH_DSA_SHAKE_256S_TYPE:
+    #ifdef WOLFSSL_SLHDSA_SHA2
+        case SLH_DSA_SHA2_128F_TYPE:
+        case SLH_DSA_SHA2_192F_TYPE:
+        case SLH_DSA_SHA2_256F_TYPE:
+        case SLH_DSA_SHA2_128S_TYPE:
+        case SLH_DSA_SHA2_192S_TYPE:
+        case SLH_DSA_SHA2_256S_TYPE:
+    #endif
             slhDsaKey = (SlhDsaKey*)key;
             break;
         default:
@@ -28623,6 +28844,20 @@ int wc_SignCert_ex(int requestSz, int sType, byte* buf, word32 buffSz,
         slhDsaKey = (SlhDsaKey*)key;
     else if (keyType == SLH_DSA_SHAKE_256S_TYPE)
         slhDsaKey = (SlhDsaKey*)key;
+#ifdef WOLFSSL_SLHDSA_SHA2
+    else if (keyType == SLH_DSA_SHA2_128F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_192F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_256F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_128S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_192S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_256S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+#endif
 
     return SignCert(requestSz, sType, buf, buffSz, rsaKey, eccKey, ed25519Key,
                     ed448Key, falconKey, dilithiumKey, slhDsaKey, rng);
@@ -28918,6 +29153,20 @@ int wc_SetSubjectKeyIdFromPublicKey_ex(Cert *cert, int keyType, void* key)
         slhDsaKey = (SlhDsaKey*)key;
     else if (keyType == SLH_DSA_SHAKE_256S_TYPE)
         slhDsaKey = (SlhDsaKey*)key;
+#ifdef WOLFSSL_SLHDSA_SHA2
+    else if (keyType == SLH_DSA_SHA2_128F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_192F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_256F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_128S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_192S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_256S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+#endif
 
     return SetKeyIdFromPublicKey(cert, rsaKey, eccKey, ed25519Key, ed448Key,
                                  falconKey, dilithiumKey, slhDsaKey,
@@ -28979,6 +29228,20 @@ int wc_SetAuthKeyIdFromPublicKey_ex(Cert *cert, int keyType, void* key)
         slhDsaKey = (SlhDsaKey*)key;
     else if (keyType == SLH_DSA_SHAKE_256S_TYPE)
         slhDsaKey = (SlhDsaKey*)key;
+#ifdef WOLFSSL_SLHDSA_SHA2
+    else if (keyType == SLH_DSA_SHA2_128F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_192F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_256F_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_128S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_192S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+    else if (keyType == SLH_DSA_SHA2_256S_TYPE)
+        slhDsaKey = (SlhDsaKey*)key;
+#endif
 
     return SetKeyIdFromPublicKey(cert, rsaKey, eccKey, ed25519Key, ed448Key,
                                  falconKey, dilithiumKey, slhDsaKey,

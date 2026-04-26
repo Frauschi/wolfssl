@@ -151,6 +151,10 @@ if BUILD_DTLS_CID
 dist_noinst_SCRIPTS+= scripts/dtlscid.test
 endif
 
+if BUILD_WC_SLHDSA
+dist_noinst_SCRIPTS+= scripts/slhdsa-interop.test
+endif
+
 EXTRA_DIST += scripts/bench/bench_functions.sh
 EXTRA_DIST += scripts/benchmark_compare.sh
 

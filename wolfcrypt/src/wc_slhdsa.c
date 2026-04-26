@@ -8438,9 +8438,7 @@ int wc_SlhDsaKey_SigSizeFromParam(enum SlhDsaParam param)
     return ret;
 }
 
-/* Map SLH-DSA parameter set to OID key type for DER encoding.
- * Only SHAKE variants are supported; SHA2 SLH-DSA OIDs are defined in
- * oid_sum.h but not handled here pending native SHA2 implementation. */
+/* Map SLH-DSA parameter set to OID key type for DER encoding. */
 static int slhdsa_param_to_keytype(enum SlhDsaParam param)
 {
     switch (param) {
@@ -8468,15 +8466,32 @@ static int slhdsa_param_to_keytype(enum SlhDsaParam param)
         case SLHDSA_SHAKE256F: return SLH_DSA_SHAKE_256Fk;
     #endif
 #endif
+#ifdef WOLFSSL_SLHDSA_SHA2
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128S
+        case SLHDSA_SHA2_128S: return SLH_DSA_SHA2_128Sk;
+    #endif
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128F
+        case SLHDSA_SHA2_128F: return SLH_DSA_SHA2_128Fk;
+    #endif
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192S
+        case SLHDSA_SHA2_192S: return SLH_DSA_SHA2_192Sk;
+    #endif
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192F
+        case SLHDSA_SHA2_192F: return SLH_DSA_SHA2_192Fk;
+    #endif
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256S
+        case SLHDSA_SHA2_256S: return SLH_DSA_SHA2_256Sk;
+    #endif
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256F
+        case SLHDSA_SHA2_256F: return SLH_DSA_SHA2_256Fk;
+    #endif
+#endif
         default:
             return BAD_FUNC_ARG;
     }
 }
 
-/* Map OID key type back to SlhDsaParam.  Returns NOT_COMPILED_IN for
- * SHA2-SLH-DSA OIDs - the wolfCrypt SLH-DSA backend is SHAKE-only
- * today, so SHA2-SLH-DSA certs/keys are rejected loudly at decode
- * rather than getting an uninformative BAD_FUNC_ARG. */
+/* Map OID key type back to SlhDsaParam. */
 static int slhdsa_keytype_to_param(int keytype)
 {
     switch (keytype) {
@@ -8504,13 +8519,26 @@ static int slhdsa_keytype_to_param(int keytype)
         case SLH_DSA_SHAKE_256Fk: return SLHDSA_SHAKE256F;
     #endif
 #endif
-        case SLH_DSA_SHA2_128Sk:
-        case SLH_DSA_SHA2_128Fk:
-        case SLH_DSA_SHA2_192Sk:
-        case SLH_DSA_SHA2_192Fk:
-        case SLH_DSA_SHA2_256Sk:
-        case SLH_DSA_SHA2_256Fk:
-            return NOT_COMPILED_IN;
+#ifdef WOLFSSL_SLHDSA_SHA2
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128S
+        case SLH_DSA_SHA2_128Sk: return SLHDSA_SHA2_128S;
+    #endif
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128F
+        case SLH_DSA_SHA2_128Fk: return SLHDSA_SHA2_128F;
+    #endif
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192S
+        case SLH_DSA_SHA2_192Sk: return SLHDSA_SHA2_192S;
+    #endif
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192F
+        case SLH_DSA_SHA2_192Fk: return SLHDSA_SHA2_192F;
+    #endif
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256S
+        case SLH_DSA_SHA2_256Sk: return SLHDSA_SHA2_256S;
+    #endif
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256F
+        case SLH_DSA_SHA2_256Fk: return SLHDSA_SHA2_256F;
+    #endif
+#endif
         default:
             return BAD_FUNC_ARG;
     }
@@ -8584,7 +8612,7 @@ int wc_SlhDsaKey_PrivateKeyDecode(const byte* input, word32* inOutIdx,
     }
 
     /* Map the OID to an SLH-DSA parameter set.  Pass through NOT_COMPILED_IN
-     * so callers can distinguish "SHA2-SLH-DSA present but unsupported" from
+     * so callers can distinguish "variant present but not built in" from
      * "malformed DER". */
     paramId = slhdsa_keytype_to_param((int)oid);
     if (paramId == WC_NO_ERR_TRACE(NOT_COMPILED_IN)) {
@@ -8675,8 +8703,8 @@ int wc_SlhDsaKey_PublicKeyDecode(const byte* input, word32* inOutIdx,
     }
 
     /* Map the detected OID key type to an SLH-DSA parameter set.  Pass
-     * through NOT_COMPILED_IN for SHA2-SLH-DSA so callers see the specific
-     * reason (unsupported variant) rather than a generic parse error. */
+     * through NOT_COMPILED_IN so callers see the specific reason
+     * (unsupported variant) rather than a generic parse error. */
     paramId = slhdsa_keytype_to_param(keytype);
     if (paramId == WC_NO_ERR_TRACE(NOT_COMPILED_IN)) {
         *inOutIdx = savedIdx;
