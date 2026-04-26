@@ -8070,9 +8070,13 @@ int wc_SlhDsaKey_ImportPublic(SlhDsaKey* key, const byte* pub, word32 pubLen)
     }
     else {
         /* Copy public key data into SLH-DSA key object. Use |= so that
-         * the private flag is preserved when an upstream caller is
-         * populating both halves of an SLH-DSA key (e.g. during DER
-         * decode of a PKCS#8 OneAsymmetricKey with attached publicKey). */
+         * the private flag is preserved when an upstream caller populates
+         * both halves of an SLH-DSA key (e.g. during DER decode of a
+         * PKCS#8 OneAsymmetricKey with attached publicKey, where the
+         * decoder may call ImportPrivate then ImportPublic).
+         * slhdsakey_precompute_sha2_midstates() only reads key->sk
+         * [2*n..3*n] (PK.seed just copied above) and writes to
+         * key->hash.sha2; it does not touch flags or the private half. */
         XMEMCPY(key->sk + 2 * key->params->n, pub, 2 * key->params->n);
         key->flags |= WC_SLHDSA_FLAG_PUBLIC;
 #ifdef WOLFSSL_SLHDSA_SHA2
@@ -8467,31 +8471,42 @@ static int slhdsa_param_to_keytype(enum SlhDsaParam param)
     #endif
 #endif
 #ifdef WOLFSSL_SLHDSA_SHA2
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128S
+#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
         case SLHDSA_SHA2_128S: return SLH_DSA_SHA2_128Sk;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128F
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
         case SLHDSA_SHA2_128F: return SLH_DSA_SHA2_128Fk;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192S
+#endif
+#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
         case SLHDSA_SHA2_192S: return SLH_DSA_SHA2_192Sk;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192F
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
         case SLHDSA_SHA2_192F: return SLH_DSA_SHA2_192Fk;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256S
+#endif
+#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
         case SLHDSA_SHA2_256S: return SLH_DSA_SHA2_256Sk;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256F
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
         case SLHDSA_SHA2_256F: return SLH_DSA_SHA2_256Fk;
     #endif
 #endif
+#endif /* WOLFSSL_SLHDSA_SHA2 */
         default:
             return BAD_FUNC_ARG;
     }
 }
 
-/* Map OID key type back to SlhDsaParam. */
+/* Map OID key type back to SlhDsaParam.
+ *
+ * Returns NOT_COMPILED_IN for SLH-DSA OIDs that wolfSSL recognises but
+ * weren't built (e.g. a SHA-2 cert fed to a SHAKE-only build), so that
+ * callers can distinguish "valid OID, parameter set not enabled" from
+ * "unknown OID / malformed DER" (BAD_FUNC_ARG). */
 static int slhdsa_keytype_to_param(int keytype)
 {
     switch (keytype) {
@@ -8520,24 +8535,43 @@ static int slhdsa_keytype_to_param(int keytype)
     #endif
 #endif
 #ifdef WOLFSSL_SLHDSA_SHA2
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128S
+#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
         case SLH_DSA_SHA2_128Sk: return SLHDSA_SHA2_128S;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_128F
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
         case SLH_DSA_SHA2_128Fk: return SLHDSA_SHA2_128F;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192S
+#endif
+#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
         case SLH_DSA_SHA2_192Sk: return SLHDSA_SHA2_192S;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_192F
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
         case SLH_DSA_SHA2_192Fk: return SLHDSA_SHA2_192F;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256S
+#endif
+#ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL
         case SLH_DSA_SHA2_256Sk: return SLHDSA_SHA2_256S;
     #endif
-    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_256F
+    #ifndef WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST
         case SLH_DSA_SHA2_256Fk: return SLHDSA_SHA2_256F;
     #endif
+#endif
+#endif /* WOLFSSL_SLHDSA_SHA2 */
+#ifndef WOLFSSL_SLHDSA_SHA2
+        /* SHA-2 OIDs are valid SLH-DSA OIDs but the SHA-2 backend was
+         * not built. Report NOT_COMPILED_IN rather than falling through
+         * to the BAD_FUNC_ARG path so the caller (asn.c, x509.c, ...)
+         * can render a "variant not built" diagnostic. */
+        case SLH_DSA_SHA2_128Sk:
+        case SLH_DSA_SHA2_128Fk:
+        case SLH_DSA_SHA2_192Sk:
+        case SLH_DSA_SHA2_192Fk:
+        case SLH_DSA_SHA2_256Sk:
+        case SLH_DSA_SHA2_256Fk:
+            return NOT_COMPILED_IN;
 #endif
         default:
             return BAD_FUNC_ARG;

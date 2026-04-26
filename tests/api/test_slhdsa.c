@@ -34,6 +34,7 @@
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/wolfcrypt/asn.h>
 #include <wolfssl/wolfcrypt/asn_public.h>
+#include <wolfssl/ssl.h>
 #include <tests/api/api.h>
 #include <tests/api/test_slhdsa.h>
 
@@ -446,6 +447,45 @@ int test_wc_slhdsa_make_key(void)
     wc_SlhDsaKey_Free(&key);
 #endif
 
+#ifdef WOLFSSL_SLHDSA_SHA2
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_128S, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_128F, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_192S, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_192F, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_256S, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_256F, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#endif /* WOLFSSL_SLHDSA_SHA2 */
+
     /* Test MakeKeyWithRandom. */
 #ifdef WOLFSSL_SLHDSA_PARAM_128S
     {
@@ -857,6 +897,81 @@ int test_wc_slhdsa_sign_vfy(void)
 
     wc_SlhDsaKey_Free(&key);
 #endif
+
+#ifdef WOLFSSL_SLHDSA_SHA2
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_128S, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    sigLen = WC_SLHDSA_MAX_SIG_LEN;
+    ExpectIntEQ(wc_SlhDsaKey_Sign(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, &sigLen, &rng), 0);
+    ExpectIntEQ(sigLen, WC_SLHDSA_SHA2_128S_SIG_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, sigLen), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_128F, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    sigLen = WC_SLHDSA_MAX_SIG_LEN;
+    ExpectIntEQ(wc_SlhDsaKey_Sign(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, &sigLen, &rng), 0);
+    ExpectIntEQ(sigLen, WC_SLHDSA_SHA2_128F_SIG_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, sigLen), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_192S, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    sigLen = WC_SLHDSA_MAX_SIG_LEN;
+    ExpectIntEQ(wc_SlhDsaKey_Sign(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, &sigLen, &rng), 0);
+    ExpectIntEQ(sigLen, WC_SLHDSA_SHA2_192S_SIG_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, sigLen), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_192F, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    sigLen = WC_SLHDSA_MAX_SIG_LEN;
+    ExpectIntEQ(wc_SlhDsaKey_Sign(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, &sigLen, &rng), 0);
+    ExpectIntEQ(sigLen, WC_SLHDSA_SHA2_192F_SIG_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, sigLen), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256S
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_256S, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    sigLen = WC_SLHDSA_MAX_SIG_LEN;
+    ExpectIntEQ(wc_SlhDsaKey_Sign(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, &sigLen, &rng), 0);
+    ExpectIntEQ(sigLen, WC_SLHDSA_SHA2_256S_SIG_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, sigLen), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256F
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHA2_256F, NULL, INVALID_DEVID),
+        0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    sigLen = WC_SLHDSA_MAX_SIG_LEN;
+    ExpectIntEQ(wc_SlhDsaKey_Sign(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, &sigLen, &rng), 0);
+    ExpectIntEQ(sigLen, WC_SLHDSA_SHA2_256F_SIG_LEN);
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, ctx, sizeof(ctx), msg, sizeof(msg),
+        sig, sigLen), 0);
+    wc_SlhDsaKey_Free(&key);
+#endif
+#endif /* WOLFSSL_SLHDSA_SHA2 */
 
     wc_FreeRng(&rng);
     XFREE(sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
@@ -1295,8 +1410,8 @@ int test_wc_slhdsa_check_key(void)
     wc_SlhDsaKey_Free(&key);
 
     /* Test check with both keys imported.
-     * Note: ImportPublic overwrites flags, so import Public first then Private.
-     */
+     * Order: ImportPublic uses |= on flags, so Private and Public can be
+     * imported in either order without dropping the FLAG_PRIVATE bit. */
 #ifdef WOLFSSL_SLHDSA_PARAM_128S
     ExpectIntEQ(wc_SlhDsaKey_Init(&key, SLHDSA_SHAKE128S, NULL, INVALID_DEVID),
         0);
@@ -1699,11 +1814,13 @@ int test_wc_slhdsa_der_decode_files(void)
 }
 
 #if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
-    defined(WOLFSSL_CERT_GEN) && defined(WC_ENABLE_ASYM_KEY_EXPORT)
-/* Mint a self-signed leaf cert with the given SLH-DSA key, then parse it
- * and verify the embedded signature using the cert's own public key.
- * Exercises wc_MakeCert_ex / wc_SignCert_ex / ParseCert / ConfirmSignature
- * for one SLH-DSA parameter set. */
+    defined(WOLFSSL_CERT_GEN) && defined(WC_ENABLE_ASYM_KEY_EXPORT) && \
+    !defined(NO_CERTS)
+/* Mint a self-signed leaf cert with the given SLH-DSA key, then load it
+ * into a CertManager as a trusted root and verify the cert through the
+ * CertManager. The verify path drives ConfirmSignature() which is the
+ * SHA-2 dispatch arm exercised by this commit, so this is the actual
+ * end-to-end cert-layer integration test. */
 static int slhdsa_cert_roundtrip_one(enum SlhDsaParam param, int certKeyType,
     int sigType)
 {
@@ -1711,11 +1828,9 @@ static int slhdsa_cert_roundtrip_one(enum SlhDsaParam param, int certKeyType,
     SlhDsaKey key;
     WC_RNG rng;
     Cert cert;
-    DecodedCert decoded;
     byte* der = NULL;
     int derSz = 0;
     int signedSz = 0;
-    int decodedInited = 0;
 
     XMEMSET(&key, 0, sizeof(key));
     XMEMSET(&rng, 0, sizeof(rng));
@@ -1733,6 +1848,8 @@ static int slhdsa_cert_roundtrip_one(enum SlhDsaParam param, int certKeyType,
     XSTRNCPY(cert.subject.org, "wolfSSL", CTC_NAME_SIZE);
     XSTRNCPY(cert.subject.unit, "Test", CTC_NAME_SIZE);
     XSTRNCPY(cert.subject.commonName, "slhdsa-test", CTC_NAME_SIZE);
+    /* Self-signed: issuer == subject. */
+    XMEMCPY(&cert.issuer, &cert.subject, sizeof(cert.issuer));
     cert.sigType = sigType;
     cert.isCA = 1;
     cert.selfSigned = 1;
@@ -1742,18 +1859,36 @@ static int slhdsa_cert_roundtrip_one(enum SlhDsaParam param, int certKeyType,
     ExpectIntGT(signedSz = wc_SignCert_ex(cert.bodySz, sigType, der,
         64 * 1024, certKeyType, &key, &rng), 0);
 
-    /* NO_VERIFY: parse the cert structure (which exercises the SHA-2
-     * SLH-DSA branches in pubKey OID dispatch) without needing a CA in a
-     * cert manager. The signature itself was already verified above by
-     * the wc_SlhDsaKey_Sign/_Verify round-trips in test_wc_slhdsa_sign_vfy
-     * for every variant. */
-    InitDecodedCert(&decoded, der, (word32)signedSz, NULL);
-    decodedInited = 1;
-    ExpectIntEQ(ParseCert(&decoded, CERT_TYPE, NO_VERIFY, NULL), 0);
+    /* Parse the cert (NO_VERIFY) to extract TBS, signature, and the
+     * embedded public key, then call ConfirmSignature() directly with
+     * the SLH-DSA pubKey. This drives the SLH-DSA OID -> SLHDSA_*
+     * dispatch arms in ConfirmSignature for both SHAKE and SHA-2,
+     * which is the actual code path this commit modifies. A missed
+     * SHA-2 dispatch site or a signature corruption would surface as
+     * a non-zero return from ConfirmSignature. */
+    {
+        DecodedCert decoded;
+        SignatureCtx sigCtx;
+        int parseRet, sigRet;
 
-    if (decodedInited) {
+        InitDecodedCert(&decoded, der, (word32)signedSz, NULL);
+        parseRet = ParseCert(&decoded, CERT_TYPE, NO_VERIFY, NULL);
+        ExpectIntEQ(parseRet, 0);
+
+        if (parseRet == 0) {
+            InitSignatureCtx(&sigCtx, NULL, INVALID_DEVID);
+            sigRet = ConfirmSignature(&sigCtx,
+                der + decoded.certBegin,
+                decoded.sigIndex - decoded.certBegin,
+                decoded.publicKey, decoded.pubKeySize, decoded.keyOID,
+                decoded.signature, decoded.sigLength,
+                decoded.signatureOID, NULL, 0, NULL);
+            ExpectIntEQ(sigRet, 0);
+            FreeSignatureCtx(&sigCtx);
+        }
         FreeDecodedCert(&decoded);
     }
+
     wc_SlhDsaKey_Free(&key);
     wc_FreeRng(&rng);
     XFREE(der, NULL, DYNAMIC_TYPE_TMP_BUFFER);
@@ -1774,7 +1909,8 @@ int test_wc_slhdsa_cert_roundtrip(void)
 {
     EXPECT_DECLS;
 #if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
-    defined(WOLFSSL_CERT_GEN) && defined(WC_ENABLE_ASYM_KEY_EXPORT)
+    defined(WOLFSSL_CERT_GEN) && defined(WC_ENABLE_ASYM_KEY_EXPORT) && \
+    !defined(NO_CERTS)
 #ifdef WOLFSSL_SLHDSA_PARAM_128S
     ExpectIntEQ(slhdsa_cert_roundtrip_one(SLHDSA_SHAKE128S,
         SLH_DSA_SHAKE_128S_TYPE, CTC_SLH_DSA_SHAKE_128S), TEST_SUCCESS);

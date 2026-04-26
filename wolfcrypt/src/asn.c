@@ -16842,7 +16842,20 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                 }
             #endif /* HAVE_DILITHIUM */
             #if defined(WOLFSSL_HAVE_SLHDSA)
-            #ifdef WOLFSSL_SLHDSA_SHA2
+            #ifndef WOLFSSL_SLHDSA_SHA2
+                /* SHA-2 OIDs recognised but backend not built; emit a
+                 * specific NOT_COMPILED_IN so callers can render a
+                 * "variant unavailable" diagnostic instead of the
+                 * generic ASN_UNKNOWN_OID_E for "malformed DER". */
+                case SLH_DSA_SHA2_128Fk:
+                case SLH_DSA_SHA2_192Fk:
+                case SLH_DSA_SHA2_256Fk:
+                case SLH_DSA_SHA2_128Sk:
+                case SLH_DSA_SHA2_192Sk:
+                case SLH_DSA_SHA2_256Sk:
+                    WOLFSSL_MSG("SHA2-SLH-DSA recognised but not compiled in");
+                    ERROR_OUT(NOT_COMPILED_IN, exit_cs);
+            #else
                 case SLH_DSA_SHA2_128Fk:
                 case SLH_DSA_SHA2_192Fk:
                 case SLH_DSA_SHA2_256Fk:
@@ -16907,8 +16920,14 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                         WOLFSSL_MSG("ASN Key init err: SLH-DSA");
                         goto exit_cs;
                     }
-                    if ((ret = wc_SlhDsaKey_PublicKeyDecode(key, &idx,
-                        sigCtx->key.slhdsa, keySz)) < 0) {
+                    /* StoreKey stashes the BIT STRING contents (the raw
+                     * public key bytes) in cert->publicKey, not the
+                     * SPKI envelope, so use ImportPublic which takes
+                     * raw bytes. _PublicKeyDecode would expect an SPKI
+                     * SEQUENCE and fail with ASN_PARSE_E here. */
+                    (void)idx;
+                    if ((ret = wc_SlhDsaKey_ImportPublic(sigCtx->key.slhdsa,
+                        key, keySz)) < 0) {
                         WOLFSSL_MSG("ASN Key import err: SLH-DSA");
                         goto exit_cs;
                     }
@@ -23274,6 +23293,13 @@ static wcchar END_PUB_KEY          = "-----END PUBLIC KEY-----";
     static wcchar END_ML_DSA_LEVEL5_PRIV   = "-----END ML_DSA_LEVEL5 PRIVATE KEY-----";
 #endif /* HAVE_DILITHIUM */
 #if defined(WOLFSSL_HAVE_SLHDSA)
+    /* Note: these PEM labels use underscores ("SLH_DSA_SHAKE_128F")
+     * matching the wolfSSL identifier style. This diverges from the
+     * usual "SLH-DSA-SHAKE-128F" hyphenated form seen in other PQ
+     * tooling. The convention was set by the SHAKE side in 9c22cf1a
+     * and is preserved for the SHA-2 labels below for consistency;
+     * external interoperability of these PEM blocks should not be
+     * assumed without conversion. */
     static wcchar BEGIN_SLH_DSA_SHAKE_128F_PRIV = "-----BEGIN SLH_DSA_SHAKE_128F PRIVATE KEY-----";
     static wcchar END_SLH_DSA_SHAKE_128F_PRIV   = "-----END SLH_DSA_SHAKE_128F PRIVATE KEY-----";
     static wcchar BEGIN_SLH_DSA_SHAKE_192F_PRIV = "-----BEGIN SLH_DSA_SHAKE_192F PRIVATE KEY-----";
