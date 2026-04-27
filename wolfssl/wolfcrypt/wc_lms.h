@@ -546,6 +546,13 @@ typedef struct HssPrivKey {
 #endif
 } HssPrivKey;
 
+#ifndef LMS_MAX_ID_LEN
+#define LMS_MAX_ID_LEN              32
+#endif
+#ifndef LMS_MAX_LABEL_LEN
+#define LMS_MAX_LABEL_LEN           32
+#endif
+
 struct LmsKey {
     /* Public key. */
     ALIGN16 byte pub[HSS_PUBLIC_KEY_LEN(LMS_MAX_NODE_LEN)];
@@ -574,6 +581,16 @@ struct LmsKey {
 #ifdef WOLF_CRYPTO_CB
     /* Device Identifier. */
     int devId;
+    /* Per-device opaque context, populated by the callback. */
+    void* devCtx;
+#endif
+#ifdef WOLF_PRIVATE_KEY_ID
+    /* Optional device-side key identifier. */
+    byte id[LMS_MAX_ID_LEN];
+    int  idLen;
+    /* Optional device-side key label. */
+    char label[LMS_MAX_LABEL_LEN];
+    int  labelLen;
 #endif
 };
 

@@ -205,6 +205,13 @@ typedef struct XmssParams {
     word8  bds_k;
 } XmssParams;
 
+#ifndef XMSS_MAX_ID_LEN
+#define XMSS_MAX_ID_LEN              32
+#endif
+#ifndef XMSS_MAX_LABEL_LEN
+#define XMSS_MAX_LABEL_LEN           32
+#endif
+
 struct XmssKey {
     /* Public key. */
     unsigned char        pk[2 * WC_XMSS_MAX_N];
@@ -228,6 +235,20 @@ struct XmssKey {
 #endif /* ifndef WOLFSSL_XMSS_VERIFY_ONLY */
     /* State of key. */
     enum wc_XmssState    state;
+#ifdef WOLF_CRYPTO_CB
+    /* Device Identifier. */
+    int                  devId;
+    /* Per-device opaque context, populated by the callback. */
+    void*                devCtx;
+#endif
+#ifdef WOLF_PRIVATE_KEY_ID
+    /* Optional device-side key identifier. */
+    byte                 id[XMSS_MAX_ID_LEN];
+    int                  idLen;
+    /* Optional device-side key label. */
+    char                 label[XMSS_MAX_LABEL_LEN];
+    int                  labelLen;
+#endif
 };
 
 typedef struct XmssState {

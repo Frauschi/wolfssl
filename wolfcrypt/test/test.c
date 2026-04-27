@@ -68384,6 +68384,114 @@ static int myCryptoDevCb(int devIdArg, wc_CryptoInfo* info, void* ctx)
         }
         #endif
     #endif /* HAVE_ED25519 */
+    #if defined(WOLFSSL_HAVE_LMS) || defined(WOLFSSL_HAVE_XMSS)
+        if (info->pk.type == WC_PK_TYPE_PQC_STATEFUL_SIG_KEYGEN) {
+            int pqcType = info->pk.pqc_stateful_sig_kg.type;
+        #if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_VERIFY_ONLY)
+            if (pqcType == WC_PQC_STATEFUL_SIG_TYPE_LMS) {
+                LmsKey* lk = (LmsKey*)info->pk.pqc_stateful_sig_kg.key;
+                lk->devId = INVALID_DEVID;
+                ret = wc_LmsKey_MakeKey(lk, info->pk.pqc_stateful_sig_kg.rng);
+                lk->devId = devIdArg;
+            }
+        #endif
+        #if defined(WOLFSSL_HAVE_XMSS) && !defined(WOLFSSL_XMSS_VERIFY_ONLY)
+            if (pqcType == WC_PQC_STATEFUL_SIG_TYPE_XMSS) {
+                XmssKey* xk = (XmssKey*)info->pk.pqc_stateful_sig_kg.key;
+                xk->devId = INVALID_DEVID;
+                ret = wc_XmssKey_MakeKey(xk, info->pk.pqc_stateful_sig_kg.rng);
+                xk->devId = devIdArg;
+            }
+        #endif
+        }
+        else if (info->pk.type == WC_PK_TYPE_PQC_STATEFUL_SIG_SIGN) {
+            int pqcType = info->pk.pqc_stateful_sig_sign.type;
+            word32 sigSz = *info->pk.pqc_stateful_sig_sign.outSz;
+        #if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_VERIFY_ONLY)
+            if (pqcType == WC_PQC_STATEFUL_SIG_TYPE_LMS) {
+                LmsKey* lk = (LmsKey*)info->pk.pqc_stateful_sig_sign.key;
+                lk->devId = INVALID_DEVID;
+                ret = wc_LmsKey_Sign(lk,
+                    info->pk.pqc_stateful_sig_sign.out, &sigSz,
+                    info->pk.pqc_stateful_sig_sign.msg,
+                    (int)info->pk.pqc_stateful_sig_sign.msgSz);
+                lk->devId = devIdArg;
+            }
+        #endif
+        #if defined(WOLFSSL_HAVE_XMSS) && !defined(WOLFSSL_XMSS_VERIFY_ONLY)
+            if (pqcType == WC_PQC_STATEFUL_SIG_TYPE_XMSS) {
+                XmssKey* xk = (XmssKey*)info->pk.pqc_stateful_sig_sign.key;
+                xk->devId = INVALID_DEVID;
+                ret = wc_XmssKey_Sign(xk,
+                    info->pk.pqc_stateful_sig_sign.out, &sigSz,
+                    info->pk.pqc_stateful_sig_sign.msg,
+                    (int)info->pk.pqc_stateful_sig_sign.msgSz);
+                xk->devId = devIdArg;
+            }
+        #endif
+            *info->pk.pqc_stateful_sig_sign.outSz = sigSz;
+        }
+        else if (info->pk.type == WC_PK_TYPE_PQC_STATEFUL_SIG_VERIFY) {
+            int pqcType = info->pk.pqc_stateful_sig_verify.type;
+            int verifyRet = WC_NO_ERR_TRACE(NOT_COMPILED_IN);
+        #if defined(WOLFSSL_HAVE_LMS)
+            if (pqcType == WC_PQC_STATEFUL_SIG_TYPE_LMS) {
+                LmsKey* lk = (LmsKey*)info->pk.pqc_stateful_sig_verify.key;
+                lk->devId = INVALID_DEVID;
+                verifyRet = wc_LmsKey_Verify(lk,
+                    info->pk.pqc_stateful_sig_verify.sig,
+                    info->pk.pqc_stateful_sig_verify.sigSz,
+                    info->pk.pqc_stateful_sig_verify.msg,
+                    (int)info->pk.pqc_stateful_sig_verify.msgSz);
+                lk->devId = devIdArg;
+            }
+        #endif
+        #if defined(WOLFSSL_HAVE_XMSS)
+            if (pqcType == WC_PQC_STATEFUL_SIG_TYPE_XMSS) {
+                XmssKey* xk = (XmssKey*)info->pk.pqc_stateful_sig_verify.key;
+                xk->devId = INVALID_DEVID;
+                verifyRet = wc_XmssKey_Verify(xk,
+                    info->pk.pqc_stateful_sig_verify.sig,
+                    info->pk.pqc_stateful_sig_verify.sigSz,
+                    info->pk.pqc_stateful_sig_verify.msg,
+                    (int)info->pk.pqc_stateful_sig_verify.msgSz);
+                xk->devId = devIdArg;
+            }
+        #endif
+            if (info->pk.pqc_stateful_sig_verify.res != NULL) {
+                *info->pk.pqc_stateful_sig_verify.res =
+                    (verifyRet == 0) ? 1 : 0;
+            }
+            /* SIG_VERIFY_E is a validity signal, not a crypto error, so
+             * translate it back to success for the dispatcher. */
+            if (verifyRet == WC_NO_ERR_TRACE(SIG_VERIFY_E))
+                verifyRet = 0;
+            ret = verifyRet;
+        }
+        else if (info->pk.type == WC_PK_TYPE_PQC_STATEFUL_SIG_SIGS_LEFT) {
+            int pqcType = info->pk.pqc_stateful_sig_sigs_left.type;
+            int count = 0;
+        #if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_VERIFY_ONLY)
+            if (pqcType == WC_PQC_STATEFUL_SIG_TYPE_LMS) {
+                LmsKey* lk = (LmsKey*)info->pk.pqc_stateful_sig_sigs_left.key;
+                lk->devId = INVALID_DEVID;
+                count = wc_LmsKey_SigsLeft(lk);
+                lk->devId = devIdArg;
+            }
+        #endif
+        #if defined(WOLFSSL_HAVE_XMSS) && !defined(WOLFSSL_XMSS_VERIFY_ONLY)
+            if (pqcType == WC_PQC_STATEFUL_SIG_TYPE_XMSS) {
+                XmssKey* xk = (XmssKey*)info->pk.pqc_stateful_sig_sigs_left.key;
+                xk->devId = INVALID_DEVID;
+                count = wc_XmssKey_SigsLeft(xk);
+                xk->devId = devIdArg;
+            }
+        #endif
+            if (info->pk.pqc_stateful_sig_sigs_left.sigsLeft != NULL)
+                *info->pk.pqc_stateful_sig_sigs_left.sigsLeft = (word32)count;
+            ret = 0;
+        }
+    #endif /* WOLFSSL_HAVE_LMS || WOLFSSL_HAVE_XMSS */
     #ifdef WOLFSSL_HAVE_MLKEM
         if (info->pk.type == WC_PK_TYPE_PQC_KEM_KEYGEN) {
             if ((info->pk.pqc_kem_kg.type == WC_PQC_KEM_TYPE_KYBER) &&
@@ -69836,6 +69944,14 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t cryptocb_test(void)
 #ifdef HAVE_DILITHIUM
     if (ret == 0)
         ret = dilithium_test();
+#endif
+#if defined(WOLFSSL_HAVE_XMSS) && !defined(WOLFSSL_XMSS_VERIFY_ONLY)
+    if (ret == 0)
+        ret = xmss_test();
+#endif
+#if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_VERIFY_ONLY)
+    if (ret == 0)
+        ret = lms_test();
 #endif
 #ifdef HAVE_ED25519
     PRIVATE_KEY_UNLOCK();

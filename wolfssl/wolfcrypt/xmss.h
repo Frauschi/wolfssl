@@ -170,6 +170,12 @@ typedef enum wc_XmssRc (*wc_xmss_read_private_key_cb)(byte* priv, word32 privSz,
 #endif
 
 WOLFSSL_API int  wc_XmssKey_Init(XmssKey* key, void* heap, int devId);
+#ifdef WOLF_PRIVATE_KEY_ID
+WOLFSSL_API int  wc_XmssKey_InitId(XmssKey* key, const unsigned char* id,
+    int len, void* heap, int devId);
+WOLFSSL_API int  wc_XmssKey_InitLabel(XmssKey* key, const char* label,
+    void* heap, int devId);
+#endif
 WOLFSSL_API int  wc_XmssKey_SetParamStr(XmssKey* key, const char* str);
 #ifndef WOLFSSL_XMSS_VERIFY_ONLY
 WOLFSSL_API int  wc_XmssKey_SetWriteCb(XmssKey* key,
@@ -194,6 +200,12 @@ WOLFSSL_API int  wc_XmssKey_ImportPubRaw(XmssKey* key, const byte* in,
     word32 inLen);
 WOLFSSL_API int  wc_XmssKey_Verify(XmssKey* key, const byte* sig, word32 sigSz,
     const byte* msg, int msgSz);
+/* Compute the digest of a message with the hash function dictated by the
+ * XMSS parameter set. Useful for crypto-callback / HSM backends that follow
+ * the PKCS#11 v3.2 CKM_XMSS / CKM_XMSSMT convention of taking a
+ * pre-computed digest. */
+WOLFSSL_API int  wc_XmssKey_HashMsg(const XmssKey* key, const byte* msg,
+    word32 msgSz, byte* hash, word32* hashSz);
 
 #ifdef __cplusplus
     } /* extern "C" */
