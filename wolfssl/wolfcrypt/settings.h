@@ -547,6 +547,27 @@
 
     #undef WOLFSSL_CERT_EXT
     #define WOLFSSL_CERT_EXT
+
+    /* Required so that ssl->peerCert is available for the alternative
+     * public key extracted from the dual-alg certificate (see tls13.c). */
+    #undef KEEP_PEER_CERT
+    #define KEEP_PEER_CERT
+
+    /* Required so that SetDatesFromDcert / SetAltNamesFromDcert helpers
+     * are compiled in - they are used by wc_GeneratePreTBS. */
+    #undef WOLFSSL_ALT_NAMES
+    #define WOLFSSL_ALT_NAMES
+
+    /* Custom OID support is still used by some dual-alg-cert tests/examples
+     * to manually craft the sapki/altSigAlg/altSigVal extensions. */
+    #undef WOLFSSL_CUSTOM_OID
+    #define WOLFSSL_CUSTOM_OID
+
+    #undef HAVE_OID_ENCODING
+    #define HAVE_OID_ENCODING
+
+    #undef HAVE_OID_DECODING
+    #define HAVE_OID_DECODING
 #endif /* WOLFSSL_DUAL_ALG_CERTS */
 
 /* RFC 8737 id-pe-acmeIdentifier (TLS-ALPN-01) requires SHA-256. */
