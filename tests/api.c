@@ -770,7 +770,8 @@ static int test_wolfSSL_Method_Allocators(void)
     return EXPECT_RESULT();
 }
 
-#if defined(WOLFSSL_DUAL_ALG_CERTS) && !defined(NO_FILESYSTEM)
+#if defined(WOLFSSL_DUAL_ALG_CERTS) && !defined(NO_FILESYSTEM) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING)
 /*----------------------------------------------------------------------------*
  | Dual algorithm Certificate Tests
  *----------------------------------------------------------------------------*/
@@ -1548,7 +1549,8 @@ static int test_dual_alg_crit_ext_support(void)
     return TEST_SKIPPED;
 }
 
-#endif /* WOLFSSL_DUAL_ALG_CERTS && !NO_FILESYSTEM */
+#endif /* WOLFSSL_DUAL_ALG_CERTS && !NO_FILESYSTEM &&
+        * WOLFSSL_CUSTOM_OID && HAVE_OID_ENCODING */
 
 /**
  * Test dual-alg ECDSA + ML-DSA:
