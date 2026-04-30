@@ -539,23 +539,14 @@
         #error "Need ECDSA or else dual alg cert example will not work."
     #endif
 
+    #undef WOLFSSL_ASN_TEMPLATE
+    #define WOLFSSL_ASN_TEMPLATE
+
     #undef WOLFSSL_CERT_GEN
     #define WOLFSSL_CERT_GEN
 
-    #undef WOLFSSL_CUSTOM_OID
-    #define WOLFSSL_CUSTOM_OID
-
-    #undef HAVE_OID_ENCODING
-    #define HAVE_OID_ENCODING
-
     #undef WOLFSSL_CERT_EXT
     #define WOLFSSL_CERT_EXT
-
-    #undef OPENSSL_EXTRA
-    #define OPENSSL_EXTRA
-
-    #undef HAVE_OID_DECODING
-    #define HAVE_OID_DECODING
 #endif /* WOLFSSL_DUAL_ALG_CERTS */
 
 /* RFC 8737 id-pe-acmeIdentifier (TLS-ALPN-01) requires SHA-256. */
