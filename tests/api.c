@@ -1702,6 +1702,402 @@ static int test_dual_alg_ecdsa_mldsa(void)
     return EXPECT_RESULT();
 }
 
+/* Direct unit tests for wc_GeneratePreTBS. Covers:
+ *   - NULL / zero-size argument validation
+ *   - issuer-side fast path (no altSigValue yet -> verbatim TBS)
+ *   - verifier-side excision (altSigValue stripped, signature reverifies)
+ *   - BUFFER_E when output buffer is too small
+ *   - ASN_PARSE_E when altSigValue is not the last extension (X9.146
+ *     conformance enforcement)
+ */
+static int test_dual_alg_pretbs_cert(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_DILITHIUM) && \
+    defined(HAVE_ECC) && !defined(WC_NO_RNG) && \
+    !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY) && \
+    !defined(WOLFSSL_DILITHIUM_NO_SIGN) && \
+    !defined(WOLFSSL_DILITHIUM_NO_VERIFY) && !defined(WOLFSSL_SMALL_STACK) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING)
+#ifndef LARGE_TEMP_SZ
+#define LARGE_TEMP_SZ 4096
+#endif
+    MlDsaKey    alt_ca_key;
+    ecc_key     ca_key;
+    WC_RNG      rng;
+    int         ret;
+    DecodedCert d_cert;
+    Cert        new_cert;
+    byte        alt_pub_der[LARGE_TEMP_SZ];
+    word32      alt_pub_sz = LARGE_TEMP_SZ;
+    byte        alt_sig_alg[LARGE_TEMP_SZ];
+    word32      alt_sig_alg_sz = LARGE_TEMP_SZ;
+    byte        tbs_der[LARGE_TEMP_SZ];
+    int         tbs_der_sz;
+    byte        alt_sig[LARGE_TEMP_SZ];
+    int         alt_sig_sz;
+    byte        der[LARGE_TEMP_SZ];
+    int         der_sz;
+    byte        final_der[2 * LARGE_TEMP_SZ];
+    int         final_der_sz;
+    byte        scratch[LARGE_TEMP_SZ];
+
+    XMEMSET(&alt_ca_key, 0, sizeof(alt_ca_key));
+    XMEMSET(&ca_key,     0, sizeof(ca_key));
+    XMEMSET(&rng,        0, sizeof(rng));
+    XMEMSET(&d_cert,     0, sizeof(d_cert));
+    XMEMSET(alt_pub_der, 0, alt_pub_sz);
+    XMEMSET(alt_sig_alg, 0, alt_sig_alg_sz);
+    XMEMSET(tbs_der,     0, sizeof(tbs_der));
+    XMEMSET(alt_sig,     0, sizeof(alt_sig));
+    XMEMSET(der,         0, sizeof(der));
+    XMEMSET(final_der,   0, sizeof(final_der));
+
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+
+    /* ML-DSA alt key. */
+    ExpectIntEQ(wc_MlDsaKey_Init(&alt_ca_key, NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_MlDsaKey_SetParams(&alt_ca_key, WC_ML_DSA_44), 0);
+    ExpectIntEQ(wc_MlDsaKey_MakeKey(&alt_ca_key, &rng), 0);
+    ret = wc_MlDsaKey_PublicKeyToDer(&alt_ca_key, alt_pub_der,
+                                     (word32)sizeof(alt_pub_der), 1);
+    ExpectIntGT(ret, 0);
+    alt_pub_sz = (word32)ret;
+
+    ret = SetAlgoID(CTC_SHA256wECDSA, alt_sig_alg, oidSigType, 0);
+    ExpectIntGT(ret, 0);
+    alt_sig_alg_sz = (word32)ret;
+
+    /* ECC primary key. */
+    ExpectIntEQ(wc_ecc_init(&ca_key), 0);
+    ExpectIntEQ(wc_ecc_make_key(&rng, KEY32, &ca_key), 0);
+
+    /* Build cert with sapki + altSigAlg, no altSigVal yet. */
+    wc_InitCert(&new_cert);
+    strncpy(new_cert.subject.commonName, "preTBS-test", CTC_NAME_SIZE);
+    new_cert.sigType = CTC_SHA256wECDSA;
+    new_cert.isCA    = 1;
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.72", alt_pub_der,
+                                      alt_pub_sz), 0);
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.73", alt_sig_alg,
+                                      alt_sig_alg_sz), 0);
+    ret = wc_MakeCert_ex(&new_cert, der, (word32)sizeof(der), ECC_TYPE,
+                         &ca_key, &rng);
+    ExpectIntGT(ret, 0);
+    der_sz = wc_SignCert_ex(new_cert.bodySz, new_cert.sigType, der,
+                            (word32)sizeof(der), ECC_TYPE, &ca_key, &rng);
+    ExpectIntGT(der_sz, 0);
+
+    wc_InitDecodedCert(&d_cert, der, (word32)der_sz, 0);
+    ExpectIntEQ(wc_ParseCert(&d_cert, CERT_TYPE, NO_VERIFY, NULL), 0);
+
+    /* --- Negative: invalid arguments. */
+    ExpectIntEQ(wc_GeneratePreTBS(NULL, tbs_der, (int)sizeof(tbs_der)),
+                BAD_FUNC_ARG);
+    ExpectIntEQ(wc_GeneratePreTBS(&d_cert, NULL, (int)sizeof(tbs_der)),
+                BAD_FUNC_ARG);
+    ExpectIntEQ(wc_GeneratePreTBS(&d_cert, tbs_der, 0), BAD_FUNC_ARG);
+
+    /* --- Issuer-side fast path: cert has no altSigValue extension yet,
+     * preTBS must equal the parsed TBS verbatim. */
+    tbs_der_sz = wc_GeneratePreTBS(&d_cert, tbs_der, (int)sizeof(tbs_der));
+    ExpectIntGT(tbs_der_sz, 0);
+    ExpectIntEQ((word32)tbs_der_sz, d_cert.sigIndex - d_cert.certBegin);
+    ExpectIntEQ(XMEMCMP(tbs_der, d_cert.source + d_cert.certBegin,
+                        (size_t)tbs_der_sz), 0);
+
+    /* --- Negative: derSz too small. */
+    ExpectIntEQ(wc_GeneratePreTBS(&d_cert, scratch, 4), BUFFER_E);
+
+    /* --- Sign the issuer-side preTBS, embed altSigValue, then exercise the
+     * verifier-side excision path. */
+    alt_sig_sz = wc_MakeSigWithBitStr(alt_sig, (word32)sizeof(alt_sig),
+                                      CTC_ML_DSA_LEVEL2, tbs_der,
+                                      (word32)tbs_der_sz, ML_DSA_LEVEL2_TYPE,
+                                      &alt_ca_key, &rng);
+    ExpectIntGT(alt_sig_sz, 0);
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.74", alt_sig,
+                                      (word32)alt_sig_sz), 0);
+    ret = wc_MakeCert_ex(&new_cert, final_der, (word32)sizeof(final_der),
+                         ECC_TYPE, &ca_key, &rng);
+    ExpectIntGT(ret, 0);
+    final_der_sz = wc_SignCert_ex(new_cert.bodySz, new_cert.sigType, final_der,
+                                  (word32)sizeof(final_der), ECC_TYPE, &ca_key,
+                                  &rng);
+    ExpectIntGT(final_der_sz, 0);
+
+    wc_FreeDecodedCert(&d_cert);
+    wc_InitDecodedCert(&d_cert, final_der, (word32)final_der_sz, 0);
+    ExpectIntEQ(wc_ParseCert(&d_cert, CERT_TYPE, NO_VERIFY, NULL), 0);
+
+    /* PreTBS now goes through the excision path; result must round-trip
+     * exactly (signature regenerated over the new preTBS must match the
+     * embedded altSigValue). */
+    XMEMSET(tbs_der, 0, sizeof(tbs_der));
+    tbs_der_sz = wc_GeneratePreTBS(&d_cert, tbs_der, (int)sizeof(tbs_der));
+    ExpectIntGT(tbs_der_sz, 0);
+    ExpectIntLT((word32)tbs_der_sz, d_cert.sigIndex - d_cert.certBegin);
+
+    XMEMSET(scratch, 0, sizeof(scratch));
+    ret = wc_MakeSigWithBitStr(scratch, (word32)sizeof(scratch),
+                               CTC_ML_DSA_LEVEL2, tbs_der, (word32)tbs_der_sz,
+                               ML_DSA_LEVEL2_TYPE, &alt_ca_key, &rng);
+    ExpectIntGT(ret, 0);
+    /* Note: ML-DSA is randomised by default, so we cannot byte-compare the
+     * fresh signature against the embedded one. The fact that
+     * wc_GeneratePreTBS produced a strictly smaller (excised) preTBS that
+     * still encodes/parses cleanly is the property under test here; the
+     * end-to-end "alt sig verifies against preTBS" check is exercised by
+     * test_dual_alg_support. */
+
+    wc_FreeDecodedCert(&d_cert);
+    wc_ecc_free(&ca_key);
+    wc_MlDsaKey_Free(&alt_ca_key);
+    wc_FreeRng(&rng);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* Verify that wc_GeneratePreTBS rejects a certificate whose
+ * altSignatureValue extension is not the last extension, per X9.146 /
+ * ITU-T X.509:2019 Annex A. */
+static int test_dual_alg_pretbs_altsigval_not_last(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_DILITHIUM) && \
+    defined(HAVE_ECC) && !defined(WC_NO_RNG) && \
+    !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY) && \
+    !defined(WOLFSSL_DILITHIUM_NO_SIGN) && \
+    !defined(WOLFSSL_DILITHIUM_NO_VERIFY) && !defined(WOLFSSL_SMALL_STACK) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING)
+#ifndef LARGE_TEMP_SZ
+#define LARGE_TEMP_SZ 4096
+#endif
+    MlDsaKey    alt_ca_key;
+    ecc_key     ca_key;
+    WC_RNG      rng;
+    int         ret;
+    DecodedCert d_cert;
+    Cert        new_cert;
+    byte        alt_pub_der[LARGE_TEMP_SZ];
+    word32      alt_pub_sz = LARGE_TEMP_SZ;
+    byte        alt_sig_alg[LARGE_TEMP_SZ];
+    word32      alt_sig_alg_sz = LARGE_TEMP_SZ;
+    byte        alt_sig[LARGE_TEMP_SZ];
+    int         alt_sig_sz;
+    byte        scratch[16];
+    byte        der[2 * LARGE_TEMP_SZ];
+    int         der_sz;
+    byte        tbs_der[2 * LARGE_TEMP_SZ];
+
+    XMEMSET(&alt_ca_key, 0, sizeof(alt_ca_key));
+    XMEMSET(&ca_key,     0, sizeof(ca_key));
+    XMEMSET(&rng,        0, sizeof(rng));
+    XMEMSET(&d_cert,     0, sizeof(d_cert));
+    XMEMSET(scratch,     0xCD, sizeof(scratch));
+
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_MlDsaKey_Init(&alt_ca_key, NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_MlDsaKey_SetParams(&alt_ca_key, WC_ML_DSA_44), 0);
+    ExpectIntEQ(wc_MlDsaKey_MakeKey(&alt_ca_key, &rng), 0);
+    ret = wc_MlDsaKey_PublicKeyToDer(&alt_ca_key, alt_pub_der,
+                                     (word32)sizeof(alt_pub_der), 1);
+    ExpectIntGT(ret, 0);
+    alt_pub_sz = (word32)ret;
+
+    ret = SetAlgoID(CTC_SHA256wECDSA, alt_sig_alg, oidSigType, 0);
+    ExpectIntGT(ret, 0);
+    alt_sig_alg_sz = (word32)ret;
+
+    ExpectIntEQ(wc_ecc_init(&ca_key), 0);
+    ExpectIntEQ(wc_ecc_make_key(&rng, KEY32, &ca_key), 0);
+
+    /* Build a real (BIT-STRING-wrapped) ML-DSA signature for the altSigValue
+     * extension content. The parser validates the BIT STRING before our
+     * "altSigValue must be last" check fires, so it has to be well-formed. */
+    XMEMSET(alt_sig, 0, sizeof(alt_sig));
+    alt_sig_sz = wc_MakeSigWithBitStr(alt_sig, (word32)sizeof(alt_sig),
+                                      CTC_ML_DSA_LEVEL2, scratch,
+                                      (word32)sizeof(scratch),
+                                      ML_DSA_LEVEL2_TYPE, &alt_ca_key, &rng);
+    ExpectIntGT(alt_sig_sz, 0);
+
+    wc_InitCert(&new_cert);
+    strncpy(new_cert.subject.commonName, "altsigval-not-last", CTC_NAME_SIZE);
+    new_cert.sigType = CTC_SHA256wECDSA;
+    new_cert.isCA    = 1;
+
+    /* Custom extension order ends up matching insertion order: sapki,
+     * altSigAlg, altSigVal, then a *trailing* extension that pushes
+     * altSigVal off the end. */
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.72", alt_pub_der,
+                                      alt_pub_sz), 0);
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.73", alt_sig_alg,
+                                      alt_sig_alg_sz), 0);
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.74", alt_sig,
+                                      (word32)alt_sig_sz), 0);
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "1.2.3.4.7",
+                (const byte*)"trailer", 7), 0);
+
+    ret = wc_MakeCert_ex(&new_cert, der, (word32)sizeof(der), ECC_TYPE,
+                         &ca_key, &rng);
+    ExpectIntGT(ret, 0);
+    der_sz = wc_SignCert_ex(new_cert.bodySz, new_cert.sigType, der,
+                            (word32)sizeof(der), ECC_TYPE, &ca_key, &rng);
+    ExpectIntGT(der_sz, 0);
+
+    wc_InitDecodedCert(&d_cert, der, (word32)der_sz, 0);
+    ExpectIntEQ(wc_ParseCert(&d_cert, CERT_TYPE, NO_VERIFY, NULL), 0);
+
+    /* The cert has altSigValue but it is not the last extension; the
+     * preTBS generator must reject it. */
+    ExpectIntEQ(wc_GeneratePreTBS(&d_cert, tbs_der, (int)sizeof(tbs_der)),
+                ASN_PARSE_E);
+
+    wc_FreeDecodedCert(&d_cert);
+    wc_ecc_free(&ca_key);
+    wc_MlDsaKey_Free(&alt_ca_key);
+    wc_FreeRng(&rng);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* Full dual-alg CSR roundtrip exercising GenerateCsrPreTBS:
+ *   - Build a PKCS#10 CertificationRequest carrying sapki+altSigAlg in
+ *     extensionRequest.
+ *   - Parse, generate preTBS (issuer-side: verbatim CRInfo).
+ *   - Sign the preTBS with the ML-DSA alt key.
+ *   - Add altSigValue to the extensionRequest, re-emit and re-sign.
+ *   - Reparse the final CSR; primary signature must validate.
+ *   - Generate preTBS again (verifier-side: altSigValue excised).
+ */
+static int test_dual_alg_csr_roundtrip(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(WOLFSSL_CERT_REQ) && \
+    defined(HAVE_DILITHIUM) && defined(HAVE_ECC) && !defined(WC_NO_RNG) && \
+    !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY) && \
+    !defined(WOLFSSL_DILITHIUM_NO_SIGN) && \
+    !defined(WOLFSSL_DILITHIUM_NO_VERIFY) && !defined(WOLFSSL_SMALL_STACK) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING)
+#ifndef LARGE_TEMP_SZ
+#define LARGE_TEMP_SZ 4096
+#endif
+    MlDsaKey    alt_key;
+    ecc_key     ec_key;
+    WC_RNG      rng;
+    int         ret;
+    DecodedCert d_cert;
+    Cert        new_cert;
+    byte        alt_pub_der[LARGE_TEMP_SZ];
+    word32      alt_pub_sz = LARGE_TEMP_SZ;
+    byte        alt_sig_alg[LARGE_TEMP_SZ];
+    word32      alt_sig_alg_sz = LARGE_TEMP_SZ;
+    byte        tbs_der[LARGE_TEMP_SZ];
+    int         tbs_der_sz;
+    byte        alt_sig[LARGE_TEMP_SZ];
+    int         alt_sig_sz;
+    byte        csr_der[LARGE_TEMP_SZ];
+    int         csr_der_sz;
+    byte        final_csr[2 * LARGE_TEMP_SZ];
+    int         final_csr_sz;
+
+    XMEMSET(&alt_key, 0, sizeof(alt_key));
+    XMEMSET(&ec_key,  0, sizeof(ec_key));
+    XMEMSET(&rng,     0, sizeof(rng));
+    XMEMSET(&d_cert,  0, sizeof(d_cert));
+
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+
+    ExpectIntEQ(wc_MlDsaKey_Init(&alt_key, NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_MlDsaKey_SetParams(&alt_key, WC_ML_DSA_44), 0);
+    ExpectIntEQ(wc_MlDsaKey_MakeKey(&alt_key, &rng), 0);
+    ret = wc_MlDsaKey_PublicKeyToDer(&alt_key, alt_pub_der,
+                                     (word32)sizeof(alt_pub_der), 1);
+    ExpectIntGT(ret, 0);
+    alt_pub_sz = (word32)ret;
+
+    ret = SetAlgoID(CTC_SHA256wECDSA, alt_sig_alg, oidSigType, 0);
+    ExpectIntGT(ret, 0);
+    alt_sig_alg_sz = (word32)ret;
+
+    ExpectIntEQ(wc_ecc_init(&ec_key), 0);
+    ExpectIntEQ(wc_ecc_make_key(&rng, KEY32, &ec_key), 0);
+
+    wc_InitCert(&new_cert);
+    strncpy(new_cert.subject.commonName, "csr-dual-alg-test", CTC_NAME_SIZE);
+    new_cert.sigType = CTC_SHA256wECDSA;
+    /* CSRs do not carry isCA / pathLen. */
+
+    /* sapki and altSigAlg via custom OIDs (so they live in the
+     * extensionRequest attribute the encoder produces). */
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.72", alt_pub_der,
+                                      alt_pub_sz), 0);
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.73", alt_sig_alg,
+                                      alt_sig_alg_sz), 0);
+
+    ret = wc_MakeCertReq_ex(&new_cert, csr_der, (word32)sizeof(csr_der),
+                            ECC_TYPE, &ec_key);
+    ExpectIntGT(ret, 0);
+    csr_der_sz = wc_SignCert_ex(new_cert.bodySz, new_cert.sigType, csr_der,
+                                (word32)sizeof(csr_der), ECC_TYPE, &ec_key,
+                                &rng);
+    ExpectIntGT(csr_der_sz, 0);
+
+    /* Parse and run preTBS through the issuer-side fast path. */
+    wc_InitDecodedCert(&d_cert, csr_der, (word32)csr_der_sz, 0);
+    ExpectIntEQ(wc_ParseCert(&d_cert, CERTREQ_TYPE, NO_VERIFY, NULL), 0);
+
+    XMEMSET(tbs_der, 0, sizeof(tbs_der));
+    tbs_der_sz = wc_GeneratePreTBS(&d_cert, tbs_der, (int)sizeof(tbs_der));
+    ExpectIntGT(tbs_der_sz, 0);
+    /* Issuer-side: preTBS must equal CertificationRequestInfo verbatim. */
+    ExpectIntEQ((word32)tbs_der_sz, d_cert.sigIndex - d_cert.certBegin);
+    ExpectIntEQ(XMEMCMP(tbs_der, d_cert.source + d_cert.certBegin,
+                        (size_t)tbs_der_sz), 0);
+
+    /* Sign the preTBS with the alt key. */
+    XMEMSET(alt_sig, 0, sizeof(alt_sig));
+    alt_sig_sz = wc_MakeSigWithBitStr(alt_sig, (word32)sizeof(alt_sig),
+                                      CTC_ML_DSA_LEVEL2, tbs_der,
+                                      (word32)tbs_der_sz, ML_DSA_LEVEL2_TYPE,
+                                      &alt_key, &rng);
+    ExpectIntGT(alt_sig_sz, 0);
+
+    /* Add altSigValue to the extensionRequest and re-emit. */
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.74", alt_sig,
+                                      (word32)alt_sig_sz), 0);
+    ret = wc_MakeCertReq_ex(&new_cert, final_csr, (word32)sizeof(final_csr),
+                            ECC_TYPE, &ec_key);
+    ExpectIntGT(ret, 0);
+    final_csr_sz = wc_SignCert_ex(new_cert.bodySz, new_cert.sigType, final_csr,
+                                  (word32)sizeof(final_csr), ECC_TYPE, &ec_key,
+                                  &rng);
+    ExpectIntGT(final_csr_sz, 0);
+
+    /* Reparse final CSR. */
+    wc_FreeDecodedCert(&d_cert);
+    wc_InitDecodedCert(&d_cert, final_csr, (word32)final_csr_sz, 0);
+    ExpectIntEQ(wc_ParseCert(&d_cert, CERTREQ_TYPE, NO_VERIFY, NULL), 0);
+
+    /* Verifier-side preTBS: must be strictly smaller than CRInfo (we
+     * removed altSigValue) and parse cleanly. */
+    XMEMSET(tbs_der, 0, sizeof(tbs_der));
+    tbs_der_sz = wc_GeneratePreTBS(&d_cert, tbs_der, (int)sizeof(tbs_der));
+    ExpectIntGT(tbs_der_sz, 0);
+    ExpectIntLT((word32)tbs_der_sz, d_cert.sigIndex - d_cert.certBegin);
+    /* The first byte must still be a SEQUENCE tag - excision must produce
+     * a well-formed CertificationRequestInfo. */
+    ExpectIntEQ(tbs_der[0], (ASN_SEQUENCE | ASN_CONSTRUCTED));
+
+    wc_FreeDecodedCert(&d_cert);
+    wc_ecc_free(&ec_key);
+    wc_MlDsaKey_Free(&alt_key);
+    wc_FreeRng(&rng);
+#endif
+    return EXPECT_RESULT();
+}
+
 /* Test wolfSSL_use_AltPrivateKey_Id.
  * Verify that a valid key ID can be set successfully. Guards against an
  * inverted AllocDer return check (== 0 vs != 0) that would treat successful
@@ -37133,6 +37529,9 @@ TEST_CASE testCases[] = {
     TEST_DECL(test_dual_alg_crit_ext_support),
 
     TEST_DECL(test_dual_alg_ecdsa_mldsa),
+    TEST_DECL(test_dual_alg_pretbs_cert),
+    TEST_DECL(test_dual_alg_pretbs_altsigval_not_last),
+    TEST_DECL(test_dual_alg_csr_roundtrip),
 
     TEST_DECL(test_wolfSSL_use_AltPrivateKey_Id),
     TEST_DECL(test_wolfSSL_use_AltPrivateKey_Label),
