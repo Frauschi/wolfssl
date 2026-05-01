@@ -16584,8 +16584,22 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                                             sigCtx->heap, sigCtx->devId)) < 0) {
                         goto exit_cs;
                     }
-                    if ((ret = wc_ed25519_import_public(key, keySz,
-                                                    sigCtx->key.ed25519)) < 0) {
+                    /* Two callers feed this path with different key
+                     * encodings: the primary-signature verify hands us a raw
+                     * 32-byte public key (StoreKey strips the SPKI BIT
+                     * STRING wrapper into cert->publicKey), while the X9.146
+                     * alt-signature verify hands us the full
+                     * SubjectPublicKeyInfo DER from cert->ca->sapkiDer.
+                     * Try the raw form first and fall back to SPKI parsing
+                     * if that doesn't fit. */
+                    ret = wc_ed25519_import_public(key, keySz,
+                                                   sigCtx->key.ed25519);
+                    if (ret != 0) {
+                        word32 idx = 0;
+                        ret = wc_Ed25519PublicKeyDecode(key, &idx,
+                                            sigCtx->key.ed25519, keySz);
+                    }
+                    if (ret < 0) {
                         WOLFSSL_MSG("ASN Key import error ED25519");
                         WOLFSSL_ERROR_VERBOSE(ret);
                         goto exit_cs;
@@ -16611,8 +16625,17 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                     if ((ret = wc_ed448_init(sigCtx->key.ed448)) < 0) {
                         goto exit_cs;
                     }
-                    if ((ret = wc_ed448_import_public(key, keySz,
-                                                      sigCtx->key.ed448)) < 0) {
+                    /* Same dual-input pattern as ED25519 above: raw key for
+                     * the primary-signature path, SPKI DER for the X9.146
+                     * alt-signature path. */
+                    ret = wc_ed448_import_public(key, keySz,
+                                                 sigCtx->key.ed448);
+                    if (ret != 0) {
+                        word32 idx = 0;
+                        ret = wc_Ed448PublicKeyDecode(key, &idx,
+                                            sigCtx->key.ed448, keySz);
+                    }
+                    if (ret < 0) {
                         WOLFSSL_MSG("ASN Key import error ED448");
                         WOLFSSL_ERROR_VERBOSE(ret);
                         goto exit_cs;

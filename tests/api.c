@@ -2619,46 +2619,41 @@ static int do_build_dual_alg_self_signed_ed25519alt(byte* out, word32 outSz,
 }
 #endif
 
-/* Parser tolerance for an unsupported alt-key OID.
- *
- * Per the soft-skip behaviour in DecodePeerAltPubKey, an alt-key OID we
- * don't implement (e.g. Ed25519 - not in the cert/CSR alt-key dispatch
- * switch) must not break a purely-native (sigSpec == NATIVE) handshake.
- *
- * A pure TLS-handshake regression test isn't currently possible: the
- * cert's alt signature has to verify before ProcessPeerCerts /
- * DecodePeerAltPubKey is reached, and the Ed25519 leg of ConfirmSignature
- * (used for alt-sig verify) calls wc_ed25519_import_public on
- * cert->ca->sapkiDer - which is the SPKI DER, not the raw 32-byte key
- * the function expects. That's a pre-existing wolfSSL gap independent of
- * this PR (the ECC and RSA cases use wc_*PublicKeyDecode which accepts
- * SPKI DER).
- *
- * What we *can* test directly: that the parser accepts a cert carrying
- * an Ed25519 sapki with NO_VERIFY, and that wc_GeneratePreTBS handles
- * the resulting DecodedCert (the receive-side tolerance fires from
- * DecodePeerAltPubKey on top of this). */
+/* Unsupported alt-key OID + NATIVE handshake: build a self-signed cert
+ * with primary ECDSA + alt Ed25519 (real key, real Ed25519 alt
+ * signature). The cert validates cleanly during ParseCertRelative -
+ * ConfirmSignature now parses SPKI DER for Ed25519/Ed448 sapki, the
+ * companion fix in this PR - but DecodePeerAltPubKey has no case for
+ * Ed25519. Per the soft-skip behaviour the handshake must still succeed
+ * when sigSpec is NATIVE (the alt key just isn't decoded into any
+ * peer*Key slot, since NATIVE never consumes it). */
 static int test_dual_alg_unsupported_alt_native(void)
 {
     EXPECT_DECLS;
 #if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_ECC) && \
     defined(HAVE_ED25519) && defined(HAVE_ED25519_KEY_EXPORT) && \
-    defined(HAVE_ED25519_SIGN) && !defined(WC_NO_RNG) && \
-    !defined(WOLFSSL_SMALL_STACK) && \
-    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING)
+    defined(HAVE_ED25519_KEY_IMPORT) && \
+    defined(HAVE_ED25519_SIGN) && defined(HAVE_ED25519_VERIFY) && \
+    !defined(WC_NO_RNG) && !defined(WOLFSSL_SMALL_STACK) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING) && \
+    !defined(NO_TLS) && defined(WOLFSSL_TLS13)
     WC_RNG       rng;
     ecc_key      primaryKey;
     ed25519_key  altKey;
-    DecodedCert  d_cert;
+    byte         primaryKeyDer[256];
+    int          primaryKeyDerSz;
     byte         certDer[2 * LARGE_TEMP_SZ];
     int          certDerSz;
-    byte         tbs[2 * LARGE_TEMP_SZ];
-    int          tbsSz;
+    WOLFSSL_CTX *ctx_c = NULL;
+    WOLFSSL_CTX *ctx_s = NULL;
+    WOLFSSL     *ssl_c = NULL;
+    WOLFSSL     *ssl_s = NULL;
+    struct test_memio_ctx test_ctx;
 
     XMEMSET(&rng, 0, sizeof(rng));
     XMEMSET(&primaryKey, 0, sizeof(primaryKey));
     XMEMSET(&altKey, 0, sizeof(altKey));
-    XMEMSET(&d_cert, 0, sizeof(d_cert));
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
 
     ExpectIntEQ(wc_InitRng(&rng), 0);
     ExpectIntEQ(wc_ecc_init(&primaryKey), 0);
@@ -2666,29 +2661,33 @@ static int test_dual_alg_unsupported_alt_native(void)
     ExpectIntEQ(wc_ed25519_init(&altKey), 0);
     ExpectIntEQ(wc_ed25519_make_key(&rng, ED25519_KEY_SIZE, &altKey), 0);
 
+    primaryKeyDerSz = wc_EccKeyToDer(&primaryKey, primaryKeyDer,
+                                     sizeof(primaryKeyDer));
+    ExpectIntGT(primaryKeyDerSz, 0);
+
     if (EXPECT_SUCCESS()) {
         certDerSz = do_build_dual_alg_self_signed_ed25519alt(certDer,
                         sizeof(certDer), &primaryKey, &altKey, &rng);
         ExpectIntGT(certDerSz, 0);
 
-        /* Parser must accept the cert (NO_VERIFY skips alt-sig verify;
-         * sapkiOID lands as ED25519k, which is what DecodePeerAltPubKey's
-         * default branch is designed to tolerate). */
-        wc_InitDecodedCert(&d_cert, certDer, (word32)certDerSz, 0);
-        ExpectIntEQ(wc_ParseCert(&d_cert, CERT_TYPE, NO_VERIFY, NULL), 0);
-        ExpectIntNE(d_cert.extSapkiSet, 0);
-        ExpectIntNE(d_cert.extAltSigAlgSet, 0);
-        ExpectIntNE(d_cert.extAltSigValSet, 0);
+        ExpectIntEQ(test_memio_setup_ex(&test_ctx, &ctx_c, &ctx_s, &ssl_c,
+                    &ssl_s, wolfTLSv1_3_client_method,
+                    wolfTLSv1_3_server_method,
+                    certDer, certDerSz,
+                    certDer, certDerSz,
+                    primaryKeyDer, primaryKeyDerSz), 0);
 
-        /* wc_GeneratePreTBS must still excise altSigValue cleanly even
-         * though the alt key uses an algorithm DecodePeerAltPubKey
-         * doesn't dispatch on. */
-        tbsSz = wc_GeneratePreTBS(&d_cert, tbs, (int)sizeof(tbs));
-        ExpectIntGT(tbsSz, 0);
-        ExpectIntLT((word32)tbsSz, d_cert.sigIndex - d_cert.certBegin);
+        /* Default sigSpec is NATIVE; handshake must succeed. The Ed25519
+         * alt sig is verified at parse time (ConfirmSignature now handles
+         * SPKI DER for Ed25519), and DecodePeerAltPubKey hits its default
+         * "log + skip" branch for the unrecognised OID. */
+        ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
     }
 
-    wc_FreeDecodedCert(&d_cert);
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
     wc_ecc_free(&primaryKey);
     wc_ed25519_free(&altKey);
     wc_FreeRng(&rng);
