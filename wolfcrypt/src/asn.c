@@ -12939,7 +12939,7 @@ static int GetCertKey(DecodedCert* cert, const byte* source, word32* inOutIdx,
 #if defined(HAVE_ECC) || !defined(NO_DSA)
     int pubLen;
 #endif
-#if defined(HAVE_ECC) || !defined(NO_DSA) || defined(WOLFSSL_DUAL_ALG_CERTS)
+#if defined(HAVE_ECC) || !defined(NO_DSA)
     int pubIdx = (int)srcIdx;
 #endif
     int ret = 0;
@@ -12964,13 +12964,6 @@ static int GetCertKey(DecodedCert* cert, const byte* source, word32* inOutIdx,
     pubLen = (int)srcIdx - pubIdx + length;
 #endif
     maxIdx = srcIdx + (word32)length;
-
-#ifdef WOLFSSL_DUAL_ALG_CERTS
-    /* Capture the raw DER-encoded SubjectPublicKeyInfo so the preTBS
-     * generator can re-emit it without a decode/encode round-trip. */
-    cert->rawPublicKey = source + pubIdx;
-    cert->rawPubKeySize = (word32)((int)srcIdx - pubIdx + length);
-#endif
 
     /* Decode the algorithm identifier for the key. */
     if (GetAlgoId(source, &srcIdx, &cert->keyOID, oidKeyType, maxIdx) < 0) {
@@ -13900,6 +13893,7 @@ static int GenerateDNSEntryRIDString(DNS_entry* entry, void* heap)
  */
 static int AddDNSEntryToList(DNS_entry** lst, DNS_entry* entry)
 {
+#if defined(OPENSSL_EXTRA) && !defined(WOLFSSL_ALT_NAMES_NO_REV)
     entry->next = NULL;
     if (*lst == NULL) {
         /* First on list */
@@ -13914,6 +13908,11 @@ static int AddDNSEntryToList(DNS_entry** lst, DNS_entry* entry)
         /* Add to end */
         temp->next = entry;
     }
+#else
+    /* Prepend entry to linked list. */
+    entry->next = *lst;
+    *lst = entry;
+#endif
 
     return 0;
 }
@@ -27672,14 +27671,6 @@ static int MakeAnyCert(Cert* cert, byte* derBuffer, word32 derSz,
             cert->keyType = SPHINCS_SMALL_LEVEL5_KEY;
         }
 #endif /* HAVE_SPHINCS */
-#ifdef WOLFSSL_DUAL_ALG_CERTS
-        /* Caller may supply a pre-encoded SubjectPublicKeyInfo (e.g. from
-         * wc_GeneratePreTBS) instead of a key object. Require the matching
-         * keyType to also be pre-set. */
-        else if (cert->keyType != 0 && cert->pubKeyDer != NULL &&
-                 cert->pubKeyLen > 0) {
-        }
-#endif
         else {
             ret = BAD_FUNC_ARG;
         }
@@ -27725,19 +27716,11 @@ static int MakeAnyCert(Cert* cert, byte* derBuffer, word32 derSz,
         }
     }
     if (ret >= 0) {
-    #ifdef WOLFSSL_DUAL_ALG_CERTS
-        if (cert->pubKeyLen > 0) {
-            publicKeySz = (word32)cert->pubKeyLen;
-        }
-        else
-    #endif
-        {
-            /* Calculate public key encoding size. */
-            ret = EncodePublicKey(cert->keyType, NULL, 0, rsaKey,
-                    eccKey, ed25519Key, ed448Key, dsaKey, falconKey,
-                    dilithiumKey, sphincsKey);
-            publicKeySz = (word32)ret;
-        }
+        /* Calculate public key encoding size. */
+        ret = EncodePublicKey(cert->keyType, NULL, 0, rsaKey,
+                eccKey, ed25519Key, ed448Key, dsaKey, falconKey,
+                dilithiumKey, sphincsKey);
+        publicKeySz = (word32)ret;
     }
     if (ret >= 0) {
         /* Calculate extensions encoding size - may be 0. */
@@ -27915,23 +27898,15 @@ static int MakeAnyCert(Cert* cert, byte* derBuffer, word32 derSz,
         }
     }
     if (ret >= 0) {
-    #ifdef WOLFSSL_DUAL_ALG_CERTS
-        if (cert->pubKeyLen > 0) {
-            XMEMCPY((byte*)dataASN[X509CERTASN_IDX_TBS_SPUBKEYINFO_SEQ]
-                            .data.buffer.data, cert->pubKeyDer, publicKeySz);
-        }
-        else
-    #endif
-        {
-            /* Encode public key into buffer. */
-            ret = EncodePublicKey(cert->keyType,
-                (byte*)(wc_ptr_t)dataASN[X509CERTASN_IDX_TBS_SPUBKEYINFO_SEQ]
-                            .data.buffer.data,
-                (int)dataASN[X509CERTASN_IDX_TBS_SPUBKEYINFO_SEQ]
-                            .data.buffer.length,
-                rsaKey, eccKey, ed25519Key, ed448Key, dsaKey,
-                falconKey, dilithiumKey, sphincsKey);
-        }
+        /* Encode public key into buffer. */
+        /* safe cast -- the pointer is actually inside derBuffer. */
+        ret = EncodePublicKey(cert->keyType,
+            (byte*)(wc_ptr_t)dataASN[X509CERTASN_IDX_TBS_SPUBKEYINFO_SEQ]
+                           .data.buffer.data,
+            (int)dataASN[X509CERTASN_IDX_TBS_SPUBKEYINFO_SEQ]
+                           .data.buffer.length,
+            rsaKey, eccKey, ed25519Key, ed448Key, dsaKey,
+            falconKey, dilithiumKey, sphincsKey);
     }
     if ((ret >= 0) && (!dataASN[X509CERTASN_IDX_TBS_EXT_SEQ].noOut)) {
         /* Encode extensions into buffer. */
@@ -28195,14 +28170,6 @@ static int MakeCertReq(Cert* cert, byte* derBuffer, word32 derSz,
             cert->keyType = SPHINCS_SMALL_LEVEL5_KEY;
         }
 #endif /* HAVE_SPHINCS */
-#ifdef WOLFSSL_DUAL_ALG_CERTS
-        /* Caller may supply a pre-encoded SubjectPublicKeyInfo (e.g. from
-         * wc_GeneratePreTBS) instead of a key object. Require the matching
-         * keyType to also be pre-set. */
-        else if (cert->keyType != 0 && cert->pubKeyDer != NULL &&
-                 cert->pubKeyLen > 0) {
-        }
-#endif
         else {
             ret = BAD_FUNC_ARG;
         }
@@ -28222,19 +28189,11 @@ static int MakeCertReq(Cert* cert, byte* derBuffer, word32 derSz,
         }
     }
     if (ret >= 0) {
-    #ifdef WOLFSSL_DUAL_ALG_CERTS
-        if (cert->pubKeyLen > 0) {
-            publicKeySz = (word32)cert->pubKeyLen;
-        }
-        else
-    #endif
-        {
-            /* Determine encode public key size. */
-            ret = EncodePublicKey(cert->keyType, NULL, 0, rsaKey,
-                eccKey, ed25519Key, ed448Key, dsaKey, falconKey,
-                dilithiumKey, sphincsKey);
-            publicKeySz = (word32)ret;
-        }
+        /* Determine encode public key size. */
+         ret = EncodePublicKey(cert->keyType, NULL, 0, rsaKey,
+             eccKey, ed25519Key, ed448Key, dsaKey, falconKey,
+             dilithiumKey, sphincsKey);
+         publicKeySz = (word32)ret;
     }
     if (ret >= 0) {
         /* Determine encode extensions size. */
@@ -28345,21 +28304,15 @@ static int MakeCertReq(Cert* cert, byte* derBuffer, word32 derSz,
         }
     }
     if (ret >= 0 && derBuffer != NULL) {
-    #ifdef WOLFSSL_DUAL_ALG_CERTS
-        if (cert->pubKeyLen > 0) {
-            XMEMCPY((byte*)dataASN[CERTREQBODYASN_IDX_SPUBKEYINFO_SEQ]
-                            .data.buffer.data, cert->pubKeyDer, publicKeySz);
-        }
-        else
-    #endif
-        {
-            /* Encode public key into space in buffer. */
-            ret = EncodePublicKey(cert->keyType,
-                (byte*)(wc_ptr_t)dataASN[CERTREQBODYASN_IDX_SPUBKEYINFO_SEQ].data.buffer.data,
-                (int)dataASN[CERTREQBODYASN_IDX_SPUBKEYINFO_SEQ].data.buffer.length,
-                rsaKey, eccKey, ed25519Key, ed448Key, dsaKey, falconKey,
-                dilithiumKey, sphincsKey);
-        }
+        /* Encode public key into space in buffer. */
+        /* safe cast -- the pointer is actually inside derBuffer. */
+        ret = EncodePublicKey(
+            cert->keyType,
+            (byte*)(wc_ptr_t)
+                dataASN[CERTREQBODYASN_IDX_SPUBKEYINFO_SEQ].data.buffer.data,
+            (int)dataASN[CERTREQBODYASN_IDX_SPUBKEYINFO_SEQ].data.buffer.length,
+            rsaKey, eccKey, ed25519Key, ed448Key, dsaKey, falconKey,
+            dilithiumKey, sphincsKey);
     }
     if ((ret >= 0 && derBuffer != NULL) &&
             (!dataASN[CERTREQBODYASN_IDX_EXT_BODY].noOut)) {
@@ -29574,43 +29527,16 @@ int wc_SetCustomExtension(Cert *cert, int critical, const char *oid,
 static int SetAltNamesFromDcert(Cert* cert, DecodedCert* decoded)
 {
     int ret = 0;
-    DNS_entry* altNamesSrc = decoded->altNames;
-    DNS_entry* listEnd = NULL;
 
     cert->altNamesSz = 0;
-
-#ifndef IGNORE_NAME_CONSTRAINTS
-    /* Also flatten altEmailNames if present. FlattenAltNames takes a single
-     * linked list, so temporarily splice the two together and restore
-     * decoded->altNames->...->next below. NOTE: this mutates the source
-     * DecodedCert for the duration of the call. Callers must not share
-     * a DecodedCert across threads while this runs. */
-    if (altNamesSrc == NULL) {
-        altNamesSrc = decoded->altEmailNames;
-    }
-    else if (decoded->altEmailNames != NULL) {
-        listEnd = altNamesSrc;
-        while (listEnd->next != NULL) {
-            listEnd = listEnd->next;
-        }
-        listEnd->next = decoded->altEmailNames;
-    }
-#endif
-
-    if (altNamesSrc) {
-        ret = FlattenAltNames(cert->altNames, sizeof(cert->altNames),
-                              altNamesSrc);
+    if (decoded->altNames) {
+        ret = FlattenAltNames(cert->altNames,
+            sizeof(cert->altNames), decoded->altNames);
         if (ret >= 0) {
             cert->altNamesSz = ret;
             ret = 0;
         }
     }
-
-    if (decoded->extSubjAltNameCrit)
-        cert->altNamesCrit = 1;
-
-    if (listEnd)
-        listEnd->next = NULL;
 
     return ret;
 }
@@ -30091,190 +30017,206 @@ int wc_SetDatesBuffer(Cert* cert, const byte* der, int derSz)
 
 #endif /* WOLFSSL_ALT_NAMES */
 
+
+#endif /* WOLFSSL_CERT_GEN */
+
 #ifdef WOLFSSL_DUAL_ALG_CERTS
-/* Generate a der preTBS from a decoded cert, and write
- * to buffer.
+/* Generate the X9.146 preTBSCertificate from a parsed dual-algorithm
+ * certificate.
  *
- * @param [in]  dCert The decoded cert to parse.
- * @param [out] der   The der buffer to write in.
- * @param [in]  derSz The der buffer size.
+ * The preTBS is exactly the issuer's TBSCertificate with the
+ * altSignatureValue extension (id-altSigVal, OID 2.5.29.74) removed -
+ * byte for byte. We *excise* that extension from the parsed source
+ * bytes rather than re-encode through MakeAnyCert, so the alt
+ * signature can be verified regardless of whose encoder produced the
+ * original cert (extension order, criticality flags, name encoding,
+ * unknown extensions, etc. are preserved verbatim).
  *
- * @return  preTBS der size on success.
- * */
+ * Output layout, all written into the caller-provided buffer:
+ *   - new tbsCertificate SEQUENCE header (recomputed length)
+ *   - bytes [TBS content start .. extensions [3] EXPLICIT) verbatim
+ *   - new [3] EXPLICIT header
+ *   - new inner Extensions SEQUENCE header
+ *   - bytes [first extension .. altSigValue extension) verbatim
+ *   - bytes [byte after altSigValue extension .. last extension] verbatim
+ *
+ * Embedded-friendly: no heap allocation, ~60 bytes of stack, single
+ * forward parse of the extensions list, three XMEMCPY calls.
+ *
+ * @param [in]  dCert The parsed certificate (must have extAltSigValSet).
+ * @param [out] der   Output buffer for the preTBS DER.
+ * @param [in]  derSz Output buffer capacity.
+ *
+ * @return  preTBS DER size on success.
+ * @return  BAD_FUNC_ARG / BUFFER_E / ASN_PARSE_E / NOT_COMPILED_IN
+ *          on failure.
+ */
 int wc_GeneratePreTBS(DecodedCert* dCert, byte *der, int derSz)
 {
-    int ret = 0;
-#ifndef WOLFSSL_SMALL_STACK
-    Cert tbsCert[1];
-#else
-    Cert* tbsCert;
-#endif
-#ifdef WOLFSSL_CERT_EXT
-    int i;
-#endif
+    int    ret = 0;
+    int    len;
+    byte   tag;
+    word32 idx;
+    word32 walkIdx;
+    word32 tbsContentStart;
+    word32 outerExplicitContentLen;
+    word32 innerSeqContentStart;
+    word32 innerSeqContentEnd;
+    word32 innerSeqContentLen;
+    word32 excisedStart = 0;
+    word32 excisedEnd   = 0;
+    word32 newInnerSeqContentLen;
+    word32 newInnerSeqHeaderSz;
+    word32 newOuterExplicitContentLen;
+    word32 newOuterExplicitHeaderSz;
+    word32 newTbsContentLen;
+    word32 newTbsTotal;
+    word32 prefixLen;
+    word32 outIdx;
 
     WOLFSSL_ENTER("wc_GeneratePreTBS");
 
-    if (dCert == NULL || der == NULL || derSz == 0) {
+    if (dCert == NULL || der == NULL || derSz <= 0) {
         return BAD_FUNC_ARG;
     }
-
-#ifdef WOLFSSL_SMALL_STACK
-    tbsCert = (Cert*)XMALLOC(sizeof(Cert), dCert->heap, DYNAMIC_TYPE_CERT);
-    if (tbsCert == NULL) {
-        return MEMORY_E;
+#ifdef WOLFSSL_CERT_REQ
+    if (dCert->isCSR) {
+        /* CSRs carry extensions inside the attributes field, not as a
+         * top-level [3] EXPLICIT wrapper. The excision logic below is
+         * cert-shaped only. */
+        WOLFSSL_MSG("preTBS generation for CSRs not supported");
+        return NOT_COMPILED_IN;
     }
 #endif
-
-    ret = wc_InitCert_ex(tbsCert, dCert->heap, INVALID_DEVID);
-
-    if (ret == 0) {
-        /* Copy metadata. Do as many shallow copies as possible. */
-        tbsCert->version = dCert->version;
-        if (dCert->serialSz > (int)sizeof(tbsCert->serial)) {
-            ret = BUFFER_E;
-        }
-        else if (dCert->serialSz > 0) {
-            XMEMCPY(tbsCert->serial, dCert->serial, (size_t)dCert->serialSz);
-            tbsCert->serialSz = dCert->serialSz;
-        }
+    if (dCert->source == NULL || dCert->sigIndex <= dCert->certBegin) {
+        return ASN_PARSE_E;
     }
 
-    if (ret == 0) {
-        tbsCert->sigType = 0; /* Explicitly 0 to not encode it. */
-        tbsCert->selfSigned = dCert->selfSigned;
-        tbsCert->isCA = dCert->isCA;
-        tbsCert->pathLen = dCert->pathLength;
-        tbsCert->pathLenSet = dCert->pathLengthSet;
-        tbsCert->basicConstSet = dCert->extBasicConstSet;
-
-#ifdef WOLFSSL_CERT_EXT
-        if (dCert->extSubjKeyIdSet) {
-            if (dCert->extSubjKeyIdSz > (word32)sizeof(tbsCert->skid)) {
-                ret = BUFFER_E;
-            }
-            else {
-                XMEMCPY(tbsCert->skid, dCert->extSubjKeyId,
-                        dCert->extSubjKeyIdSz);
-                tbsCert->skidSz = (int)dCert->extSubjKeyIdSz;
-            }
+    /* Issuer-side fast path: cert does not (yet) have an altSigValue
+     * extension, so the preTBS *is* the TBS verbatim. */
+    if (!dCert->extAltSigValSet || dCert->altSigValDer == NULL) {
+        word32 tbsTotal = dCert->sigIndex - dCert->certBegin;
+        if (tbsTotal > (word32)derSz) {
+            return BUFFER_E;
         }
-        if (ret == 0 && dCert->extAuthKeyIdSet) {
-            if (dCert->extAuthKeyIdSz > (word32)sizeof(tbsCert->akid)) {
-                ret = BUFFER_E;
-            }
-            else {
-                XMEMCPY(tbsCert->akid, dCert->extAuthKeyId,
-                        dCert->extAuthKeyIdSz);
-                tbsCert->akidSz = (int)dCert->extAuthKeyIdSz;
-    #ifdef WOLFSSL_AKID_NAME
-                tbsCert->rawAkid = 0;
-    #endif
-            }
-        }
-        if (ret == 0) {
-            tbsCert->keyUsage = dCert->extKeyUsage;
-            tbsCert->extKeyUsage = dCert->extExtKeyUsage;
-    #ifndef IGNORE_NETSCAPE_CERT_TYPE
-            tbsCert->nsCertType = dCert->nsCertType;
-    #endif
-            for (i = 0; i < dCert->extCertPoliciesNb && i < MAX_CERTPOL_NB;
-                 i++) {
-                XMEMCPY(tbsCert->certPolicies[i], dCert->extCertPolicies[i],
-                        MAX_CERTPOL_SZ);
-            }
-            tbsCert->certPoliciesNb = dCert->extCertPoliciesNb;
-
-            if (dCert->extCrlInfoRawSz > (int)sizeof(tbsCert->crlInfo)) {
-                ret = BUFFER_E;
-            }
-            else if (dCert->extCrlInfoRaw != NULL &&
-                     dCert->extCrlInfoRawSz > 0) {
-                XMEMCPY(tbsCert->crlInfo, dCert->extCrlInfoRaw,
-                        (size_t)dCert->extCrlInfoRawSz);
-                tbsCert->crlInfoSz = dCert->extCrlInfoRawSz;
-            }
-        }
-#endif /* WOLFSSL_CERT_EXT */
+        XMEMCPY(der, dCert->source + dCert->certBegin, tbsTotal);
+        return (int)tbsTotal;
     }
 
-    if (ret == 0) {
-    #if defined(WOLFSSL_CERT_EXT) || defined(OPENSSL_EXTRA) || \
-        defined(WOLFSSL_CERT_REQ)
-        if (dCert->issuerRawLen > (int)sizeof(tbsCert->issRaw) ||
-            dCert->subjectRawLen > (int)sizeof(tbsCert->sbjRaw)) {
-            ret = BUFFER_E;
+    if (dCert->extensions == NULL || dCert->extensionsSz <= 0) {
+        return ASN_PARSE_E;
+    }
+
+    /* Locate where the TBSCertificate content starts (i.e. just after the
+     * outer SEQUENCE header). */
+    idx = 0;
+    ret = GetSequence(dCert->source + dCert->certBegin, &idx, &len,
+                      dCert->sigIndex - dCert->certBegin);
+    if (ret < 0) {
+        return ret;
+    }
+    tbsContentStart = dCert->certBegin + idx;
+
+    /* Step into the [3] EXPLICIT wrapper around Extensions. */
+    idx = 0;
+    ret = GetASNTag(dCert->extensions, &idx, &tag,
+                    (word32)dCert->extensionsSz);
+    if (ret < 0 || tag != (ASN_CONTEXT_SPECIFIC | ASN_CONSTRUCTED | 3)) {
+        return ASN_PARSE_E;
+    }
+    ret = GetLength(dCert->extensions, &idx, &len,
+                    (word32)dCert->extensionsSz);
+    if (ret < 0) {
+        return ret;
+    }
+    outerExplicitContentLen = (word32)len;
+
+    /* Step into the inner Extensions SEQUENCE OF. */
+    ret = GetSequence(dCert->extensions, &idx, &len,
+                      (word32)dCert->extensionsSz);
+    if (ret < 0) {
+        return ret;
+    }
+    innerSeqContentLen   = (word32)len;
+    innerSeqContentStart = dCert->extensionsIdx + idx;
+    innerSeqContentEnd   = innerSeqContentStart + innerSeqContentLen;
+    (void)outerExplicitContentLen;
+
+    /* Walk Extension items until we find the one whose extnValue OCTET
+     * STRING is the parsed altSigValDer. We use pointer overlap
+     * (altSigValDer points into source) instead of OID comparison, since
+     * the parser already validated the OID. */
+    walkIdx = innerSeqContentStart;
+    while (walkIdx < innerSeqContentEnd) {
+        word32 extStart = walkIdx;
+        word32 absIdx   = walkIdx - dCert->extensionsIdx;
+        int    extLen;
+
+        ret = GetSequence(dCert->extensions, &absIdx, &extLen,
+                          (word32)dCert->extensionsSz);
+        if (ret < 0) {
+            return ret;
         }
-        else {
-            if (dCert->issuerRaw != NULL && dCert->issuerRawLen > 0) {
-                XMEMCPY(tbsCert->issRaw, dCert->issuerRaw,
-                        (size_t)dCert->issuerRawLen);
-            }
-            if (dCert->subjectRaw != NULL && dCert->subjectRawLen > 0) {
-                XMEMCPY(tbsCert->sbjRaw, dCert->subjectRaw,
-                        (size_t)dCert->subjectRawLen);
-            }
+        walkIdx = dCert->extensionsIdx + absIdx + (word32)extLen;
+        if (walkIdx > innerSeqContentEnd) {
+            return ASN_PARSE_E;
         }
-    #endif
-    }
 
-    if (ret == 0) {
-        tbsCert->sapkiDer = dCert->sapkiDer;
-        tbsCert->sapkiLen = dCert->sapkiLen;
-        tbsCert->sapkiCrit = dCert->extSapkiCrit;
-
-        tbsCert->altSigAlgDer = dCert->altSigAlgDer;
-        tbsCert->altSigAlgLen = dCert->altSigAlgLen;
-        tbsCert->altSigAlgCrit = dCert->extAltSigAlgCrit;
-
-        /* Do not set tbsCert->altSigValDer to exclude it from the TBS cert. */
-
-        /* Reuse the already-parsed public key DER instead of decoding and
-         * re-encoding it during preTBS generation. */
-        tbsCert->pubKeyDer = dCert->rawPublicKey;
-        tbsCert->pubKeyLen = (int)dCert->rawPubKeySize;
-    }
-
-    /* Validity (CSRs don't carry it). */
-    if (ret == 0
-    #ifdef WOLFSSL_CERT_REQ
-        && !dCert->isCSR
-    #endif
-        ) {
-        ret = SetDatesFromDcert(tbsCert, dCert);
-    }
-
-#ifdef WOLFSSL_ALT_NAMES
-    /* Alt names. */
-    if (ret == 0 && (dCert->altNames != NULL || dCert->altEmailNames != NULL)) {
-        ret = SetAltNamesFromDcert(tbsCert, dCert);
-    }
-#endif
-
-    /* Generate the TBS certificate. */
-    if (ret == 0) {
-    #ifdef WOLFSSL_CERT_REQ
-        if (dCert->isCSR) {
-            ret = MakeCertReq(tbsCert, der, (word32)derSz, NULL, NULL, NULL,
-                              NULL, NULL, NULL, NULL, NULL);
-        }
-        else
-    #endif
-        {
-            ret = MakeAnyCert(tbsCert, der, (word32)derSz, NULL, NULL, NULL,
-                              NULL, NULL, NULL, NULL, NULL, NULL);
+        if ((dCert->altSigValDer >= dCert->source + extStart) &&
+            (dCert->altSigValDer <  dCert->source + walkIdx)) {
+            excisedStart = extStart;
+            excisedEnd   = walkIdx;
+            break;
         }
     }
+    if (excisedStart == excisedEnd) {
+        WOLFSSL_MSG("altSigValue extension not found in extensions list");
+        return ASN_PARSE_E;
+    }
 
-#ifdef WOLFSSL_SMALL_STACK
-    XFREE(tbsCert, dCert->heap, DYNAMIC_TYPE_CERT);
-#endif
+    /* Compute new lengths bottom-up. */
+    newInnerSeqContentLen = innerSeqContentLen - (excisedEnd - excisedStart);
+    newInnerSeqHeaderSz   = SetSequence(newInnerSeqContentLen, NULL);
+    newOuterExplicitContentLen = newInnerSeqHeaderSz + newInnerSeqContentLen;
+    newOuterExplicitHeaderSz   = 1 /* [3] tag */
+                                 + SetLength(newOuterExplicitContentLen, NULL);
 
-    return ret;
+    prefixLen = dCert->extensionsIdx - tbsContentStart;
+    newTbsContentLen = prefixLen + newOuterExplicitHeaderSz
+                                 + newOuterExplicitContentLen;
+    newTbsTotal = SetSequence(newTbsContentLen, NULL) + newTbsContentLen;
+
+    if (newTbsTotal > (word32)derSz) {
+        return BUFFER_E;
+    }
+
+    /* Emit. */
+    outIdx = SetSequence(newTbsContentLen, der);
+    /* Verbatim TBS prefix: version, serial, sigAlg, issuer, validity,
+     * subject, SPKI, optional unique IDs. */
+    XMEMCPY(der + outIdx, dCert->source + tbsContentStart, prefixLen);
+    outIdx += prefixLen;
+    /* New [3] EXPLICIT header. */
+    der[outIdx++] = ASN_CONTEXT_SPECIFIC | ASN_CONSTRUCTED | 3;
+    outIdx += SetLength(newOuterExplicitContentLen, der + outIdx);
+    /* New inner Extensions SEQUENCE header. */
+    outIdx += SetSequence(newInnerSeqContentLen, der + outIdx);
+    /* Extensions before altSigValue (verbatim). */
+    if (excisedStart > innerSeqContentStart) {
+        XMEMCPY(der + outIdx, dCert->source + innerSeqContentStart,
+                excisedStart - innerSeqContentStart);
+        outIdx += excisedStart - innerSeqContentStart;
+    }
+    /* Extensions after altSigValue (verbatim). */
+    if (innerSeqContentEnd > excisedEnd) {
+        XMEMCPY(der + outIdx, dCert->source + excisedEnd,
+                innerSeqContentEnd - excisedEnd);
+        outIdx += innerSeqContentEnd - excisedEnd;
+    }
+
+    return (int)outIdx;
 }
-#endif
-
-#endif /* WOLFSSL_CERT_GEN */
+#endif /* WOLFSSL_DUAL_ALG_CERTS */
 
 #if (defined(WOLFSSL_CERT_GEN) && defined(WOLFSSL_CERT_EXT)) \
         || defined(OPENSSL_EXTRA)

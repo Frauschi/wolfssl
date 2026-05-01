@@ -538,6 +538,12 @@
  * the matching ssl->peer*Key slot during cert parsing; if the algorithm
  * collides with the primary's slot the handshake is rejected with
  * PEER_KEY_ERROR.
+ *
+ * The verify path is the only feature that hard-requires WOLFSSL_ASN_TEMPLATE
+ * (for the parser fields wc_GeneratePreTBS reads). WOLFSSL_CERT_GEN and
+ * WOLFSSL_CERT_EXT are force-enabled so issuers can generate dual-alg certs;
+ * verify-only embedded builds may omit them once the corresponding code
+ * paths are isolated.
  */
 #ifdef WOLFSSL_DUAL_ALG_CERTS
     #ifdef NO_RSA
@@ -556,13 +562,6 @@
 
     #undef WOLFSSL_CERT_EXT
     #define WOLFSSL_CERT_EXT
-
-    /* wc_GeneratePreTBS calls SetDatesFromDcert / SetAltNamesFromDcert,
-     * which live under WOLFSSL_ALT_NAMES. Modern certs almost always carry
-     * a SubjectAltName extension, so a preTBS reconstruction without alt
-     * names would not round-trip. */
-    #undef WOLFSSL_ALT_NAMES
-    #define WOLFSSL_ALT_NAMES
 #endif /* WOLFSSL_DUAL_ALG_CERTS */
 
 /* RFC 8737 id-pe-acmeIdentifier (TLS-ALPN-01) requires SHA-256. */
