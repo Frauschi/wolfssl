@@ -30032,16 +30032,19 @@ int wc_SetDatesBuffer(Cert* cert, const byte* der, int derSz)
  * original cert (extension order, criticality flags, name encoding,
  * unknown extensions, etc. are preserved verbatim).
  *
+ * X9.146 / ITU-T X.509:2019 Annex A requires altSignatureValue to be the
+ * last extension in the certificate; we enforce that and reject any cert
+ * that does not conform.
+ *
  * Output layout, all written into the caller-provided buffer:
  *   - new tbsCertificate SEQUENCE header (recomputed length)
  *   - bytes [TBS content start .. extensions [3] EXPLICIT) verbatim
  *   - new [3] EXPLICIT header
  *   - new inner Extensions SEQUENCE header
  *   - bytes [first extension .. altSigValue extension) verbatim
- *   - bytes [byte after altSigValue extension .. last extension] verbatim
  *
  * Embedded-friendly: no heap allocation, ~60 bytes of stack, single
- * forward parse of the extensions list, three XMEMCPY calls.
+ * forward parse of the extensions list, two XMEMCPY calls.
  *
  * @param [in]  dCert The parsed certificate (must have extAltSigValSet).
  * @param [out] der   Output buffer for the preTBS DER.
@@ -30173,6 +30176,16 @@ int wc_GeneratePreTBS(DecodedCert* dCert, byte *der, int derSz)
         WOLFSSL_MSG("altSigValue extension not found in extensions list");
         return ASN_PARSE_E;
     }
+    /* X9.146 / ITU-T X.509:2019 Annex A: the altSignatureValue extension
+     * shall be the last extension in the extensions field. Reject any cert
+     * where altSigValue is followed by further extensions - it violates the
+     * standard, and silently accepting it could let a peer inject extension
+     * content that the alt signature does not cover. */
+    if (excisedEnd != innerSeqContentEnd) {
+        WOLFSSL_MSG("altSigValue is not the last extension; cert violates "
+                    "X9.146 requirement");
+        return ASN_PARSE_E;
+    }
 
     /* Compute new lengths bottom-up. */
     newInnerSeqContentLen = innerSeqContentLen - (excisedEnd - excisedStart);
@@ -30201,17 +30214,12 @@ int wc_GeneratePreTBS(DecodedCert* dCert, byte *der, int derSz)
     outIdx += SetLength(newOuterExplicitContentLen, der + outIdx);
     /* New inner Extensions SEQUENCE header. */
     outIdx += SetSequence(newInnerSeqContentLen, der + outIdx);
-    /* Extensions before altSigValue (verbatim). */
+    /* All extensions except altSigValue (which is required to be last) -
+     * single verbatim copy. */
     if (excisedStart > innerSeqContentStart) {
         XMEMCPY(der + outIdx, dCert->source + innerSeqContentStart,
                 excisedStart - innerSeqContentStart);
         outIdx += excisedStart - innerSeqContentStart;
-    }
-    /* Extensions after altSigValue (verbatim). */
-    if (innerSeqContentEnd > excisedEnd) {
-        XMEMCPY(der + outIdx, dCert->source + excisedEnd,
-                innerSeqContentEnd - excisedEnd);
-        outIdx += innerSeqContentEnd - excisedEnd;
     }
 
     return (int)outIdx;
