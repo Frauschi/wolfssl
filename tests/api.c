@@ -2098,6 +2098,604 @@ static int test_dual_alg_csr_roundtrip(void)
     return EXPECT_RESULT();
 }
 
+/* CSR analogue of test_dual_alg_pretbs_altsigval_not_last: build a CSR
+ * whose extensionRequest places altSigValue before another extension and
+ * verify wc_GeneratePreTBS returns ASN_PARSE_E (X9.146 conformance). */
+static int test_dual_alg_pretbs_csr_altsigval_not_last(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(WOLFSSL_CERT_REQ) && \
+    defined(HAVE_DILITHIUM) && defined(HAVE_ECC) && !defined(WC_NO_RNG) && \
+    !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY) && \
+    !defined(WOLFSSL_DILITHIUM_NO_SIGN) && \
+    !defined(WOLFSSL_DILITHIUM_NO_VERIFY) && !defined(WOLFSSL_SMALL_STACK) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING)
+#ifndef LARGE_TEMP_SZ
+#define LARGE_TEMP_SZ 4096
+#endif
+    MlDsaKey    alt_key;
+    ecc_key     ec_key;
+    WC_RNG      rng;
+    int         ret;
+    DecodedCert d_cert;
+    Cert        new_cert;
+    byte        alt_pub_der[LARGE_TEMP_SZ];
+    word32      alt_pub_sz = LARGE_TEMP_SZ;
+    byte        alt_sig_alg[LARGE_TEMP_SZ];
+    word32      alt_sig_alg_sz = LARGE_TEMP_SZ;
+    byte        alt_sig[LARGE_TEMP_SZ];
+    int         alt_sig_sz;
+    byte        scratch[16];
+    byte        csr_der[2 * LARGE_TEMP_SZ];
+    int         csr_der_sz;
+    byte        tbs_der[2 * LARGE_TEMP_SZ];
+
+    XMEMSET(&alt_key, 0, sizeof(alt_key));
+    XMEMSET(&ec_key,  0, sizeof(ec_key));
+    XMEMSET(&rng,     0, sizeof(rng));
+    XMEMSET(&d_cert,  0, sizeof(d_cert));
+    XMEMSET(scratch,  0xCD, sizeof(scratch));
+
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_MlDsaKey_Init(&alt_key, NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_MlDsaKey_SetParams(&alt_key, WC_ML_DSA_44), 0);
+    ExpectIntEQ(wc_MlDsaKey_MakeKey(&alt_key, &rng), 0);
+    ret = wc_MlDsaKey_PublicKeyToDer(&alt_key, alt_pub_der,
+                                     (word32)sizeof(alt_pub_der), 1);
+    ExpectIntGT(ret, 0);
+    alt_pub_sz = (word32)ret;
+
+    ret = SetAlgoID(CTC_SHA256wECDSA, alt_sig_alg, oidSigType, 0);
+    ExpectIntGT(ret, 0);
+    alt_sig_alg_sz = (word32)ret;
+
+    XMEMSET(alt_sig, 0, sizeof(alt_sig));
+    alt_sig_sz = wc_MakeSigWithBitStr(alt_sig, (word32)sizeof(alt_sig),
+                                      CTC_ML_DSA_LEVEL2, scratch,
+                                      (word32)sizeof(scratch),
+                                      ML_DSA_LEVEL2_TYPE, &alt_key, &rng);
+    ExpectIntGT(alt_sig_sz, 0);
+
+    ExpectIntEQ(wc_ecc_init(&ec_key), 0);
+    ExpectIntEQ(wc_ecc_make_key(&rng, KEY32, &ec_key), 0);
+
+    wc_InitCert(&new_cert);
+    strncpy(new_cert.subject.commonName, "csr-altsigval-not-last",
+            CTC_NAME_SIZE);
+    new_cert.sigType = CTC_SHA256wECDSA;
+
+    /* sapki -> altSigAlg -> altSigVal -> trailer (altSigVal not last). */
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.72", alt_pub_der,
+                                      alt_pub_sz), 0);
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.73", alt_sig_alg,
+                                      alt_sig_alg_sz), 0);
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "2.5.29.74", alt_sig,
+                                      (word32)alt_sig_sz), 0);
+    ExpectIntEQ(wc_SetCustomExtension(&new_cert, 0, "1.2.3.4.7",
+                (const byte*)"trailer", 7), 0);
+
+    ret = wc_MakeCertReq_ex(&new_cert, csr_der, (word32)sizeof(csr_der),
+                            ECC_TYPE, &ec_key);
+    ExpectIntGT(ret, 0);
+    csr_der_sz = wc_SignCert_ex(new_cert.bodySz, new_cert.sigType, csr_der,
+                                (word32)sizeof(csr_der), ECC_TYPE, &ec_key,
+                                &rng);
+    ExpectIntGT(csr_der_sz, 0);
+
+    wc_InitDecodedCert(&d_cert, csr_der, (word32)csr_der_sz, 0);
+    ExpectIntEQ(wc_ParseCert(&d_cert, CERTREQ_TYPE, NO_VERIFY, NULL), 0);
+
+    ExpectIntEQ(wc_GeneratePreTBS(&d_cert, tbs_der, (int)sizeof(tbs_der)),
+                ASN_PARSE_E);
+
+    wc_FreeDecodedCert(&d_cert);
+    wc_ecc_free(&ec_key);
+    wc_MlDsaKey_Free(&alt_key);
+    wc_FreeRng(&rng);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* ----------------------------------------------------------------------------
+ * Dual-algorithm certificate negative TLS handshake tests.
+ *
+ * These tests exercise the DecodePeerAltPubKey dispatch added to
+ * ProcessPeerCerts (src/internal.c). They build a self-signed dual-alg
+ * server certificate in memory, load it into a TLS 1.3 memio handshake as
+ * both server cert and client trust anchor, and assert the expected
+ * outcome:
+ *
+ *   - test_dual_alg_collision_handshake     primary alg == alt alg, must
+ *                                           fail (collision detection)
+ *   - test_dual_alg_minkeysize_handshake    alt key smaller than client's
+ *                                           minimum, must fail
+ *   - test_dual_alg_unsupported_alt_native  unrecognised alt-key OID with
+ *                                           sigSpec=NATIVE, must succeed
+ *                                           (graceful skip)
+ * ---------------------------------------------------------------------------- */
+#if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_ECC) && \
+    !defined(WC_NO_RNG) && !defined(WOLFSSL_SMALL_STACK) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING) && \
+    !defined(NO_TLS) && defined(WOLFSSL_TLS13)
+#ifndef LARGE_TEMP_SZ
+#define LARGE_TEMP_SZ 4096
+#endif
+/* Build a self-signed dual-alg X.509 cert into 'out'.
+ *
+ * The primary signature is computed with primaryKey (an ecc_key), the
+ * alternative public key (sapki) is taken verbatim from altPubDer, and
+ * the alternative signature is computed with altKey. Caller specifies the
+ * alt sig algorithm via altSigAlgType (CTC_*).
+ *
+ * Returns the final cert size on success or a negative error code. */
+static int do_build_dual_alg_self_signed(byte* out, word32 outSz,
+        ecc_key* primaryKey, ecc_key* altKey, int altSigAlgType,
+        const byte* altPubDer, word32 altPubSz, WC_RNG* rng)
+{
+    Cert        newCert;
+    DecodedCert pre;
+    byte        altSigAlg[64];
+    word32      altSigAlgSz;
+    byte        altSig[LARGE_TEMP_SZ];
+    int         altSigSz;
+    byte        tbs[2 * LARGE_TEMP_SZ];
+    int         tbsSz;
+    byte        interim[2 * LARGE_TEMP_SZ];
+    int         interimSz;
+    int         ret;
+
+    /* Encode the alt signature algorithm OID (per X9.146). */
+    ret = (int)SetAlgoID(altSigAlgType, altSigAlg, oidSigType, 0);
+    if (ret <= 0)
+        return -1;
+    altSigAlgSz = (word32)ret;
+
+    wc_InitCert(&newCert);
+    strncpy(newCert.subject.commonName,  "dual-alg-test", CTC_NAME_SIZE);
+    strncpy(newCert.issuer.commonName,   "dual-alg-test", CTC_NAME_SIZE);
+    newCert.sigType    = CTC_SHA256wECDSA;
+    newCert.isCA       = 1;
+    newCert.selfSigned = 1;
+
+    if (wc_SetCustomExtension(&newCert, 0, "2.5.29.72",
+                              altPubDer, altPubSz) != 0)
+        return -1;
+    if (wc_SetCustomExtension(&newCert, 0, "2.5.29.73",
+                              altSigAlg, altSigAlgSz) != 0)
+        return -1;
+
+    /* Build the interim cert (no altSigValue yet). */
+    ret = wc_MakeCert_ex(&newCert, interim, sizeof(interim), ECC_TYPE,
+                         primaryKey, rng);
+    if (ret <= 0)
+        return -1;
+    interimSz = wc_SignCert_ex(newCert.bodySz, newCert.sigType,
+                               interim, sizeof(interim), ECC_TYPE,
+                               primaryKey, rng);
+    if (interimSz <= 0)
+        return -1;
+
+    /* Compute preTBS (issuer-side fast path; cert has no altSigValue yet). */
+    wc_InitDecodedCert(&pre, interim, (word32)interimSz, 0);
+    ret = wc_ParseCert(&pre, CERT_TYPE, NO_VERIFY, NULL);
+    if (ret != 0) {
+        wc_FreeDecodedCert(&pre);
+        return -1;
+    }
+    tbsSz = wc_GeneratePreTBS(&pre, tbs, sizeof(tbs));
+    wc_FreeDecodedCert(&pre);
+    if (tbsSz <= 0)
+        return -1;
+
+    altSigSz = wc_MakeSigWithBitStr(altSig, sizeof(altSig), altSigAlgType,
+                                    tbs, (word32)tbsSz, ECC_TYPE,
+                                    altKey, rng);
+    if (altSigSz <= 0)
+        return -1;
+
+    if (wc_SetCustomExtension(&newCert, 0, "2.5.29.74", altSig,
+                              (word32)altSigSz) != 0)
+        return -1;
+
+    /* Final cert. */
+    ret = wc_MakeCert_ex(&newCert, out, outSz, ECC_TYPE, primaryKey, rng);
+    if (ret <= 0)
+        return -1;
+    return wc_SignCert_ex(newCert.bodySz, newCert.sigType, out, outSz,
+                          ECC_TYPE, primaryKey, rng);
+}
+
+/* Build a self-signed RSA-primary + ECC-alt dual-alg cert. Same shape as
+ * do_build_dual_alg_self_signed but with an RSA primary key. */
+#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+static int do_build_dual_alg_self_signed_rsa(byte* out, word32 outSz,
+        RsaKey* primaryKey, ecc_key* altKey, const byte* altPubDer,
+        word32 altPubSz, WC_RNG* rng)
+{
+    Cert        newCert;
+    DecodedCert pre;
+    byte        altSigAlg[64];
+    word32      altSigAlgSz;
+    byte        altSig[LARGE_TEMP_SZ];
+    int         altSigSz;
+    byte        tbs[2 * LARGE_TEMP_SZ];
+    int         tbsSz;
+    byte        interim[2 * LARGE_TEMP_SZ];
+    int         interimSz;
+    int         ret;
+
+    ret = (int)SetAlgoID(CTC_SHA256wECDSA, altSigAlg, oidSigType, 0);
+    if (ret <= 0)
+        return -1;
+    altSigAlgSz = (word32)ret;
+
+    wc_InitCert(&newCert);
+    strncpy(newCert.subject.commonName,  "dual-alg-rsa-test", CTC_NAME_SIZE);
+    strncpy(newCert.issuer.commonName,   "dual-alg-rsa-test", CTC_NAME_SIZE);
+    newCert.sigType    = CTC_SHA256wRSA;
+    newCert.isCA       = 1;
+    newCert.selfSigned = 1;
+
+    if (wc_SetCustomExtension(&newCert, 0, "2.5.29.72",
+                              altPubDer, altPubSz) != 0)
+        return -1;
+    if (wc_SetCustomExtension(&newCert, 0, "2.5.29.73",
+                              altSigAlg, altSigAlgSz) != 0)
+        return -1;
+
+    ret = wc_MakeCert_ex(&newCert, interim, sizeof(interim), RSA_TYPE,
+                         primaryKey, rng);
+    if (ret <= 0)
+        return -1;
+    interimSz = wc_SignCert_ex(newCert.bodySz, newCert.sigType,
+                               interim, sizeof(interim), RSA_TYPE,
+                               primaryKey, rng);
+    if (interimSz <= 0)
+        return -1;
+
+    wc_InitDecodedCert(&pre, interim, (word32)interimSz, 0);
+    ret = wc_ParseCert(&pre, CERT_TYPE, NO_VERIFY, NULL);
+    if (ret != 0) {
+        wc_FreeDecodedCert(&pre);
+        return -1;
+    }
+    tbsSz = wc_GeneratePreTBS(&pre, tbs, sizeof(tbs));
+    wc_FreeDecodedCert(&pre);
+    if (tbsSz <= 0)
+        return -1;
+
+    altSigSz = wc_MakeSigWithBitStr(altSig, sizeof(altSig), CTC_SHA256wECDSA,
+                                    tbs, (word32)tbsSz, ECC_TYPE,
+                                    altKey, rng);
+    if (altSigSz <= 0)
+        return -1;
+
+    if (wc_SetCustomExtension(&newCert, 0, "2.5.29.74", altSig,
+                              (word32)altSigSz) != 0)
+        return -1;
+
+    ret = wc_MakeCert_ex(&newCert, out, outSz, RSA_TYPE, primaryKey, rng);
+    if (ret <= 0)
+        return -1;
+    return wc_SignCert_ex(newCert.bodySz, newCert.sigType, out, outSz,
+                          RSA_TYPE, primaryKey, rng);
+}
+#endif /* !NO_RSA && WOLFSSL_KEY_GEN */
+#endif /* dual-alg negative TLS test gating */
+
+/* Same-algorithm collision: build a self-signed cert with primary ECC and
+ * sapki ECC. ProcessPeerCerts/DecodePeerAltPubKey should detect that both
+ * keys target the peerEccDsaKey slot and reject the handshake with
+ * PEER_KEY_ERROR. */
+static int test_dual_alg_collision_handshake(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_ECC) && \
+    !defined(WC_NO_RNG) && !defined(WOLFSSL_SMALL_STACK) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING) && \
+    !defined(NO_TLS) && defined(WOLFSSL_TLS13)
+    WC_RNG       rng;
+    ecc_key      primaryKey;
+    ecc_key      altKey;
+    byte         primaryKeyDer[256];
+    int          primaryKeyDerSz;
+    byte         altPubDer[256];
+    int          altPubSz;
+    byte         certDer[2 * LARGE_TEMP_SZ];
+    int          certDerSz;
+    WOLFSSL_CTX *ctx_c = NULL;
+    WOLFSSL_CTX *ctx_s = NULL;
+    WOLFSSL     *ssl_c = NULL;
+    WOLFSSL     *ssl_s = NULL;
+    struct test_memio_ctx test_ctx;
+
+    XMEMSET(&rng, 0, sizeof(rng));
+    XMEMSET(&primaryKey, 0, sizeof(primaryKey));
+    XMEMSET(&altKey, 0, sizeof(altKey));
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_ecc_init(&primaryKey), 0);
+    ExpectIntEQ(wc_ecc_make_key(&rng, KEY32, &primaryKey), 0);
+    ExpectIntEQ(wc_ecc_init(&altKey), 0);
+    ExpectIntEQ(wc_ecc_make_key(&rng, KEY32, &altKey), 0);
+
+    altPubSz = wc_EccPublicKeyToDer(&altKey, altPubDer, sizeof(altPubDer), 1);
+    ExpectIntGT(altPubSz, 0);
+    primaryKeyDerSz = wc_EccKeyToDer(&primaryKey, primaryKeyDer,
+                                     sizeof(primaryKeyDer));
+    ExpectIntGT(primaryKeyDerSz, 0);
+
+    if (EXPECT_SUCCESS()) {
+        certDerSz = do_build_dual_alg_self_signed(certDer, sizeof(certDer),
+                        &primaryKey, &altKey, CTC_SHA256wECDSA, altPubDer,
+                        (word32)altPubSz, &rng);
+        ExpectIntGT(certDerSz, 0);
+
+        ExpectIntEQ(test_memio_setup_ex(&test_ctx, &ctx_c, &ctx_s, &ssl_c,
+                    &ssl_s, wolfTLSv1_3_client_method,
+                    wolfTLSv1_3_server_method,
+                    certDer, certDerSz,           /* trust anchor */
+                    certDer, certDerSz,           /* server cert */
+                    primaryKeyDer, primaryKeyDerSz), 0);
+
+        /* Handshake must fail because the client rejects the cert in
+         * ProcessPeerCerts (collision on the ECC peer-key slot). */
+        ExpectTrue(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL) != 0);
+    }
+
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
+    wc_ecc_free(&primaryKey);
+    wc_ecc_free(&altKey);
+    wc_FreeRng(&rng);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* Min-key-size policy bypass: build a self-signed RSA-primary + ECC-P256
+ * alt cert. The client raises minEccKeySz above 256 bits before the
+ * handshake; ProcessPeerCerts must reject the alt key with
+ * ECC_KEY_SIZE_E even though the primary RSA cert is acceptable. */
+static int test_dual_alg_minkeysize_handshake(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_ECC) && !defined(NO_RSA) && \
+    defined(WOLFSSL_KEY_GEN) && !defined(WC_NO_RNG) && \
+    !defined(WOLFSSL_SMALL_STACK) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING) && \
+    !defined(NO_TLS) && defined(WOLFSSL_TLS13)
+    WC_RNG       rng;
+    RsaKey       primaryKey;
+    ecc_key      altKey;
+    byte         primaryKeyDer[2048];
+    int          primaryKeyDerSz;
+    byte         altPubDer[256];
+    int          altPubSz;
+    byte         certDer[4 * LARGE_TEMP_SZ];
+    int          certDerSz;
+    WOLFSSL_CTX *ctx_c = NULL;
+    WOLFSSL_CTX *ctx_s = NULL;
+    WOLFSSL     *ssl_c = NULL;
+    WOLFSSL     *ssl_s = NULL;
+    struct test_memio_ctx test_ctx;
+
+    XMEMSET(&rng, 0, sizeof(rng));
+    XMEMSET(&primaryKey, 0, sizeof(primaryKey));
+    XMEMSET(&altKey, 0, sizeof(altKey));
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_InitRsaKey_ex(&primaryKey, NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_MakeRsaKey(&primaryKey, 2048, WC_RSA_EXPONENT, &rng), 0);
+    ExpectIntEQ(wc_ecc_init(&altKey), 0);
+    ExpectIntEQ(wc_ecc_make_key(&rng, KEY32, &altKey), 0);
+
+    altPubSz = wc_EccPublicKeyToDer(&altKey, altPubDer, sizeof(altPubDer), 1);
+    ExpectIntGT(altPubSz, 0);
+    primaryKeyDerSz = wc_RsaKeyToDer(&primaryKey, primaryKeyDer,
+                                     sizeof(primaryKeyDer));
+    ExpectIntGT(primaryKeyDerSz, 0);
+
+    if (EXPECT_SUCCESS()) {
+        certDerSz = do_build_dual_alg_self_signed_rsa(certDer, sizeof(certDer),
+                        &primaryKey, &altKey, altPubDer, (word32)altPubSz,
+                        &rng);
+        ExpectIntGT(certDerSz, 0);
+
+        ExpectIntEQ(test_memio_setup_ex(&test_ctx, &ctx_c, &ctx_s, &ssl_c,
+                    &ssl_s, wolfTLSv1_3_client_method,
+                    wolfTLSv1_3_server_method,
+                    certDer, certDerSz,
+                    certDer, certDerSz,
+                    primaryKeyDer, primaryKeyDerSz), 0);
+
+        /* Tighten the client's ECC policy above the alt key's 256-bit
+         * P-256 size. ProcessPeerCerts/DecodePeerAltPubKey must reject.
+         * Apply to both ctx and ssl since ssl_c was already created from
+         * ctx_c and the size is copied at WOLFSSL_new time. */
+        ExpectIntEQ(wolfSSL_CTX_SetMinEccKey_Sz(ctx_c, 384), WOLFSSL_SUCCESS);
+        ExpectIntEQ(wolfSSL_SetMinEccKey_Sz(ssl_c, 384), WOLFSSL_SUCCESS);
+        ExpectTrue(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL) != 0);
+    }
+
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
+    wc_ecc_free(&altKey);
+    wc_FreeRsaKey(&primaryKey);
+    wc_FreeRng(&rng);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* Build a self-signed dual-alg cert whose sapki + altSigValue use a real
+ * Ed25519 alt key. The cert parses cleanly (alt sig actually verifies via
+ * ConfirmSignature), but DecodePeerAltPubKey has no case for Ed25519, so
+ * its tolerance branch (log + skip, return 0) is what handles the alt
+ * key on the receive side. */
+#if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_ECC) && \
+    defined(HAVE_ED25519) && defined(HAVE_ED25519_KEY_EXPORT) && \
+    defined(HAVE_ED25519_SIGN) && defined(HAVE_ED25519_VERIFY) && \
+    !defined(WC_NO_RNG) && !defined(WOLFSSL_SMALL_STACK) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING) && \
+    !defined(NO_TLS) && defined(WOLFSSL_TLS13)
+static int do_build_dual_alg_self_signed_ed25519alt(byte* out, word32 outSz,
+        ecc_key* primaryKey, ed25519_key* altKey, WC_RNG* rng)
+{
+    Cert        newCert;
+    DecodedCert pre;
+    byte        altPubDer[128];
+    int         altPubSz;
+    byte        altSigAlg[32];
+    word32      altSigAlgSz;
+    byte        altSig[256];
+    int         altSigSz;
+    byte        tbs[2 * LARGE_TEMP_SZ];
+    int         tbsSz;
+    byte        interim[2 * LARGE_TEMP_SZ];
+    int         interimSz;
+    int         ret;
+
+    altPubSz = wc_Ed25519PublicKeyToDer(altKey, altPubDer, sizeof(altPubDer),
+                                        1);
+    if (altPubSz <= 0)
+        return -1;
+    ret = (int)SetAlgoID(CTC_ED25519, altSigAlg, oidSigType, 0);
+    if (ret <= 0)
+        return -1;
+    altSigAlgSz = (word32)ret;
+
+    wc_InitCert(&newCert);
+    strncpy(newCert.subject.commonName, "dual-alg-ed25519-test", CTC_NAME_SIZE);
+    strncpy(newCert.issuer.commonName,  "dual-alg-ed25519-test", CTC_NAME_SIZE);
+    newCert.sigType    = CTC_SHA256wECDSA;
+    newCert.isCA       = 1;
+    newCert.selfSigned = 1;
+
+    if (wc_SetCustomExtension(&newCert, 0, "2.5.29.72", altPubDer,
+                              (word32)altPubSz) != 0)
+        return -1;
+    if (wc_SetCustomExtension(&newCert, 0, "2.5.29.73", altSigAlg,
+                              altSigAlgSz) != 0)
+        return -1;
+
+    ret = wc_MakeCert_ex(&newCert, interim, sizeof(interim), ECC_TYPE,
+                         primaryKey, rng);
+    if (ret <= 0)
+        return -1;
+    interimSz = wc_SignCert_ex(newCert.bodySz, newCert.sigType, interim,
+                               sizeof(interim), ECC_TYPE, primaryKey, rng);
+    if (interimSz <= 0)
+        return -1;
+
+    wc_InitDecodedCert(&pre, interim, (word32)interimSz, 0);
+    if (wc_ParseCert(&pre, CERT_TYPE, NO_VERIFY, NULL) != 0) {
+        wc_FreeDecodedCert(&pre);
+        return -1;
+    }
+    tbsSz = wc_GeneratePreTBS(&pre, tbs, sizeof(tbs));
+    wc_FreeDecodedCert(&pre);
+    if (tbsSz <= 0)
+        return -1;
+
+    altSigSz = wc_MakeSigWithBitStr(altSig, sizeof(altSig), CTC_ED25519,
+                                    tbs, (word32)tbsSz, ED25519_TYPE,
+                                    altKey, rng);
+    if (altSigSz <= 0)
+        return -1;
+
+    if (wc_SetCustomExtension(&newCert, 0, "2.5.29.74", altSig,
+                              (word32)altSigSz) != 0)
+        return -1;
+    ret = wc_MakeCert_ex(&newCert, out, outSz, ECC_TYPE, primaryKey, rng);
+    if (ret <= 0)
+        return -1;
+    return wc_SignCert_ex(newCert.bodySz, newCert.sigType, out, outSz,
+                          ECC_TYPE, primaryKey, rng);
+}
+#endif
+
+/* Parser tolerance for an unsupported alt-key OID.
+ *
+ * Per the soft-skip behaviour in DecodePeerAltPubKey, an alt-key OID we
+ * don't implement (e.g. Ed25519 - not in the cert/CSR alt-key dispatch
+ * switch) must not break a purely-native (sigSpec == NATIVE) handshake.
+ *
+ * A pure TLS-handshake regression test isn't currently possible: the
+ * cert's alt signature has to verify before ProcessPeerCerts /
+ * DecodePeerAltPubKey is reached, and the Ed25519 leg of ConfirmSignature
+ * (used for alt-sig verify) calls wc_ed25519_import_public on
+ * cert->ca->sapkiDer - which is the SPKI DER, not the raw 32-byte key
+ * the function expects. That's a pre-existing wolfSSL gap independent of
+ * this PR (the ECC and RSA cases use wc_*PublicKeyDecode which accepts
+ * SPKI DER).
+ *
+ * What we *can* test directly: that the parser accepts a cert carrying
+ * an Ed25519 sapki with NO_VERIFY, and that wc_GeneratePreTBS handles
+ * the resulting DecodedCert (the receive-side tolerance fires from
+ * DecodePeerAltPubKey on top of this). */
+static int test_dual_alg_unsupported_alt_native(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_ECC) && \
+    defined(HAVE_ED25519) && defined(HAVE_ED25519_KEY_EXPORT) && \
+    defined(HAVE_ED25519_SIGN) && !defined(WC_NO_RNG) && \
+    !defined(WOLFSSL_SMALL_STACK) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING)
+    WC_RNG       rng;
+    ecc_key      primaryKey;
+    ed25519_key  altKey;
+    DecodedCert  d_cert;
+    byte         certDer[2 * LARGE_TEMP_SZ];
+    int          certDerSz;
+    byte         tbs[2 * LARGE_TEMP_SZ];
+    int          tbsSz;
+
+    XMEMSET(&rng, 0, sizeof(rng));
+    XMEMSET(&primaryKey, 0, sizeof(primaryKey));
+    XMEMSET(&altKey, 0, sizeof(altKey));
+    XMEMSET(&d_cert, 0, sizeof(d_cert));
+
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_ecc_init(&primaryKey), 0);
+    ExpectIntEQ(wc_ecc_make_key(&rng, KEY32, &primaryKey), 0);
+    ExpectIntEQ(wc_ed25519_init(&altKey), 0);
+    ExpectIntEQ(wc_ed25519_make_key(&rng, ED25519_KEY_SIZE, &altKey), 0);
+
+    if (EXPECT_SUCCESS()) {
+        certDerSz = do_build_dual_alg_self_signed_ed25519alt(certDer,
+                        sizeof(certDer), &primaryKey, &altKey, &rng);
+        ExpectIntGT(certDerSz, 0);
+
+        /* Parser must accept the cert (NO_VERIFY skips alt-sig verify;
+         * sapkiOID lands as ED25519k, which is what DecodePeerAltPubKey's
+         * default branch is designed to tolerate). */
+        wc_InitDecodedCert(&d_cert, certDer, (word32)certDerSz, 0);
+        ExpectIntEQ(wc_ParseCert(&d_cert, CERT_TYPE, NO_VERIFY, NULL), 0);
+        ExpectIntNE(d_cert.extSapkiSet, 0);
+        ExpectIntNE(d_cert.extAltSigAlgSet, 0);
+        ExpectIntNE(d_cert.extAltSigValSet, 0);
+
+        /* wc_GeneratePreTBS must still excise altSigValue cleanly even
+         * though the alt key uses an algorithm DecodePeerAltPubKey
+         * doesn't dispatch on. */
+        tbsSz = wc_GeneratePreTBS(&d_cert, tbs, (int)sizeof(tbs));
+        ExpectIntGT(tbsSz, 0);
+        ExpectIntLT((word32)tbsSz, d_cert.sigIndex - d_cert.certBegin);
+    }
+
+    wc_FreeDecodedCert(&d_cert);
+    wc_ecc_free(&primaryKey);
+    wc_ed25519_free(&altKey);
+    wc_FreeRng(&rng);
+#endif
+    return EXPECT_RESULT();
+}
+
 /* Test wolfSSL_use_AltPrivateKey_Id.
  * Verify that a valid key ID can be set successfully. Guards against an
  * inverted AllocDer return check (== 0 vs != 0) that would treat successful
@@ -37532,6 +38130,10 @@ TEST_CASE testCases[] = {
     TEST_DECL(test_dual_alg_pretbs_cert),
     TEST_DECL(test_dual_alg_pretbs_altsigval_not_last),
     TEST_DECL(test_dual_alg_csr_roundtrip),
+    TEST_DECL(test_dual_alg_pretbs_csr_altsigval_not_last),
+    TEST_DECL(test_dual_alg_collision_handshake),
+    TEST_DECL(test_dual_alg_minkeysize_handshake),
+    TEST_DECL(test_dual_alg_unsupported_alt_native),
 
     TEST_DECL(test_wolfSSL_use_AltPrivateKey_Id),
     TEST_DECL(test_wolfSSL_use_AltPrivateKey_Label),
