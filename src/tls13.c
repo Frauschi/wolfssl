@@ -10723,8 +10723,13 @@ static int DoTls13CertificateVerify(WOLFSSL* ssl, byte* input,
                     sa = args->altSigAlgo;
 
                 if (*ssl->sigSpec == WOLFSSL_CKS_SIGSPEC_ALTERNATIVE) {
-                    /* Now swap in the alternative by removing the native.
-                     * sa contains the alternative signature type. */
+                    /* Both peer*Key slots were populated during cert parsing
+                     * (primary from publicKey, alt from sapki). Free the slot
+                     * that does NOT match `sa` so the rest of the verify path
+                     * uses only the alternative key. The else-chain enumerates
+                     * the algorithms supported by the alt-key dispatch in
+                     * DecodePeerAltPubKey; if a future patch adds an
+                     * algorithm there, mirror it here. */
                 #ifndef NO_RSA
                     if (ssl->peerRsaKeyPresent && sa != rsa_pss_sa_algo) {
                         FreeKey(ssl, DYNAMIC_TYPE_RSA,

@@ -529,6 +529,15 @@
 /* ---------------------------------------------------------------------------
  * Dual Algorithm Certificate Required Features.
  * ---------------------------------------------------------------------------
+ *
+ * X9.146 dual-algorithm certificates carry two public keys (primary +
+ * alternative / "sapki") and two signatures over the same TBS. This
+ * implementation assumes the primary and alternative keys use *different*
+ * signature algorithms - that is the normal hybrid use case (e.g. ECDSA +
+ * ML-DSA). On the receive path the alternative public key is decoded into
+ * the matching ssl->peer*Key slot during cert parsing; if the algorithm
+ * collides with the primary's slot the handshake is rejected with
+ * PEER_KEY_ERROR.
  */
 #ifdef WOLFSSL_DUAL_ALG_CERTS
     #ifdef NO_RSA
