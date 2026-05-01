@@ -21225,6 +21225,42 @@ static int DecodeCertReqAttrValue(DecodedCert* cert, int* criticalExt,
             }
             break;
 
+#ifdef WOLFSSL_DUAL_ALG_CERTS
+        /* X9.146 dual-algorithm CSR attributes appear in two encodings
+         * in the wild:
+         *   - Nested inside the extensionRequest attribute above (the
+         *     IETF lamps draft style; how wolfSSL emits via
+         *     wc_SetCustomExtension).
+         *   - As top-level PKCS#10 attributes whose OID is the X.509
+         *     extension OID (2.5.29.72/73/74) - BouncyCastle's
+         *     PKCS10CertificationRequestBuilder.build(signer, altPubKey,
+         *     altSigner) emits this. EJBCA inherits the BC encoding.
+         * Accept both. The 'input'/'maxIdx' span here is the SET's
+         * content, which contains the value SEQUENCE / BIT STRING
+         * directly. */
+        case SUBJ_ALT_PUB_KEY_INFO_OID:
+            VERIFY_AND_SET_OID(cert->extSapkiSet);
+            ret = DecodeSubjAltPubKeyInfo(input, (int)maxIdx, cert);
+            if (ret < 0) {
+                ret = ASN_PARSE_E;
+            }
+            break;
+        case ALT_SIG_ALG_OID:
+            VERIFY_AND_SET_OID(cert->extAltSigAlgSet);
+            ret = DecodeAltSigAlg(input, (int)maxIdx, cert);
+            if (ret < 0) {
+                ret = ASN_PARSE_E;
+            }
+            break;
+        case ALT_SIG_VAL_OID:
+            VERIFY_AND_SET_OID(cert->extAltSigValSet);
+            ret = DecodeAltSigVal(input, (int)maxIdx, cert);
+            if (ret < 0) {
+                ret = ASN_PARSE_E;
+            }
+            break;
+#endif /* WOLFSSL_DUAL_ALG_CERTS */
+
         default:
             ret = ASN_PARSE_E;
             break;
@@ -30260,16 +30296,24 @@ static int GenerateCertPreTBS(DecodedCert* dCert, byte* der, int derSz)
 #ifdef WOLFSSL_CERT_REQ
 /* Generate preTBS for a parsed PKCS#10 CertificationRequest.
  *
- * The wrapper chain that has to be re-emitted with shrunken lengths is:
- *   CertificationRequestInfo SEQ
- *     -> attributes [0] IMPLICIT (tag 0xA0)
- *       -> extensionRequest Attribute SEQ (one of possibly several attrs)
- *         -> values SET (0x31)
- *           -> Extensions SEQ
- *             -> ... extensions, with altSigValue last ...
+ * X9.146 dual-algorithm CSRs appear in two encodings in the wild:
  *
- * Other Attributes (challengePassword, contentType, ...) and extensions
- * preceding altSigValue pass through verbatim. */
+ *   (A) Top-level PKCS#10 attributes - BouncyCastle's
+ *       PKCS10CertificationRequestBuilder.build(signer, altPubKey,
+ *       altSigner) emits sapki / altSigAlg / altSigValue as direct
+ *       Attribute entries inside the CRInfo's attributes [0] SET.
+ *       EJBCA inherits this via BC.
+ *
+ *   (B) Nested inside an extensionRequest attribute - the IETF lamps
+ *       draft style (Truskovsky et al.). wolfSSL's own
+ *       wc_SetCustomExtension flow emits this form because the cert
+ *       encoder reuses customCertExt[] when repurposed for a CSR.
+ *
+ * Both forms are accepted on the receive side (DecodeCertExtensions
+ * handles (B); the top-level cases in the CSR attribute switch handle
+ * (A)). This function locates altSignatureValue wherever it lives,
+ * removes only that piece, and emits the new CRInfo verbatim
+ * everywhere else. */
 static int GenerateCsrPreTBS(DecodedCert* dCert, byte* der, int derSz)
 {
     int    ret;
@@ -30282,33 +30326,39 @@ static int GenerateCsrPreTBS(DecodedCert* dCert, byte* der, int derSz)
     word32 attrsTagOff;
     word32 attrsContentStart;
     word32 attrsContentEnd;
+    word32 prefixLen;        /* CRInfo content before attributes [0] */
+    word32 outIdx;
+
+    /* Excised range, in two flavours. */
+    int    bcMode = 0;       /* if set, excise an entire top-level Attribute */
+    word32 excisedAttrStart = 0;
+    word32 excisedAttrEnd   = 0;
+    /* lamps-draft (extensionRequest) mode: */
     word32 extReqAttrTagOff = 0;
     word32 extReqAttrContentStart = 0;
     word32 extReqAttrContentEnd   = 0;
     word32 setTagOff = 0;
-    word32 setContentStart;
-    word32 setContentEnd;
-    word32 extensionsContentStart;
-    word32 extensionsContentEnd;
-    word32 attrsSuffixLen;
-    word32 attrsPrefixLen;
-    word32 setPrefixLen;
-    word32 prefixLen;
-    word32 excisedStart = 0;
-    word32 excisedEnd   = 0;
-    word32 newExtensionsContentLen;
-    word32 newExtensionsHeaderSz;
-    word32 newSetContentLen;
-    word32 newSetHeaderSz;
-    word32 newExtReqAttrContentLen;
-    word32 newExtReqAttrHeaderSz;
-    word32 newExtReqAttrTotal;
+    word32 setContentStart = 0;
+    word32 setContentEnd   = 0;
+    word32 extensionsContentStart = 0;
+    word32 extensionsContentEnd   = 0;
+    word32 excisedExtStart = 0;
+    word32 excisedExtEnd   = 0;
+    word32 attrsPrefixLen  = 0;
+    word32 attrsSuffixLen  = 0;
+    word32 setPrefixLen    = 0;
+    word32 newExtensionsContentLen = 0;
+    word32 newExtensionsHeaderSz   = 0;
+    word32 newSetContentLen        = 0;
+    word32 newSetHeaderSz          = 0;
+    word32 newExtReqAttrContentLen = 0;
+    word32 newExtReqAttrHeaderSz   = 0;
+    word32 newExtReqAttrTotal      = 0;
+
     word32 newAttrsContentLen;
     word32 newAttrsHeaderSz;
     word32 newCrInfoContentLen;
     word32 newCrInfoTotal;
-    word32 outIdx;
-    int    found = 0;
 
     /* CertificationRequestInfo SEQUENCE header. */
     idx = 0;
@@ -30357,7 +30407,10 @@ static int GenerateCsrPreTBS(DecodedCert* dCert, byte* der, int derSz)
     attrsContentStart = idx;
     attrsContentEnd   = attrsContentStart + (word32)len;
 
-    /* Walk Attribute SEQUENCEs and find the extensionRequest one by OID. */
+    /* Walk Attributes once, in order, looking for either:
+     *   - a top-level Attribute(altSignatureValue) -> BC encoding (A)
+     *   - or extensionRequest -> lamps-draft encoding (B), descended
+     *     into below. */
     walkIdx = attrsContentStart;
     while (walkIdx < attrsContentEnd) {
         word32 attrTagOff = walkIdx;
@@ -30378,94 +30431,115 @@ static int GenerateCsrPreTBS(DecodedCert* dCert, byte* der, int derSz)
         if (ret < 0) {
             return ret;
         }
+
+        if (oid == ALT_SIG_VAL_OID) {
+            /* (A) BC encoding - excise this entire Attribute SEQUENCE. */
+            bcMode = 1;
+            excisedAttrStart = attrTagOff;
+            excisedAttrEnd   = attrContentEnd;
+            break;
+        }
         if (oid == EXTENSION_REQUEST_OID) {
             extReqAttrTagOff       = attrTagOff;
             extReqAttrContentStart = attrContentStart;
             extReqAttrContentEnd   = attrContentEnd;
-            setTagOff              = attrIdx; /* now at the values SET */
-            found = 1;
-            break;
+            setTagOff              = attrIdx;
         }
         walkIdx = attrContentEnd;
     }
-    if (!found) {
-        WOLFSSL_MSG("CSR has altSigValue but no extensionRequest attribute");
-        return ASN_PARSE_E;
-    }
 
-    /* values SET. */
-    idx = setTagOff;
-    ret = GetSet(dCert->source, &idx, &len, extReqAttrContentEnd);
-    if (ret < 0) {
-        return ret;
+    if (bcMode) {
+        /* BC encoding: only the wrapping CRInfo SEQUENCE and attributes
+         * [0] header lengths shrink; the altSigValue Attribute is
+         * removed wholesale. */
+        attrsPrefixLen = excisedAttrStart - attrsContentStart;
+        attrsSuffixLen = attrsContentEnd  - excisedAttrEnd;
+        newAttrsContentLen = attrsPrefixLen + attrsSuffixLen;
     }
-    setContentStart = idx;
-    setContentEnd   = setContentStart + (word32)len;
+    else {
+        /* lamps-draft encoding: descend into extensionRequest. */
+        if (extReqAttrTagOff == 0) {
+            WOLFSSL_MSG("CSR has altSigValue but neither a top-level"
+                        " altSignatureValue attribute nor an"
+                        " extensionRequest");
+            return ASN_PARSE_E;
+        }
 
-    /* The SET should contain the Extensions SEQUENCE the parser already
-     * located. */
-    if (setContentStart != dCert->extensionsIdx) {
-        WOLFSSL_MSG("CSR extensions location mismatch");
-        return ASN_PARSE_E;
-    }
-    idx = setContentStart;
-    ret = GetSequence(dCert->source, &idx, &len, setContentEnd);
-    if (ret < 0) {
-        return ret;
-    }
-    extensionsContentStart = idx;
-    extensionsContentEnd   = extensionsContentStart + (word32)len;
-
-    /* Walk Extension items, find altSigValue (must be last per X9.146). */
-    walkIdx = extensionsContentStart;
-    while (walkIdx < extensionsContentEnd) {
-        word32 extStart = walkIdx;
-        word32 extIdx   = walkIdx;
-        int    extLen;
-
-        ret = GetSequence(dCert->source, &extIdx, &extLen,
-                          extensionsContentEnd);
+        idx = setTagOff;
+        ret = GetSet(dCert->source, &idx, &len, extReqAttrContentEnd);
         if (ret < 0) {
             return ret;
         }
-        walkIdx = extIdx + (word32)extLen;
-        if (walkIdx > extensionsContentEnd) {
+        setContentStart = idx;
+        setContentEnd   = setContentStart + (word32)len;
+
+        if (setContentStart != dCert->extensionsIdx) {
+            WOLFSSL_MSG("CSR extensions location mismatch");
             return ASN_PARSE_E;
         }
-        if ((dCert->altSigValDer >= dCert->source + extStart) &&
-            (dCert->altSigValDer <  dCert->source + walkIdx)) {
-            excisedStart = extStart;
-            excisedEnd   = walkIdx;
-            break;
+        idx = setContentStart;
+        ret = GetSequence(dCert->source, &idx, &len, setContentEnd);
+        if (ret < 0) {
+            return ret;
         }
+        extensionsContentStart = idx;
+        extensionsContentEnd   = extensionsContentStart + (word32)len;
+
+        /* Walk Extension items, find altSigValue (must be last). */
+        walkIdx = extensionsContentStart;
+        while (walkIdx < extensionsContentEnd) {
+            word32 extStart = walkIdx;
+            word32 extIdx   = walkIdx;
+            int    extLen;
+
+            ret = GetSequence(dCert->source, &extIdx, &extLen,
+                              extensionsContentEnd);
+            if (ret < 0) {
+                return ret;
+            }
+            walkIdx = extIdx + (word32)extLen;
+            if (walkIdx > extensionsContentEnd) {
+                return ASN_PARSE_E;
+            }
+            if ((dCert->altSigValDer >= dCert->source + extStart) &&
+                (dCert->altSigValDer <  dCert->source + walkIdx)) {
+                excisedExtStart = extStart;
+                excisedExtEnd   = walkIdx;
+                break;
+            }
+        }
+        if (excisedExtStart == excisedExtEnd) {
+            WOLFSSL_MSG("altSigValue extension not found in CSR");
+            return ASN_PARSE_E;
+        }
+        if (excisedExtEnd != extensionsContentEnd) {
+            WOLFSSL_MSG("altSigValue is not the last extension; CSR violates"
+                        " X9.146 requirement");
+            return ASN_PARSE_E;
+        }
+
+        newExtensionsContentLen = (extensionsContentEnd - extensionsContentStart)
+                                  - (excisedExtEnd - excisedExtStart);
+        newExtensionsHeaderSz   = SetSequence(newExtensionsContentLen, NULL);
+
+        newSetContentLen = newExtensionsHeaderSz + newExtensionsContentLen;
+        newSetHeaderSz   = 1 /* SET tag */ + SetLength(newSetContentLen, NULL);
+
+        setPrefixLen = setTagOff - extReqAttrContentStart; /* OID bytes */
+        newExtReqAttrContentLen =
+            setPrefixLen + newSetHeaderSz + newSetContentLen;
+        newExtReqAttrHeaderSz =
+            SetSequence(newExtReqAttrContentLen, NULL);
+        newExtReqAttrTotal =
+            newExtReqAttrHeaderSz + newExtReqAttrContentLen;
+
+        attrsPrefixLen = extReqAttrTagOff - attrsContentStart;
+        attrsSuffixLen = attrsContentEnd  - extReqAttrContentEnd;
+        newAttrsContentLen =
+            attrsPrefixLen + newExtReqAttrTotal + attrsSuffixLen;
     }
-    if (excisedStart == excisedEnd) {
-        WOLFSSL_MSG("altSigValue extension not found in CSR extensions list");
-        return ASN_PARSE_E;
-    }
-    if (excisedEnd != extensionsContentEnd) {
-        WOLFSSL_MSG("altSigValue is not the last extension; CSR violates "
-                    "X9.146 requirement");
-        return ASN_PARSE_E;
-    }
 
-    /* Recompute lengths innermost to outermost. */
-    newExtensionsContentLen = (extensionsContentEnd - extensionsContentStart)
-                              - (excisedEnd - excisedStart);
-    newExtensionsHeaderSz   = SetSequence(newExtensionsContentLen, NULL);
-
-    newSetContentLen = newExtensionsHeaderSz + newExtensionsContentLen;
-    newSetHeaderSz   = 1 /* SET tag */ + SetLength(newSetContentLen, NULL);
-
-    setPrefixLen = setTagOff - extReqAttrContentStart; /* OID bytes */
-    newExtReqAttrContentLen = setPrefixLen + newSetHeaderSz + newSetContentLen;
-    newExtReqAttrHeaderSz   = SetSequence(newExtReqAttrContentLen, NULL);
-    newExtReqAttrTotal      = newExtReqAttrHeaderSz + newExtReqAttrContentLen;
-
-    attrsPrefixLen = extReqAttrTagOff - attrsContentStart;
-    attrsSuffixLen = attrsContentEnd  - extReqAttrContentEnd;
-    newAttrsContentLen = attrsPrefixLen + newExtReqAttrTotal + attrsSuffixLen;
-    newAttrsHeaderSz   = 1 /* [0] tag */ + SetLength(newAttrsContentLen, NULL);
+    newAttrsHeaderSz = 1 /* [0] tag */ + SetLength(newAttrsContentLen, NULL);
 
     prefixLen = attrsTagOff - crInfoContentStart;
     newCrInfoContentLen = prefixLen + newAttrsHeaderSz + newAttrsContentLen;
@@ -30484,33 +30558,47 @@ static int GenerateCsrPreTBS(DecodedCert* dCert, byte* der, int derSz)
     /* New attributes [0] header. */
     der[outIdx++] = ASN_CONTEXT_SPECIFIC | ASN_CONSTRUCTED | 0;
     outIdx += SetLength(newAttrsContentLen, der + outIdx);
-    /* Attributes preceding extensionRequest (verbatim). */
-    if (attrsPrefixLen > 0) {
-        XMEMCPY(der + outIdx, dCert->source + attrsContentStart,
-                attrsPrefixLen);
-        outIdx += attrsPrefixLen;
+
+    if (bcMode) {
+        /* Emit the attributes SET with the altSigValue Attribute SEQUENCE
+         * removed (everything else stays exactly where it was). */
+        if (attrsPrefixLen > 0) {
+            XMEMCPY(der + outIdx, dCert->source + attrsContentStart,
+                    attrsPrefixLen);
+            outIdx += attrsPrefixLen;
+        }
+        if (attrsSuffixLen > 0) {
+            XMEMCPY(der + outIdx, dCert->source + excisedAttrEnd,
+                    attrsSuffixLen);
+            outIdx += attrsSuffixLen;
+        }
     }
-    /* New extensionRequest Attribute SEQUENCE header. */
-    outIdx += SetSequence(newExtReqAttrContentLen, der + outIdx);
-    /* OID bytes (verbatim). */
-    XMEMCPY(der + outIdx, dCert->source + extReqAttrContentStart, setPrefixLen);
-    outIdx += setPrefixLen;
-    /* New values SET header. */
-    der[outIdx++] = ASN_SET | ASN_CONSTRUCTED;
-    outIdx += SetLength(newSetContentLen, der + outIdx);
-    /* New Extensions SEQUENCE header. */
-    outIdx += SetSequence(newExtensionsContentLen, der + outIdx);
-    /* Extensions before altSigValue (verbatim). */
-    if (excisedStart > extensionsContentStart) {
-        XMEMCPY(der + outIdx, dCert->source + extensionsContentStart,
-                excisedStart - extensionsContentStart);
-        outIdx += excisedStart - extensionsContentStart;
-    }
-    /* Attributes after extensionRequest (verbatim). */
-    if (attrsSuffixLen > 0) {
-        XMEMCPY(der + outIdx, dCert->source + extReqAttrContentEnd,
-                attrsSuffixLen);
-        outIdx += attrsSuffixLen;
+    else {
+        /* lamps-draft path: rebuild the extensionRequest -> SET ->
+         * Extensions chain with altSigValue removed; pass other attrs
+         * through. */
+        if (attrsPrefixLen > 0) {
+            XMEMCPY(der + outIdx, dCert->source + attrsContentStart,
+                    attrsPrefixLen);
+            outIdx += attrsPrefixLen;
+        }
+        outIdx += SetSequence(newExtReqAttrContentLen, der + outIdx);
+        XMEMCPY(der + outIdx, dCert->source + extReqAttrContentStart,
+                setPrefixLen);
+        outIdx += setPrefixLen;
+        der[outIdx++] = ASN_SET | ASN_CONSTRUCTED;
+        outIdx += SetLength(newSetContentLen, der + outIdx);
+        outIdx += SetSequence(newExtensionsContentLen, der + outIdx);
+        if (excisedExtStart > extensionsContentStart) {
+            XMEMCPY(der + outIdx, dCert->source + extensionsContentStart,
+                    excisedExtStart - extensionsContentStart);
+            outIdx += excisedExtStart - extensionsContentStart;
+        }
+        if (attrsSuffixLen > 0) {
+            XMEMCPY(der + outIdx, dCert->source + extReqAttrContentEnd,
+                    attrsSuffixLen);
+            outIdx += attrsSuffixLen;
+        }
     }
 
     return (int)outIdx;
@@ -30560,9 +30648,11 @@ int wc_GeneratePreTBS(DecodedCert* dCert, byte *der, int derSz)
             XMEMCPY(der, dCert->source + dCert->certBegin, crInfoTotal);
             return (int)crInfoTotal;
         }
-        if (dCert->extensions == NULL || dCert->extensionsSz <= 0) {
-            return ASN_PARSE_E;
-        }
+        /* dCert->extensions is only set when the CSR uses the lamps-draft
+         * encoding (X9.146 attrs nested in extensionRequest). BC's
+         * top-level encoding doesn't populate it, but altSigValDer is
+         * still set by the top-level attribute parser. Either signal is
+         * sufficient for GenerateCsrPreTBS to do its job. */
         return GenerateCsrPreTBS(dCert, der, derSz);
     }
 #endif
