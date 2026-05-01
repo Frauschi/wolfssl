@@ -6530,6 +6530,11 @@ struct WOLFSSL {
     word16 sigSpecSz;
     byte *peerSigSpec;     /* This pointer always owns the memory. */
     word16 peerSigSpecSz;
+    /* Owning copy of the peer cert's Subject Alternative Public Key Info
+     * (sapki) DER. Stored here so the dual-alg CertificateVerify path does
+     * not depend on KEEP_PEER_CERT. Freed in SSL_ResourceFree. */
+    byte  *peerSapkiDer;
+    word32 peerSapkiLen;
 #endif
 #if defined(WOLFSSL_SYS_CRYPTO_POLICY)
     int secLevel; /* The security level of system-wide crypto policy. */

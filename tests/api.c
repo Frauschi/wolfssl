@@ -1563,7 +1563,11 @@ static int test_dual_alg_ecdsa_mldsa(void)
     defined(HAVE_ECC) && !defined(WC_NO_RNG) && \
     !defined(WOLFSSL_DILITHIUM_NO_MAKE_KEY) && \
     !defined(WOLFSSL_DILITHIUM_NO_SIGN) && \
-    !defined(WOLFSSL_DILITHIUM_NO_VERIFY) && !defined(WOLFSSL_SMALL_STACK)
+    !defined(WOLFSSL_DILITHIUM_NO_VERIFY) && !defined(WOLFSSL_SMALL_STACK) && \
+    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING)
+#ifndef LARGE_TEMP_SZ
+#define LARGE_TEMP_SZ 4096
+#endif
     WOLFSSL_CERT_MANAGER * cm = NULL;
     MlDsaKey    alt_ca_key;
     ecc_key     ca_key;

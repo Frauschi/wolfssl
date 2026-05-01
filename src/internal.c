@@ -9127,6 +9127,9 @@ void wolfSSL_ResourceFree(WOLFSSL* ssl)
 #endif
 #ifdef WOLFSSL_DUAL_ALG_CERTS
     XFREE(ssl->peerSigSpec, ssl->heap, DYNAMIC_TYPE_TLSX);
+    XFREE(ssl->peerSapkiDer, ssl->heap, DYNAMIC_TYPE_X509_EXT);
+    ssl->peerSapkiDer = NULL;
+    ssl->peerSapkiLen = 0;
 #endif
 }
 
@@ -16824,6 +16827,31 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                     }
                 }
             #endif /* KEEP_PEER_CERT */
+
+            #ifdef WOLFSSL_DUAL_ALG_CERTS
+                /* Stash the alternative public key (sapki) on the SSL session
+                 * so the X9.146 CertificateVerify path can verify the
+                 * alternative signature without requiring KEEP_PEER_CERT. */
+                if (args->fatal == 0 && args->dCert->extSapkiSet &&
+                    args->dCert->sapkiLen > 0) {
+                    if (ssl->peerSapkiDer != NULL) {
+                        XFREE(ssl->peerSapkiDer, ssl->heap,
+                              DYNAMIC_TYPE_X509_EXT);
+                        ssl->peerSapkiDer = NULL;
+                        ssl->peerSapkiLen = 0;
+                    }
+                    ssl->peerSapkiDer = (byte*)XMALLOC(args->dCert->sapkiLen,
+                            ssl->heap, DYNAMIC_TYPE_X509_EXT);
+                    if (ssl->peerSapkiDer == NULL) {
+                        args->fatal = 1;
+                    }
+                    else {
+                        XMEMCPY(ssl->peerSapkiDer, args->dCert->sapkiDer,
+                                args->dCert->sapkiLen);
+                        ssl->peerSapkiLen = args->dCert->sapkiLen;
+                    }
+                }
+            #endif /* WOLFSSL_DUAL_ALG_CERTS */
 
             #ifndef IGNORE_KEY_EXTENSIONS
                 #if defined(OPENSSL_EXTRA)

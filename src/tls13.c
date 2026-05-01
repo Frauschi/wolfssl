@@ -10558,12 +10558,15 @@ static void FreeDcv13Args(WOLFSSL* ssl, void* pArgs)
 
 #ifdef WOLFSSL_DUAL_ALG_CERTS
 #ifndef NO_RSA
-/* ssl->peerCert->sapkiDer is the alternative public key. Hopefully it is a
- * RSA public key. Convert it into a usable public key. */
+/* ssl->peerSapkiDer holds the peer cert's alternative public key (sapki).
+ * Hopefully it is an RSA public key; decode into a usable peerRsaKey. */
 static int decodeRsaKey(WOLFSSL* ssl)
 {
     int keyRet;
     word32 tmpIdx = 0;
+
+    if (ssl->peerSapkiDer == NULL || ssl->peerSapkiLen == 0)
+        return PEER_KEY_ERROR;
 
     if (ssl->peerRsaKeyPresent)
         return INVALID_PARAMETER;
@@ -10573,9 +10576,9 @@ static int decodeRsaKey(WOLFSSL* ssl)
         return PEER_KEY_ERROR;
 
     ssl->peerRsaKeyPresent = 1;
-    keyRet = wc_RsaPublicKeyDecode(ssl->peerCert.sapkiDer, &tmpIdx,
+    keyRet = wc_RsaPublicKeyDecode(ssl->peerSapkiDer, &tmpIdx,
                                    ssl->peerRsaKey,
-                                   ssl->peerCert.sapkiLen);
+                                   ssl->peerSapkiLen);
     if (keyRet != 0)
         return PEER_KEY_ERROR;
 
@@ -10584,12 +10587,15 @@ static int decodeRsaKey(WOLFSSL* ssl)
 #endif /* !NO_RSA */
 
 #ifdef HAVE_ECC
-/* ssl->peerCert->sapkiDer is the alternative public key. Hopefully it is a
- * ECC public key. Convert it into a usable public key. */
+/* ssl->peerSapkiDer holds the peer cert's alternative public key (sapki).
+ * Hopefully it is an ECC public key; decode into a usable peerEccDsaKey. */
 static int decodeEccKey(WOLFSSL* ssl)
 {
     int keyRet;
     word32 tmpIdx = 0;
+
+    if (ssl->peerSapkiDer == NULL || ssl->peerSapkiLen == 0)
+        return PEER_KEY_ERROR;
 
     if (ssl->peerEccDsaKeyPresent)
         return INVALID_PARAMETER;
@@ -10599,9 +10605,9 @@ static int decodeEccKey(WOLFSSL* ssl)
         return PEER_KEY_ERROR;
 
     ssl->peerEccDsaKeyPresent = 1;
-    keyRet = wc_EccPublicKeyDecode(ssl->peerCert.sapkiDer, &tmpIdx,
+    keyRet = wc_EccPublicKeyDecode(ssl->peerSapkiDer, &tmpIdx,
                                    ssl->peerEccDsaKey,
-                                   ssl->peerCert.sapkiLen);
+                                   ssl->peerSapkiLen);
     if (keyRet != 0)
         return PEER_KEY_ERROR;
 
@@ -10610,12 +10616,15 @@ static int decodeEccKey(WOLFSSL* ssl)
 #endif /* HAVE_ECC */
 
 #ifdef HAVE_DILITHIUM
-/* ssl->peerCert->sapkiDer is the alternative public key. Hopefully it is a
- * dilithium public key. Convert it into a usable public key. */
+/* ssl->peerSapkiDer holds the peer cert's alternative public key (sapki).
+ * Hopefully it is a Dilithium public key; decode into peerDilithiumKey. */
 static int decodeDilithiumKey(WOLFSSL* ssl, int level)
 {
     int keyRet;
     word32 tmpIdx = 0;
+
+    if (ssl->peerSapkiDer == NULL || ssl->peerSapkiLen == 0)
+        return PEER_KEY_ERROR;
 
     if (ssl->peerDilithiumKeyPresent)
         return INVALID_PARAMETER;
@@ -10630,9 +10639,9 @@ static int decodeDilithiumKey(WOLFSSL* ssl, int level)
     if (keyRet != 0)
         return PEER_KEY_ERROR;
 
-    keyRet = wc_Dilithium_PublicKeyDecode(ssl->peerCert.sapkiDer, &tmpIdx,
+    keyRet = wc_Dilithium_PublicKeyDecode(ssl->peerSapkiDer, &tmpIdx,
                                           ssl->peerDilithiumKey,
-                                          ssl->peerCert.sapkiLen);
+                                          ssl->peerSapkiLen);
     if (keyRet != 0)
         return PEER_KEY_ERROR;
 

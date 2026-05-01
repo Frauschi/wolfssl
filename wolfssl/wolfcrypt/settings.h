@@ -548,12 +548,6 @@
     #undef WOLFSSL_CERT_EXT
     #define WOLFSSL_CERT_EXT
 
-    /* tls13.c reads ssl->peerCert.sapkiDer / .sapkiLen when verifying the
-     * alternative signature in the X9.146 CertificateVerify path; that field
-     * only exists when KEEP_PEER_CERT is enabled. */
-    #undef KEEP_PEER_CERT
-    #define KEEP_PEER_CERT
-
     /* wc_GeneratePreTBS calls SetDatesFromDcert / SetAltNamesFromDcert,
      * which live under WOLFSSL_ALT_NAMES. Modern certs almost always carry
      * a SubjectAltName extension, so a preTBS reconstruction without alt
