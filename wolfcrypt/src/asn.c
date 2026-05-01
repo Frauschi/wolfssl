@@ -30063,19 +30063,24 @@ static int GenerateCertPreTBS(DecodedCert* dCert, byte* der, int derSz)
     word32 idx;
     word32 walkIdx;
     word32 tbsContentStart;
-    word32 innerSeqContentStart;
-    word32 innerSeqContentEnd;
-    word32 innerSeqContentLen;
+    word32 tbsContentEnd; /* end of TBS content; equals sigIndex */
+    word32 sigAlgIdStart;
+    word32 sigAlgIdEnd;
+    word32 innerSeqContentStart = 0;
+    word32 innerSeqContentEnd   = 0;
+    word32 innerSeqContentLen   = 0;
     word32 excisedStart = 0;
     word32 excisedEnd   = 0;
-    word32 newInnerSeqContentLen;
-    word32 newInnerSeqHeaderSz;
-    word32 newOuterExplicitContentLen;
-    word32 newOuterExplicitHeaderSz;
+    word32 newInnerSeqContentLen   = 0;
+    word32 newInnerSeqHeaderSz     = 0;
+    word32 newOuterExplicitContentLen = 0;
+    word32 newOuterExplicitHeaderSz   = 0;
+    word32 prefix1Len;       /* version + serialNumber */
+    word32 prefix2Len;       /* issuer..SPKI..uniqueIDs */
     word32 newTbsContentLen;
     word32 newTbsTotal;
-    word32 prefixLen;
     word32 outIdx;
+    int    hasAltSigVal = (dCert->extAltSigValSet && dCert->altSigValDer != NULL);
 
     /* Locate where the TBSCertificate content starts (i.e. just after the
      * outer SEQUENCE header). */
@@ -30086,77 +30091,146 @@ static int GenerateCertPreTBS(DecodedCert* dCert, byte* der, int derSz)
         return ret;
     }
     tbsContentStart = dCert->certBegin + idx;
+    tbsContentEnd   = dCert->sigIndex;
 
-    /* Step into the [3] EXPLICIT wrapper around Extensions. */
-    idx = 0;
-    ret = GetASNTag(dCert->extensions, &idx, &tag,
-                    (word32)dCert->extensionsSz);
-    if (ret < 0 || tag != (ASN_CONTEXT_SPECIFIC | ASN_CONSTRUCTED | 3)) {
+    /* Walk past version (optional [0] EXPLICIT) and serialNumber to land at
+     * the start of the signature AlgorithmIdentifier - which X9.146 /
+     * ITU-T X.509:2019 9.8.4 says must be excluded from preTBSCertificate
+     * (alongside the altSignatureValue extension). */
+    idx = tbsContentStart;
+    ret = GetASNTag(dCert->source, &idx, &tag, tbsContentEnd);
+    if (ret < 0) {
+        return ret;
+    }
+    if (tag == (ASN_CONTEXT_SPECIFIC | ASN_CONSTRUCTED | 0)) {
+        /* version [0] EXPLICIT */
+        ret = GetLength(dCert->source, &idx, &len, tbsContentEnd);
+        if (ret < 0) {
+            return ret;
+        }
+        idx += (word32)len;
+        /* re-read tag to land on serialNumber */
+        ret = GetASNTag(dCert->source, &idx, &tag, tbsContentEnd);
+        if (ret < 0) {
+            return ret;
+        }
+    }
+    /* serialNumber INTEGER (or whatever the parser already accepted as
+     * serial - just skip the TLV). */
+    if (tag != ASN_INTEGER) {
         return ASN_PARSE_E;
     }
-    ret = GetLength(dCert->extensions, &idx, &len,
-                    (word32)dCert->extensionsSz);
+    ret = GetLength(dCert->source, &idx, &len, tbsContentEnd);
     if (ret < 0) {
         return ret;
     }
+    idx += (word32)len;
 
-    /* Step into the inner Extensions SEQUENCE OF. */
-    ret = GetSequence(dCert->extensions, &idx, &len,
-                      (word32)dCert->extensionsSz);
+    /* Now at signature AlgorithmIdentifier SEQUENCE - record its bounds and
+     * skip. */
+    sigAlgIdStart = idx;
+    ret = GetSequence(dCert->source, &idx, &len, tbsContentEnd);
     if (ret < 0) {
         return ret;
     }
-    innerSeqContentLen   = (word32)len;
-    innerSeqContentStart = dCert->extensionsIdx + idx;
-    innerSeqContentEnd   = innerSeqContentStart + innerSeqContentLen;
+    sigAlgIdEnd = idx + (word32)len;
 
-    /* Walk Extension items until we find the one whose extnValue OCTET
-     * STRING is the parsed altSigValDer. We use pointer overlap
-     * (altSigValDer points into source) instead of OID comparison, since
-     * the parser already validated the OID. */
-    walkIdx = innerSeqContentStart;
-    while (walkIdx < innerSeqContentEnd) {
-        word32 extStart = walkIdx;
-        word32 absIdx   = walkIdx - dCert->extensionsIdx;
-        int    extLen;
+    /* If the cert carries altSignatureValue, locate its bounds inside the
+     * Extensions SEQUENCE. (Issuer-side flow: cert doesn't have altSigValue
+     * yet, so this branch is skipped and we only excise the signature
+     * AlgID.) */
+    if (hasAltSigVal) {
+        if (dCert->extensions == NULL || dCert->extensionsSz <= 0) {
+            return ASN_PARSE_E;
+        }
 
-        ret = GetSequence(dCert->extensions, &absIdx, &extLen,
+        /* [3] EXPLICIT around Extensions. */
+        idx = 0;
+        ret = GetASNTag(dCert->extensions, &idx, &tag,
+                        (word32)dCert->extensionsSz);
+        if (ret < 0 ||
+            tag != (ASN_CONTEXT_SPECIFIC | ASN_CONSTRUCTED | 3)) {
+            return ASN_PARSE_E;
+        }
+        ret = GetLength(dCert->extensions, &idx, &len,
+                        (word32)dCert->extensionsSz);
+        if (ret < 0) {
+            return ret;
+        }
+
+        /* Inner Extensions SEQUENCE OF. */
+        ret = GetSequence(dCert->extensions, &idx, &len,
                           (word32)dCert->extensionsSz);
         if (ret < 0) {
             return ret;
         }
-        walkIdx = dCert->extensionsIdx + absIdx + (word32)extLen;
-        if (walkIdx > innerSeqContentEnd) {
+        innerSeqContentLen   = (word32)len;
+        innerSeqContentStart = dCert->extensionsIdx + idx;
+        innerSeqContentEnd   = innerSeqContentStart + innerSeqContentLen;
+
+        /* Walk Extension items, find altSigValue by pointer overlap. */
+        walkIdx = innerSeqContentStart;
+        while (walkIdx < innerSeqContentEnd) {
+            word32 extStart = walkIdx;
+            word32 absIdx   = walkIdx - dCert->extensionsIdx;
+            int    extLen;
+
+            ret = GetSequence(dCert->extensions, &absIdx, &extLen,
+                              (word32)dCert->extensionsSz);
+            if (ret < 0) {
+                return ret;
+            }
+            walkIdx = dCert->extensionsIdx + absIdx + (word32)extLen;
+            if (walkIdx > innerSeqContentEnd) {
+                return ASN_PARSE_E;
+            }
+            if ((dCert->altSigValDer >= dCert->source + extStart) &&
+                (dCert->altSigValDer <  dCert->source + walkIdx)) {
+                excisedStart = extStart;
+                excisedEnd   = walkIdx;
+                break;
+            }
+        }
+        if (excisedStart == excisedEnd) {
+            WOLFSSL_MSG("altSigValue extension not found in extensions list");
             return ASN_PARSE_E;
         }
-
-        if ((dCert->altSigValDer >= dCert->source + extStart) &&
-            (dCert->altSigValDer <  dCert->source + walkIdx)) {
-            excisedStart = extStart;
-            excisedEnd   = walkIdx;
-            break;
+        if (excisedEnd != innerSeqContentEnd) {
+            WOLFSSL_MSG("altSigValue is not the last extension; cert violates"
+                        " X9.146 requirement");
+            return ASN_PARSE_E;
         }
     }
-    if (excisedStart == excisedEnd) {
-        WOLFSSL_MSG("altSigValue extension not found in extensions list");
-        return ASN_PARSE_E;
+
+    /* Compute lengths bottom-up. */
+    prefix1Len = sigAlgIdStart - tbsContentStart;          /* version+serial */
+
+    if (hasAltSigVal) {
+        /* prefix2 covers issuer..uniqueIDs (everything between the sig AlgID
+         * we're excising and the [3] EXPLICIT extensions wrapper). */
+        prefix2Len = dCert->extensionsIdx - sigAlgIdEnd;
+
+        newInnerSeqContentLen = innerSeqContentLen
+                                - (excisedEnd - excisedStart);
+        newInnerSeqHeaderSz   = SetSequence(newInnerSeqContentLen, NULL);
+        newOuterExplicitContentLen =
+            newInnerSeqHeaderSz + newInnerSeqContentLen;
+        newOuterExplicitHeaderSz =
+            1 /* [3] tag */ + SetLength(newOuterExplicitContentLen, NULL);
+
+        newTbsContentLen = prefix1Len + prefix2Len
+                           + newOuterExplicitHeaderSz
+                           + newOuterExplicitContentLen;
     }
-    if (excisedEnd != innerSeqContentEnd) {
-        WOLFSSL_MSG("altSigValue is not the last extension; cert violates "
-                    "X9.146 requirement");
-        return ASN_PARSE_E;
+    else {
+        /* Issuer-side path: cert has no altSigValue extension yet. The new
+         * TBS is the original minus only the signature AlgID; everything
+         * after the AlgID stays verbatim, including the (possibly absent)
+         * extensions wrapper. */
+        prefix2Len = tbsContentEnd - sigAlgIdEnd;
+        newTbsContentLen = prefix1Len + prefix2Len;
     }
 
-    /* Compute new lengths bottom-up. */
-    newInnerSeqContentLen = innerSeqContentLen - (excisedEnd - excisedStart);
-    newInnerSeqHeaderSz   = SetSequence(newInnerSeqContentLen, NULL);
-    newOuterExplicitContentLen = newInnerSeqHeaderSz + newInnerSeqContentLen;
-    newOuterExplicitHeaderSz   = 1 /* [3] tag */
-                                 + SetLength(newOuterExplicitContentLen, NULL);
-
-    prefixLen = dCert->extensionsIdx - tbsContentStart;
-    newTbsContentLen = prefixLen + newOuterExplicitHeaderSz
-                                 + newOuterExplicitContentLen;
     newTbsTotal = SetSequence(newTbsContentLen, NULL) + newTbsContentLen;
 
     if (newTbsTotal > (word32)derSz) {
@@ -30165,21 +30239,29 @@ static int GenerateCertPreTBS(DecodedCert* dCert, byte* der, int derSz)
 
     /* Emit. */
     outIdx = SetSequence(newTbsContentLen, der);
-    /* Verbatim TBS prefix: version, serial, sigAlg, issuer, validity,
-     * subject, SPKI, optional unique IDs. */
-    XMEMCPY(der + outIdx, dCert->source + tbsContentStart, prefixLen);
-    outIdx += prefixLen;
-    /* New [3] EXPLICIT header. */
-    der[outIdx++] = ASN_CONTEXT_SPECIFIC | ASN_CONSTRUCTED | 3;
-    outIdx += SetLength(newOuterExplicitContentLen, der + outIdx);
-    /* New inner Extensions SEQUENCE header. */
-    outIdx += SetSequence(newInnerSeqContentLen, der + outIdx);
-    /* All extensions except altSigValue (which is required to be last) -
-     * single verbatim copy. */
-    if (excisedStart > innerSeqContentStart) {
-        XMEMCPY(der + outIdx, dCert->source + innerSeqContentStart,
-                excisedStart - innerSeqContentStart);
-        outIdx += excisedStart - innerSeqContentStart;
+    /* TBS prefix part 1 verbatim: version + serialNumber. */
+    if (prefix1Len > 0) {
+        XMEMCPY(der + outIdx, dCert->source + tbsContentStart, prefix1Len);
+        outIdx += prefix1Len;
+    }
+    /* (signature AlgorithmIdentifier excised - X9.146 9.8.4) */
+    /* TBS prefix part 2 verbatim: issuer..validity..subject..SPKI..uniqueIDs
+     * (..extensions wrapper, on the no-altSigVal path). */
+    if (prefix2Len > 0) {
+        XMEMCPY(der + outIdx, dCert->source + sigAlgIdEnd, prefix2Len);
+        outIdx += prefix2Len;
+    }
+
+    if (hasAltSigVal) {
+        /* Reconstruct extensions wrapper without altSigValue. */
+        der[outIdx++] = ASN_CONTEXT_SPECIFIC | ASN_CONSTRUCTED | 3;
+        outIdx += SetLength(newOuterExplicitContentLen, der + outIdx);
+        outIdx += SetSequence(newInnerSeqContentLen, der + outIdx);
+        if (excisedStart > innerSeqContentStart) {
+            XMEMCPY(der + outIdx, dCert->source + innerSeqContentStart,
+                    excisedStart - innerSeqContentStart);
+            outIdx += excisedStart - innerSeqContentStart;
+        }
     }
 
     return (int)outIdx;
@@ -30445,9 +30527,15 @@ static int GenerateCsrPreTBS(DecodedCert* dCert, byte* der, int derSz)
 }
 #endif /* WOLFSSL_CERT_REQ */
 
-/* Public preTBS entry point. Dispatches to the cert or CSR helper after
- * common input validation and the "no altSigValue yet" issuer-side fast
- * path (used while computing the alt signature input).
+/* Public preTBS entry point. Dispatches to the cert or CSR helper.
+ *
+ * For X.509 certs, GenerateCertPreTBS always excises the signature
+ * AlgorithmIdentifier (X9.146 / ITU-T X.509:2019 9.8.4 requires preTBS
+ * to omit it) and additionally excises altSignatureValue when present.
+ * For CSRs the CertificationRequestInfo carries no signature
+ * AlgorithmIdentifier (it lives at the outer CertificationRequest
+ * level), so the verbatim copy is correct when no altSignatureValue
+ * has been added yet.
  *
  * @param [in]  dCert The parsed certificate or CSR.
  * @param [out] der   Output buffer for the preTBS DER.
@@ -30467,24 +30555,24 @@ int wc_GeneratePreTBS(DecodedCert* dCert, byte *der, int derSz)
         return ASN_PARSE_E;
     }
 
-    /* Issuer-side fast path: input does not (yet) have an altSigValue
-     * extension, so the preTBS *is* the TBS / CertificationRequestInfo
-     * verbatim. */
-    if (!dCert->extAltSigValSet || dCert->altSigValDer == NULL) {
-        word32 tbsTotal = dCert->sigIndex - dCert->certBegin;
-        if (tbsTotal > (word32)derSz) {
-            return BUFFER_E;
-        }
-        XMEMCPY(der, dCert->source + dCert->certBegin, tbsTotal);
-        return (int)tbsTotal;
-    }
-
-    if (dCert->extensions == NULL || dCert->extensionsSz <= 0) {
-        return ASN_PARSE_E;
-    }
-
 #ifdef WOLFSSL_CERT_REQ
     if (dCert->isCSR) {
+        /* CSR: verbatim CRInfo when no altSignatureValue extension is
+         * present yet (issuer-side, computing alt-sig input). The
+         * CertificationRequestInfo has no signature AlgID field that
+         * would need to be excised - that field lives outside CRInfo at
+         * the CertificationRequest level. */
+        if (!dCert->extAltSigValSet || dCert->altSigValDer == NULL) {
+            word32 crInfoTotal = dCert->sigIndex - dCert->certBegin;
+            if (crInfoTotal > (word32)derSz) {
+                return BUFFER_E;
+            }
+            XMEMCPY(der, dCert->source + dCert->certBegin, crInfoTotal);
+            return (int)crInfoTotal;
+        }
+        if (dCert->extensions == NULL || dCert->extensionsSz <= 0) {
+            return ASN_PARSE_E;
+        }
         return GenerateCsrPreTBS(dCert, der, derSz);
     }
 #endif

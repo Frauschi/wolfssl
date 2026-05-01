@@ -1798,13 +1798,14 @@ static int test_dual_alg_pretbs_cert(void)
                 BAD_FUNC_ARG);
     ExpectIntEQ(wc_GeneratePreTBS(&d_cert, tbs_der, 0), BAD_FUNC_ARG);
 
-    /* --- Issuer-side fast path: cert has no altSigValue extension yet,
-     * preTBS must equal the parsed TBS verbatim. */
+    /* --- Issuer-side: cert has no altSigValue extension yet. The preTBS
+     * is the TBS minus the signature AlgorithmIdentifier (X9.146 9.8.4),
+     * so it's strictly smaller than the parsed TBS. */
     tbs_der_sz = wc_GeneratePreTBS(&d_cert, tbs_der, (int)sizeof(tbs_der));
     ExpectIntGT(tbs_der_sz, 0);
-    ExpectIntEQ((word32)tbs_der_sz, d_cert.sigIndex - d_cert.certBegin);
-    ExpectIntEQ(XMEMCMP(tbs_der, d_cert.source + d_cert.certBegin,
-                        (size_t)tbs_der_sz), 0);
+    ExpectIntLT((word32)tbs_der_sz, d_cert.sigIndex - d_cert.certBegin);
+    /* Outer wrapper is still a SEQUENCE. */
+    ExpectIntEQ(tbs_der[0], (ASN_SEQUENCE | ASN_CONSTRUCTED));
 
     /* --- Negative: derSz too small. */
     ExpectIntEQ(wc_GeneratePreTBS(&d_cert, scratch, 4), BUFFER_E);
