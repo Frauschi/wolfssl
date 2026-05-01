@@ -16571,6 +16571,7 @@ int ConfirmSignature(SignatureCtx* sigCtx,
             #if defined(HAVE_ED25519) && defined(HAVE_ED25519_KEY_IMPORT)
                 case ED25519k:
                 {
+                    word32 idx = 0;
                     sigCtx->verify = 0;
                 #ifndef WOLFSSL_NO_MALLOC
                     sigCtx->key.ed25519 = (ed25519_key*)XMALLOC(
@@ -16584,21 +16585,13 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                                             sigCtx->heap, sigCtx->devId)) < 0) {
                         goto exit_cs;
                     }
-                    /* Two callers feed this path with different key
-                     * encodings: the primary-signature verify hands us a raw
-                     * 32-byte public key (StoreKey strips the SPKI BIT
-                     * STRING wrapper into cert->publicKey), while the X9.146
-                     * alt-signature verify hands us the full
-                     * SubjectPublicKeyInfo DER from cert->ca->sapkiDer.
-                     * Try the raw form first and fall back to SPKI parsing
-                     * if that doesn't fit. */
-                    ret = wc_ed25519_import_public(key, keySz,
-                                                   sigCtx->key.ed25519);
-                    if (ret != 0) {
-                        word32 idx = 0;
-                        ret = wc_Ed25519PublicKeyDecode(key, &idx,
+                    /* wc_Ed25519PublicKeyDecode accepts both raw and SPKI
+                     * input (same dual-input pattern as the Falcon and
+                     * Dilithium decoders), so this branch handles both the
+                     * primary-signature path (cert->publicKey, raw) and the
+                     * X9.146 alt-signature path (cert->ca->sapkiDer, SPKI). */
+                    ret = wc_Ed25519PublicKeyDecode(key, &idx,
                                             sigCtx->key.ed25519, keySz);
-                    }
                     if (ret < 0) {
                         WOLFSSL_MSG("ASN Key import error ED25519");
                         WOLFSSL_ERROR_VERBOSE(ret);
@@ -16613,6 +16606,7 @@ int ConfirmSignature(SignatureCtx* sigCtx,
             #if defined(HAVE_ED448) && defined(HAVE_ED448_KEY_IMPORT)
                 case ED448k:
                 {
+                    word32 idx = 0;
                     sigCtx->verify = 0;
                 #ifndef WOLFSSL_NO_MALLOC
                     sigCtx->key.ed448 = (ed448_key*)XMALLOC(
@@ -16625,16 +16619,9 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                     if ((ret = wc_ed448_init(sigCtx->key.ed448)) < 0) {
                         goto exit_cs;
                     }
-                    /* Same dual-input pattern as ED25519 above: raw key for
-                     * the primary-signature path, SPKI DER for the X9.146
-                     * alt-signature path. */
-                    ret = wc_ed448_import_public(key, keySz,
-                                                 sigCtx->key.ed448);
-                    if (ret != 0) {
-                        word32 idx = 0;
-                        ret = wc_Ed448PublicKeyDecode(key, &idx,
+                    /* See ED25519k above for the dual-input rationale. */
+                    ret = wc_Ed448PublicKeyDecode(key, &idx,
                                             sigCtx->key.ed448, keySz);
-                    }
                     if (ret < 0) {
                         WOLFSSL_MSG("ASN Key import error ED448");
                         WOLFSSL_ERROR_VERBOSE(ret);
@@ -32049,6 +32036,19 @@ int wc_Ed25519PublicKeyDecode(const byte* input, word32* inOutIdx,
         return BAD_FUNC_ARG;
     }
 
+    /* Accept either a raw public key (32 bytes, or 33 bytes with the 0x40
+     * compressed-form prefix) or a full SubjectPublicKeyInfo DER. The raw
+     * import handles the first two; if the input is neither, fall back to
+     * stripping the SPKI wrapper. Mirrors the dual-input pattern of
+     * wc_Falcon_PublicKeyDecode / wc_Dilithium_PublicKeyDecode so that
+     * the X9.146 alt-signature verify path (which feeds full SPKI from
+     * cert->ca->sapkiDer) works alongside the primary-signature path
+     * (which feeds raw key bytes from cert->publicKey). */
+    ret = wc_ed25519_import_public(input, inSz, key);
+    if (ret == 0) {
+        return 0;
+    }
+
     /* init pubKey */
     XMEMSET(pubKey, 0, sizeof(pubKey));
 
@@ -32469,6 +32469,13 @@ int wc_Ed448PublicKeyDecode(const byte* input, word32* inOutIdx,
 
     if (input == NULL || inOutIdx == NULL || key == NULL || inSz == 0) {
         return BAD_FUNC_ARG;
+    }
+
+    /* See wc_Ed25519PublicKeyDecode for the rationale on accepting either
+     * a raw public key or a full SubjectPublicKeyInfo DER. */
+    ret = wc_ed448_import_public(input, inSz, key);
+    if (ret == 0) {
+        return 0;
     }
 
     ret = DecodeAsymKeyPublic(input, inOutIdx, inSz,
