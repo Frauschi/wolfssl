@@ -9127,9 +9127,6 @@ void wolfSSL_ResourceFree(WOLFSSL* ssl)
 #endif
 #ifdef WOLFSSL_DUAL_ALG_CERTS
     XFREE(ssl->peerSigSpec, ssl->heap, DYNAMIC_TYPE_TLSX);
-    XFREE(ssl->peerSapkiDer, ssl->heap, DYNAMIC_TYPE_X509_EXT);
-    ssl->peerSapkiDer = NULL;
-    ssl->peerSapkiLen = 0;
 #endif
 }
 
@@ -16828,31 +16825,6 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                 }
             #endif /* KEEP_PEER_CERT */
 
-            #ifdef WOLFSSL_DUAL_ALG_CERTS
-                /* Stash the alternative public key (sapki) on the SSL session
-                 * so the X9.146 CertificateVerify path can verify the
-                 * alternative signature without requiring KEEP_PEER_CERT. */
-                if (args->fatal == 0 && args->dCert->extSapkiSet &&
-                    args->dCert->sapkiLen > 0) {
-                    if (ssl->peerSapkiDer != NULL) {
-                        XFREE(ssl->peerSapkiDer, ssl->heap,
-                              DYNAMIC_TYPE_X509_EXT);
-                        ssl->peerSapkiDer = NULL;
-                        ssl->peerSapkiLen = 0;
-                    }
-                    ssl->peerSapkiDer = (byte*)XMALLOC(args->dCert->sapkiLen,
-                            ssl->heap, DYNAMIC_TYPE_X509_EXT);
-                    if (ssl->peerSapkiDer == NULL) {
-                        args->fatal = 1;
-                    }
-                    else {
-                        XMEMCPY(ssl->peerSapkiDer, args->dCert->sapkiDer,
-                                args->dCert->sapkiLen);
-                        ssl->peerSapkiLen = args->dCert->sapkiLen;
-                    }
-                }
-            #endif /* WOLFSSL_DUAL_ALG_CERTS */
-
             #ifndef IGNORE_KEY_EXTENSIONS
                 #if defined(OPENSSL_EXTRA)
                   /* when compatibility layer is turned on and no verify is
@@ -17418,6 +17390,195 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                     default:
                         break;
                 }
+
+            #ifdef WOLFSSL_DUAL_ALG_CERTS
+                /* Decode the alternative public key (sapki) into the
+                 * matching peer*Key slot, mirroring the primary-key dispatch
+                 * above. This avoids stashing the raw sapki DER on the SSL
+                 * session and lets DoTls13CertificateVerify consume the
+                 * alternative key the same way it consumes the native one.
+                 *
+                 * X9.146 dual-algorithm certs assume primary alg != alt alg,
+                 * so the slot the alt key targets must be empty when we get
+                 * here; collisions return PEER_KEY_ERROR. */
+                if (ret == 0 && args->dCert->extSapkiSet &&
+                    args->dCert->sapkiDer != NULL &&
+                    args->dCert->sapkiLen > 0) {
+                    int altKeyRet = 0;
+                    word32 altIdx = 0;
+
+                    switch (args->dCert->sapkiOID) {
+                    #ifndef NO_RSA
+                        #ifdef WC_RSA_PSS
+                        case RSAPSSk:
+                        #endif
+                        case RSAk:
+                        {
+                            if (ssl->peerRsaKeyPresent) {
+                                ret = PEER_KEY_ERROR;
+                                WOLFSSL_MSG("Dual-alg cert: native and alt "
+                                            "keys both occupy the RSA slot");
+                                WOLFSSL_ERROR_VERBOSE(ret);
+                                break;
+                            }
+                            if (ssl->peerRsaKey == NULL) {
+                                altKeyRet = AllocKey(ssl, DYNAMIC_TYPE_RSA,
+                                                (void**)&ssl->peerRsaKey);
+                            }
+                            if (altKeyRet == 0) {
+                                altKeyRet = wc_RsaPublicKeyDecode(
+                                                args->dCert->sapkiDer, &altIdx,
+                                                ssl->peerRsaKey,
+                                                args->dCert->sapkiLen);
+                            }
+                            if (altKeyRet != 0) {
+                                ret = PEER_KEY_ERROR;
+                                WOLFSSL_ERROR_VERBOSE(ret);
+                            }
+                            else {
+                                ssl->peerRsaKeyPresent = 1;
+                            }
+                            break;
+                        }
+                    #endif /* !NO_RSA */
+                    #ifdef HAVE_ECC
+                        #if defined(WOLFSSL_SM2) && defined(WOLFSSL_SM3)
+                        case SM2k:
+                        #endif
+                        case ECDSAk:
+                        {
+                            if (ssl->peerEccDsaKeyPresent) {
+                                ret = PEER_KEY_ERROR;
+                                WOLFSSL_MSG("Dual-alg cert: native and alt "
+                                            "keys both occupy the ECC slot");
+                                WOLFSSL_ERROR_VERBOSE(ret);
+                                break;
+                            }
+                            if (ssl->peerEccDsaKey == NULL) {
+                                altKeyRet = AllocKey(ssl, DYNAMIC_TYPE_ECC,
+                                                (void**)&ssl->peerEccDsaKey);
+                            }
+                            if (altKeyRet == 0) {
+                                altKeyRet = wc_EccPublicKeyDecode(
+                                                args->dCert->sapkiDer, &altIdx,
+                                                ssl->peerEccDsaKey,
+                                                args->dCert->sapkiLen);
+                            }
+                            if (altKeyRet != 0) {
+                                ret = PEER_KEY_ERROR;
+                                WOLFSSL_ERROR_VERBOSE(ret);
+                            }
+                            else {
+                                ssl->peerEccDsaKeyPresent = 1;
+                            }
+                            break;
+                        }
+                    #endif /* HAVE_ECC */
+                    #ifdef HAVE_FALCON
+                        case FALCON_LEVEL1k:
+                        case FALCON_LEVEL5k:
+                        {
+                            if (ssl->peerFalconKeyPresent) {
+                                ret = PEER_KEY_ERROR;
+                                WOLFSSL_MSG("Dual-alg cert: native and alt "
+                                            "keys both occupy the Falcon slot");
+                                WOLFSSL_ERROR_VERBOSE(ret);
+                                break;
+                            }
+                            if (ssl->peerFalconKey == NULL) {
+                                altKeyRet = AllocKey(ssl, DYNAMIC_TYPE_FALCON,
+                                                (void**)&ssl->peerFalconKey);
+                            }
+                            if (altKeyRet == 0) {
+                                altKeyRet = wc_falcon_set_level(
+                                                ssl->peerFalconKey,
+                                                args->dCert->sapkiOID
+                                                    == FALCON_LEVEL1k ? 1 : 5);
+                            }
+                            if (altKeyRet == 0) {
+                                altKeyRet = wc_Falcon_PublicKeyDecode(
+                                                args->dCert->sapkiDer, &altIdx,
+                                                ssl->peerFalconKey,
+                                                args->dCert->sapkiLen);
+                            }
+                            if (altKeyRet != 0) {
+                                ret = PEER_KEY_ERROR;
+                                WOLFSSL_ERROR_VERBOSE(ret);
+                            }
+                            else {
+                                ssl->peerFalconKeyPresent = 1;
+                            }
+                            break;
+                        }
+                    #endif /* HAVE_FALCON */
+                    #if defined(HAVE_DILITHIUM) && \
+                        !defined(WOLFSSL_DILITHIUM_NO_VERIFY)
+                        case ML_DSA_LEVEL2k:
+                        case ML_DSA_LEVEL3k:
+                        case ML_DSA_LEVEL5k:
+                        #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
+                        case DILITHIUM_LEVEL2k:
+                        case DILITHIUM_LEVEL3k:
+                        case DILITHIUM_LEVEL5k:
+                        #endif
+                        {
+                            int level = 0;
+                            if (ssl->peerDilithiumKeyPresent) {
+                                ret = PEER_KEY_ERROR;
+                                WOLFSSL_MSG("Dual-alg cert: native and alt "
+                                            "keys both occupy the Dilithium "
+                                            "slot");
+                                WOLFSSL_ERROR_VERBOSE(ret);
+                                break;
+                            }
+                            if (ssl->peerDilithiumKey == NULL) {
+                                altKeyRet = AllocKey(ssl, DYNAMIC_TYPE_DILITHIUM,
+                                                (void**)&ssl->peerDilithiumKey);
+                            }
+                            if (altKeyRet == 0) {
+                                switch (args->dCert->sapkiOID) {
+                                case ML_DSA_LEVEL2k:
+                                    level = WC_ML_DSA_44; break;
+                                case ML_DSA_LEVEL3k:
+                                    level = WC_ML_DSA_65; break;
+                                case ML_DSA_LEVEL5k:
+                                    level = WC_ML_DSA_87; break;
+                                #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
+                                case DILITHIUM_LEVEL2k:
+                                    level = WC_ML_DSA_44_DRAFT; break;
+                                case DILITHIUM_LEVEL3k:
+                                    level = WC_ML_DSA_65_DRAFT; break;
+                                case DILITHIUM_LEVEL5k:
+                                    level = WC_ML_DSA_87_DRAFT; break;
+                                #endif
+                                }
+                                altKeyRet = wc_dilithium_set_level(
+                                                ssl->peerDilithiumKey, level);
+                            }
+                            if (altKeyRet == 0) {
+                                altKeyRet = wc_Dilithium_PublicKeyDecode(
+                                                args->dCert->sapkiDer, &altIdx,
+                                                ssl->peerDilithiumKey,
+                                                args->dCert->sapkiLen);
+                            }
+                            if (altKeyRet != 0) {
+                                ret = PEER_KEY_ERROR;
+                                WOLFSSL_ERROR_VERBOSE(ret);
+                            }
+                            else {
+                                ssl->peerDilithiumKeyPresent = 1;
+                            }
+                            break;
+                        }
+                    #endif /* HAVE_DILITHIUM */
+                        default:
+                            WOLFSSL_MSG("Unsupported alt public key OID");
+                            ret = PEER_KEY_ERROR;
+                            WOLFSSL_ERROR_VERBOSE(ret);
+                            break;
+                    }
+                }
+            #endif /* WOLFSSL_DUAL_ALG_CERTS */
 
                 /* args->dCert free'd in function cleanup after callback */
             } /* if (count > 0) */
