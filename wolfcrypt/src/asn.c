@@ -5184,6 +5184,15 @@ static const byte attrDnQualifier[] = {85, 4, 46};
 static const byte attrInitals[] = {85, 4, 43};
 static const byte attrSurname[] = {85, 4, 4};
 static const byte attrGivenName[] = {85, 4, 42};
+#ifdef WOLFSSL_DUAL_ALG_CERTS
+/* X9.146 hybrid attributes can appear at the top level of a PKCS#10
+ * CSR (BouncyCastle / EJBCA encoding) in addition to nested inside
+ * extensionRequest. The OID bytes are the same as the corresponding
+ * X.509 extension OIDs (2.5.29.72/73/74). */
+static const byte attrSubjAltPubKeyInfoOid[] = {85, 29, 72};
+static const byte attrAltSigAlgOid[]         = {85, 29, 73};
+static const byte attrAltSigValOid[]         = {85, 29, 74};
+#endif
 #endif
 #endif
 
@@ -6722,6 +6731,20 @@ const byte* OidFromId(word32 id, word32 type, word32* oidSz)
                     oid = attrExtensionRequestOid;
                     *oidSz = sizeof(attrExtensionRequestOid);
                     break;
+            #ifdef WOLFSSL_DUAL_ALG_CERTS
+                case SUBJ_ALT_PUB_KEY_INFO_OID:
+                    oid = attrSubjAltPubKeyInfoOid;
+                    *oidSz = sizeof(attrSubjAltPubKeyInfoOid);
+                    break;
+                case ALT_SIG_ALG_OID:
+                    oid = attrAltSigAlgOid;
+                    *oidSz = sizeof(attrAltSigAlgOid);
+                    break;
+                case ALT_SIG_VAL_OID:
+                    oid = attrAltSigValOid;
+                    *oidSz = sizeof(attrAltSigValOid);
+                    break;
+            #endif
                 default:
                     break;
             }
@@ -21107,15 +21130,56 @@ static const byte strAttrChoice[] = {
     ASN_PRINTABLE_STRING, ASN_IA5_STRING, ASN_UTF8STRING, 0
 };
 
+#ifdef WOLFSSL_DUAL_ALG_CERTS
+/* PKCS#10 attributes are SET OF AttributeValue. Several attribute OIDs
+ * (notably the X9.146 ones we accept here) only ever carry a single
+ * value, but the wire format would let an attacker append more. Confirm
+ * that the SET content is exactly one TLV item. Returns 0 on success. */
+static int CheckSinglePkcs10AttrValue(const byte* input, word32 sz)
+{
+    word32 idx = 0;
+    int    len;
+    byte   tag;
+    int    ret;
+
+    ret = GetASNTag(input, &idx, &tag, sz);
+    if (ret < 0) {
+        return ret;
+    }
+    ret = GetLength(input, &idx, &len, sz);
+    if (ret < 0) {
+        return ret;
+    }
+    if (idx + (word32)len != sz) {
+        WOLFSSL_MSG("PKCS#10 attribute value SET must contain exactly one"
+                    " value");
+        WOLFSSL_ERROR_VERBOSE(ASN_PARSE_E);
+        return ASN_PARSE_E;
+    }
+    return 0;
+}
+#endif /* WOLFSSL_DUAL_ALG_CERTS */
+
 /* Decode a certificate request attribute's value.
+ *
+ * Recognised attribute OIDs:
+ *   PKCS#9: contentType, challengePassword, serialNumber,
+ *           unstructuredName, extensionRequest.
+ *   X9.146 dual-alg (when WOLFSSL_DUAL_ALG_CERTS is enabled):
+ *           subjectAltPublicKeyInfo, altSignatureAlgorithm,
+ *           altSignatureValue. These can also appear nested inside
+ *           extensionRequest (the IETF lamps draft style); both
+ *           encodings populate the same DecodedCert fields.
  *
  * @param [in]  cert         Certificate request object.
  * @param [out] criticalExt  Critical extension return code.
  * @param [in]  oid          OID describing which attribute was found.
  * @param [in]  aIdx         Index into certificate source to start parsing.
- * @param [in]  input        Attribute value data.
- * @param [in]  maxIdx       Maximum index to parse to.
+ * @param [in]  input        Attribute value data (the SET's content).
+ * @param [in]  maxIdx       Length of attribute value data, in bytes.
  * @return  0 on success.
+ * @return  ASN_OBJECT_ID_E when the same X9.146 attribute appears more
+ *          than once (top-level + nested or two top-level copies).
  * @return  ASN_PARSE_E when BER encoded data does not match ASN.1 items or
  *          is invalid.
  */
@@ -21226,37 +21290,33 @@ static int DecodeCertReqAttrValue(DecodedCert* cert, int* criticalExt,
             break;
 
 #ifdef WOLFSSL_DUAL_ALG_CERTS
-        /* X9.146 dual-algorithm CSR attributes appear in two encodings
-         * in the wild:
-         *   - Nested inside the extensionRequest attribute above (the
-         *     IETF lamps draft style; how wolfSSL emits via
-         *     wc_SetCustomExtension).
-         *   - As top-level PKCS#10 attributes whose OID is the X.509
-         *     extension OID (2.5.29.72/73/74) - BouncyCastle's
-         *     PKCS10CertificationRequestBuilder.build(signer, altPubKey,
-         *     altSigner) emits this. EJBCA inherits the BC encoding.
-         * Accept both. The 'input'/'maxIdx' span here is the SET's
-         * content, which contains the value SEQUENCE / BIT STRING
-         * directly. */
+        /* See the docstring above for the two X9.146 CSR encodings we
+         * accept here. The 'input'/'maxIdx' span at this point is the
+         * SET's content for the attribute value - it must contain
+         * exactly one TLV (SubjectAltPublicKeyInfo / AlgorithmIdentifier
+         * / BIT STRING). VERIFY_AND_SET_OID detects an X9.146 attribute
+         * that already arrived via the other encoding (or twice via
+         * the same encoding) and returns ASN_OBJECT_ID_E before any
+         * decoder field is overwritten. */
         case SUBJ_ALT_PUB_KEY_INFO_OID:
             VERIFY_AND_SET_OID(cert->extSapkiSet);
-            ret = DecodeSubjAltPubKeyInfo(input, (int)maxIdx, cert);
-            if (ret < 0) {
-                ret = ASN_PARSE_E;
+            ret = CheckSinglePkcs10AttrValue(input, maxIdx);
+            if (ret == 0) {
+                ret = DecodeSubjAltPubKeyInfo(input, (int)maxIdx, cert);
             }
             break;
         case ALT_SIG_ALG_OID:
             VERIFY_AND_SET_OID(cert->extAltSigAlgSet);
-            ret = DecodeAltSigAlg(input, (int)maxIdx, cert);
-            if (ret < 0) {
-                ret = ASN_PARSE_E;
+            ret = CheckSinglePkcs10AttrValue(input, maxIdx);
+            if (ret == 0) {
+                ret = DecodeAltSigAlg(input, (int)maxIdx, cert);
             }
             break;
         case ALT_SIG_VAL_OID:
             VERIFY_AND_SET_OID(cert->extAltSigValSet);
-            ret = DecodeAltSigVal(input, (int)maxIdx, cert);
-            if (ret < 0) {
-                ret = ASN_PARSE_E;
+            ret = CheckSinglePkcs10AttrValue(input, maxIdx);
+            if (ret == 0) {
+                ret = DecodeAltSigVal(input, (int)maxIdx, cert);
             }
             break;
 #endif /* WOLFSSL_DUAL_ALG_CERTS */
@@ -30330,7 +30390,12 @@ static int GenerateCsrPreTBS(DecodedCert* dCert, byte* der, int derSz)
     word32 outIdx;
 
     /* Excised range, in two flavours. */
-    int    bcMode = 0;       /* if set, excise an entire top-level Attribute */
+    /* Encoding selector for the excision step:
+     *   0 -> lamps-draft (extensionRequest-nested) - excise the
+     *        altSigValue Extension from inside extensionRequest.
+     *   1 -> BC / EJBCA top-level - excise the altSigValue Attribute
+     *        SEQUENCE wholesale from the CRInfo's attributes [0] SET. */
+    int    topLevelAttr = 0;
     word32 excisedAttrStart = 0;
     word32 excisedAttrEnd   = 0;
     /* lamps-draft (extensionRequest) mode: */
@@ -30434,7 +30499,7 @@ static int GenerateCsrPreTBS(DecodedCert* dCert, byte* der, int derSz)
 
         if (oid == ALT_SIG_VAL_OID) {
             /* (A) BC encoding - excise this entire Attribute SEQUENCE. */
-            bcMode = 1;
+            topLevelAttr = 1;
             excisedAttrStart = attrTagOff;
             excisedAttrEnd   = attrContentEnd;
             break;
@@ -30448,10 +30513,19 @@ static int GenerateCsrPreTBS(DecodedCert* dCert, byte* der, int derSz)
         walkIdx = attrContentEnd;
     }
 
-    if (bcMode) {
+    if (topLevelAttr) {
         /* BC encoding: only the wrapping CRInfo SEQUENCE and attributes
          * [0] header lengths shrink; the altSigValue Attribute is
-         * removed wholesale. */
+         * removed wholesale.
+         *
+         * Note: there is no "altSigValue must be last" enforcement here
+         * (unlike the certificate path and the lamps-draft branch
+         * below). PKCS#10 attributes is SET OF Attribute, and DER's
+         * SET OF ordering rule means the encoder controls position.
+         * Removing one element from a sorted SET still leaves it
+         * sorted, so emitting the remaining attributes in their
+         * original wire order is DER-conformant regardless of where
+         * altSigValue sat. */
         attrsPrefixLen = excisedAttrStart - attrsContentStart;
         attrsSuffixLen = attrsContentEnd  - excisedAttrEnd;
         newAttrsContentLen = attrsPrefixLen + attrsSuffixLen;
@@ -30462,6 +30536,13 @@ static int GenerateCsrPreTBS(DecodedCert* dCert, byte* der, int derSz)
             WOLFSSL_MSG("CSR has altSigValue but neither a top-level"
                         " altSignatureValue attribute nor an"
                         " extensionRequest");
+            return ASN_PARSE_E;
+        }
+
+        if (dCert->extensions == NULL || dCert->extensionsSz <= 0 ||
+            dCert->extensionsIdx == 0) {
+            WOLFSSL_MSG("CSR has lamps-draft altSigValue but extensions"
+                        " bookkeeping is missing");
             return ASN_PARSE_E;
         }
 
@@ -30559,7 +30640,7 @@ static int GenerateCsrPreTBS(DecodedCert* dCert, byte* der, int derSz)
     der[outIdx++] = ASN_CONTEXT_SPECIFIC | ASN_CONSTRUCTED | 0;
     outIdx += SetLength(newAttrsContentLen, der + outIdx);
 
-    if (bcMode) {
+    if (topLevelAttr) {
         /* Emit the attributes SET with the altSigValue Attribute SEQUENCE
          * removed (everything else stays exactly where it was). */
         if (attrsPrefixLen > 0) {
