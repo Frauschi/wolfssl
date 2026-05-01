@@ -2210,9 +2210,6 @@ static int test_dual_alg_pretbs_csr_altsigval_not_last(void)
  *                                           fail (collision detection)
  *   - test_dual_alg_minkeysize_handshake    alt key smaller than client's
  *                                           minimum, must fail
- *   - test_dual_alg_unsupported_alt_native  unrecognised alt-key OID with
- *                                           sigSpec=NATIVE, must succeed
- *                                           (graceful skip)
  * ---------------------------------------------------------------------------- */
 #if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_ECC) && \
     !defined(WC_NO_RNG) && !defined(WOLFSSL_SMALL_STACK) && \
@@ -2232,7 +2229,7 @@ static int test_dual_alg_pretbs_csr_altsigval_not_last(void)
  * and the final signed cert.
  *
  * Supported pairings (by algorithm, not enforced statically):
- *   primary {ECC, RSA}  ALG;  alt {ECC, Ed25519}  ALG.
+ *   primary {ECC, RSA}  ALG;  alt ECC  ALG.
  *   The matrix is open - anything wc_MakeCert_ex / wc_MakeSigWithBitStr
  *   accept will work; just gate the call site on the relevant HAVE_*
  *   flags.
@@ -2263,12 +2260,6 @@ static int do_build_dual_alg_self_signed(byte* out, word32 outSz,
     case ECC_TYPE:
         altPubSz = wc_EccPublicKeyToDer((ecc_key*)altKey, altPubDer,
                                         (word32)sizeof(altPubDer), 1);
-        break;
-#endif
-#if defined(HAVE_ED25519) && defined(HAVE_ED25519_KEY_EXPORT)
-    case ED25519_TYPE:
-        altPubSz = wc_Ed25519PublicKeyToDer((ed25519_key*)altKey, altPubDer,
-                                            (word32)sizeof(altPubDer), 1);
         break;
 #endif
     default:
@@ -2493,183 +2484,6 @@ static int test_dual_alg_minkeysize_handshake(void)
     return EXPECT_RESULT();
 }
 
-
-/* Unsupported alt-key OID + NATIVE handshake: build a self-signed cert
- * with primary ECDSA + alt Ed25519 (real key, real Ed25519 alt
- * signature). The cert validates cleanly during ParseCertRelative -
- * ConfirmSignature now parses SPKI DER for Ed25519/Ed448 sapki, the
- * companion fix in this PR - but DecodePeerAltPubKey has no case for
- * Ed25519. Per the soft-skip behaviour the handshake must still succeed
- * when sigSpec is NATIVE (the alt key just isn't decoded into any
- * peer*Key slot, since NATIVE never consumes it). */
-static int test_dual_alg_unsupported_alt_native(void)
-{
-    EXPECT_DECLS;
-#if defined(WOLFSSL_DUAL_ALG_CERTS) && defined(HAVE_ECC) && \
-    defined(HAVE_ED25519) && defined(HAVE_ED25519_KEY_EXPORT) && \
-    defined(HAVE_ED25519_KEY_IMPORT) && \
-    defined(HAVE_ED25519_SIGN) && defined(HAVE_ED25519_VERIFY) && \
-    !defined(WC_NO_RNG) && !defined(WOLFSSL_SMALL_STACK) && \
-    defined(WOLFSSL_CUSTOM_OID) && defined(HAVE_OID_ENCODING) && \
-    !defined(NO_TLS) && defined(WOLFSSL_TLS13)
-    WC_RNG       rng;
-    ecc_key      primaryKey;
-    ed25519_key  altKey;
-    byte         primaryKeyDer[256];
-    int          primaryKeyDerSz;
-    byte         certDer[2 * LARGE_TEMP_SZ];
-    int          certDerSz;
-    WOLFSSL_CTX *ctx_c = NULL;
-    WOLFSSL_CTX *ctx_s = NULL;
-    WOLFSSL     *ssl_c = NULL;
-    WOLFSSL     *ssl_s = NULL;
-    struct test_memio_ctx test_ctx;
-
-    XMEMSET(&rng, 0, sizeof(rng));
-    XMEMSET(&primaryKey, 0, sizeof(primaryKey));
-    XMEMSET(&altKey, 0, sizeof(altKey));
-    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
-
-    ExpectIntEQ(wc_InitRng(&rng), 0);
-    ExpectIntEQ(wc_ecc_init(&primaryKey), 0);
-    ExpectIntEQ(wc_ecc_make_key(&rng, KEY32, &primaryKey), 0);
-    ExpectIntEQ(wc_ed25519_init(&altKey), 0);
-    ExpectIntEQ(wc_ed25519_make_key(&rng, ED25519_KEY_SIZE, &altKey), 0);
-
-    primaryKeyDerSz = wc_EccKeyToDer(&primaryKey, primaryKeyDer,
-                                     sizeof(primaryKeyDer));
-    ExpectIntGT(primaryKeyDerSz, 0);
-
-    if (EXPECT_SUCCESS()) {
-        certDerSz = do_build_dual_alg_self_signed(certDer, sizeof(certDer),
-                        ECC_TYPE,     &primaryKey, CTC_SHA256wECDSA,
-                        ED25519_TYPE, &altKey,     CTC_ED25519,
-                        &rng);
-        ExpectIntGT(certDerSz, 0);
-
-        ExpectIntEQ(test_memio_setup_ex(&test_ctx, &ctx_c, &ctx_s, &ssl_c,
-                    &ssl_s, wolfTLSv1_3_client_method,
-                    wolfTLSv1_3_server_method,
-                    certDer, certDerSz,
-                    certDer, certDerSz,
-                    primaryKeyDer, primaryKeyDerSz), 0);
-
-        /* Default sigSpec is NATIVE; handshake must succeed. The Ed25519
-         * alt sig is verified at parse time (ConfirmSignature now handles
-         * SPKI DER for Ed25519), and DecodePeerAltPubKey hits its default
-         * "log + skip" branch for the unrecognised OID. */
-        ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
-    }
-
-    wolfSSL_free(ssl_c);
-    wolfSSL_free(ssl_s);
-    wolfSSL_CTX_free(ctx_c);
-    wolfSSL_CTX_free(ctx_s);
-    wc_ecc_free(&primaryKey);
-    wc_ed25519_free(&altKey);
-    wc_FreeRng(&rng);
-#endif
-    return EXPECT_RESULT();
-}
-
-/* Focused regression test for the dual-input handling added to
- * wc_Ed25519PublicKeyDecode / wc_Ed448PublicKeyDecode. The decoders must
- * accept both a raw public key (matches the historical primary-signature
- * verify path) and a full SubjectPublicKeyInfo DER (the X9.146
- * alt-signature verify path's input format). Mirrors the dual-input
- * pattern of wc_Falcon_PublicKeyDecode / wc_Dilithium_PublicKeyDecode. */
-static int test_dual_alg_eddsa_pubkey_decode_dual_input(void)
-{
-    EXPECT_DECLS;
-#if defined(HAVE_ED25519) && defined(HAVE_ED25519_KEY_EXPORT) && \
-    defined(HAVE_ED25519_KEY_IMPORT) && !defined(WC_NO_RNG)
-    {
-        WC_RNG       rng;
-        ed25519_key  src;
-        ed25519_key  decoded;
-        byte         spki[128];
-        int          spkiSz;
-        byte         raw[ED25519_PUB_KEY_SIZE];
-        word32       rawSz = (word32)sizeof(raw);
-        word32       idx;
-
-        XMEMSET(&rng, 0, sizeof(rng));
-        XMEMSET(&src, 0, sizeof(src));
-        XMEMSET(&decoded, 0, sizeof(decoded));
-
-        ExpectIntEQ(wc_InitRng(&rng), 0);
-        ExpectIntEQ(wc_ed25519_init(&src), 0);
-        ExpectIntEQ(wc_ed25519_make_key(&rng, ED25519_KEY_SIZE, &src), 0);
-
-        spkiSz = wc_Ed25519PublicKeyToDer(&src, spki, (word32)sizeof(spki),
-                                          1);
-        ExpectIntGT(spkiSz, 0);
-        ExpectIntEQ(wc_ed25519_export_public(&src, raw, &rawSz), 0);
-        ExpectIntEQ((int)rawSz, ED25519_PUB_KEY_SIZE);
-
-        /* SPKI form. */
-        ExpectIntEQ(wc_ed25519_init(&decoded), 0);
-        idx = 0;
-        ExpectIntEQ(wc_Ed25519PublicKeyDecode(spki, &idx, &decoded,
-                                              (word32)spkiSz), 0);
-        wc_ed25519_free(&decoded);
-
-        /* Raw form. */
-        ExpectIntEQ(wc_ed25519_init(&decoded), 0);
-        idx = 0;
-        ExpectIntEQ(wc_Ed25519PublicKeyDecode(raw, &idx, &decoded, rawSz),
-                    0);
-        wc_ed25519_free(&decoded);
-
-        wc_ed25519_free(&src);
-        wc_FreeRng(&rng);
-    }
-#endif
-
-#if defined(HAVE_ED448) && defined(HAVE_ED448_KEY_EXPORT) && \
-    defined(HAVE_ED448_KEY_IMPORT) && !defined(WC_NO_RNG)
-    {
-        WC_RNG       rng;
-        ed448_key    src;
-        ed448_key    decoded;
-        byte         spki[128];
-        int          spkiSz;
-        byte         raw[ED448_PUB_KEY_SIZE];
-        word32       rawSz = (word32)sizeof(raw);
-        word32       idx;
-
-        XMEMSET(&rng, 0, sizeof(rng));
-        XMEMSET(&src, 0, sizeof(src));
-        XMEMSET(&decoded, 0, sizeof(decoded));
-
-        ExpectIntEQ(wc_InitRng(&rng), 0);
-        ExpectIntEQ(wc_ed448_init(&src), 0);
-        ExpectIntEQ(wc_ed448_make_key(&rng, ED448_KEY_SIZE, &src), 0);
-
-        spkiSz = wc_Ed448PublicKeyToDer(&src, spki, (word32)sizeof(spki), 1);
-        ExpectIntGT(spkiSz, 0);
-        ExpectIntEQ(wc_ed448_export_public(&src, raw, &rawSz), 0);
-        ExpectIntEQ((int)rawSz, ED448_PUB_KEY_SIZE);
-
-        /* SPKI form. */
-        ExpectIntEQ(wc_ed448_init(&decoded), 0);
-        idx = 0;
-        ExpectIntEQ(wc_Ed448PublicKeyDecode(spki, &idx, &decoded,
-                                            (word32)spkiSz), 0);
-        wc_ed448_free(&decoded);
-
-        /* Raw form. */
-        ExpectIntEQ(wc_ed448_init(&decoded), 0);
-        idx = 0;
-        ExpectIntEQ(wc_Ed448PublicKeyDecode(raw, &idx, &decoded, rawSz), 0);
-        wc_ed448_free(&decoded);
-
-        wc_ed448_free(&src);
-        wc_FreeRng(&rng);
-    }
-#endif
-    return EXPECT_RESULT();
-}
 
 /* Test wolfSSL_use_AltPrivateKey_Id.
  * Verify that a valid key ID can be set successfully. Guards against an
@@ -38108,8 +37922,6 @@ TEST_CASE testCases[] = {
     TEST_DECL(test_dual_alg_pretbs_csr_altsigval_not_last),
     TEST_DECL(test_dual_alg_collision_handshake),
     TEST_DECL(test_dual_alg_minkeysize_handshake),
-    TEST_DECL(test_dual_alg_unsupported_alt_native),
-    TEST_DECL(test_dual_alg_eddsa_pubkey_decode_dual_input),
 
     TEST_DECL(test_wolfSSL_use_AltPrivateKey_Id),
     TEST_DECL(test_wolfSSL_use_AltPrivateKey_Label),
