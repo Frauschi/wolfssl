@@ -64,49 +64,49 @@
 
 /* Byte to include in hash to create unique sequence. */
 #define XMSS_HASH_PADDING_F             0
-#define XMSS_HASH_PADDING_H             1
-#define XMSS_HASH_PADDING_HASH          2
-#define XMSS_HASH_PADDING_PRF           3
-#define XMSS_HASH_PADDING_PRF_KEYGEN    4
+#define XMSS_HASH_PADDING_H             1U
+#define XMSS_HASH_PADDING_HASH          2U
+#define XMSS_HASH_PADDING_PRF           3U
+#define XMSS_HASH_PADDING_PRF_KEYGEN    4U
 
 /* Fixed parameter values. */
-#define XMSS_WOTS_W                     16
-#define XMSS_WOTS_LOG_W                 4
-#define XMSS_WOTS_LEN2                  3
-#define XMSS_CSUM_SHIFT                 4
-#define XMSS_CSUM_LEN                   2
+#define XMSS_WOTS_W                     16U
+#define XMSS_WOTS_LOG_W                 4U
+#define XMSS_WOTS_LEN2                  3U
+#define XMSS_CSUM_SHIFT                 4U
+#define XMSS_CSUM_LEN                   2U
 
 /* Length of the message to the PRF. */
-#define XMSS_PRF_M_LEN                  32
+#define XMSS_PRF_M_LEN                  32U
 
 /* Length of index encoding when doing XMSS. */
-#define XMSS_IDX_LEN                    4
+#define XMSS_IDX_LEN                    4U
 
 /* Size of the N when using SHA-256 and 32 byte padding. */
 #define XMSS_SHA256_32_N                WC_SHA256_DIGEST_SIZE
 /* Size of the padding when using SHA-256 and 32 byte padding. */
-#define XMSS_SHA256_32_PAD_LEN          32
+#define XMSS_SHA256_32_PAD_LEN          32U
 
 /* Calculate PRF data length for parameters. */
 #define XMSS_HASH_PRF_DATA_LEN(params)                              \
-    ((params)->pad_len + (params)->n + WC_XMSS_ADDR_LEN)
+    ((word32)(params)->pad_len + (params)->n + WC_XMSS_ADDR_LEN)
 /* PRF data length when using SHA-256 with 32 byte padding. */
 #define XMSS_HASH_PRF_DATA_LEN_SHA256_32                            \
     (XMSS_SHA256_32_PAD_LEN + XMSS_SHA256_32_N + WC_XMSS_ADDR_LEN)
 
 /* Calculate chain hash data length for parameters. */
 #define XMSS_CHAIN_HASH_DATA_LEN(params)                            \
-    ((params)->pad_len + 2 * (params)->n)
+    ((word32)(params)->pad_len + 2U * (params)->n)
 /* Chain hash data length when using SHA-256 with 32 byte padding. */
 #define XMSS_CHAIN_HASH_DATA_LEN_SHA256_32                          \
-    (XMSS_SHA256_32_PAD_LEN + 2 * XMSS_SHA256_32_N)
+    (XMSS_SHA256_32_PAD_LEN + 2U * XMSS_SHA256_32_N)
 
 /* Calculate rand hash data length for parameters. */
 #define XMSS_RAND_HASH_DATA_LEN(params)                             \
-    ((params)->pad_len + 3 * (params)->n)
+    ((word32)(params)->pad_len + 3U * (params)->n)
 /* Rand hash data length when using SHA-256 with 32 byte padding. */
 #define XMSS_RAND_HASH_DATA_LEN_SHA256_32                           \
-    (XMSS_SHA256_32_PAD_LEN + 3 * XMSS_SHA256_32_N)
+    (XMSS_SHA256_32_PAD_LEN + 3U * XMSS_SHA256_32_N)
 
 /* Encode pad value into byte array. Front fill with 0s.
  *
@@ -119,7 +119,7 @@
 #define XMSS_PAD_ENC(n, a, l)   \
 do {                            \
     XMEMSET(a, 0, l);           \
-    (a)[(l) - 1] = (n);         \
+    (a)[(l) - 1] = (byte)(n);   \
 } while (0)
 
 
@@ -266,7 +266,7 @@ do {                                                    \
  */
 #define IDX32_SET_ADDR_TREE(i, c, h, a, l)              \
     if ((c) <= 4) {                                     \
-        (l) = ((i) & ((1 << (h)) - 1));                 \
+        (l) = ((i) & (((word32)1U << (h)) - 1U));       \
         (i) >>= params->sub_h;                          \
         (a)[XMSS_ADDR_TREE] = (i);                      \
     }
@@ -400,12 +400,12 @@ do {                                                    \
  * @param [in, out] a  Array index is encoded in.
  * @param [in]      l  Length of encoded index.
  */
-static void wc_idx_update(unsigned char* a, word8 l)
+static void wc_idx_update(unsigned char* a, word32 l)
 {
-    sword8 i;
+    word32 i;
 
-    for (i = l - 1; i >= 0; i--) {
-        if ((++a[i]) != 0) {
+    for (i = l; i > 0; i--) {
+        if ((++a[i - 1]) != 0) {
             break;
         }
     }
@@ -420,8 +420,8 @@ static void wc_idx_update(unsigned char* a, word8 l)
  * @param [in, out] d   Destination buffer.
  * @param [in]      dl  Length of destination buffer.
  */
-static void wc_idx_copy(const unsigned char* s, word8 sl, unsigned char* d,
-    word8 dl)
+static void wc_idx_copy(const unsigned char* s, word32 sl, unsigned char* d,
+    word32 dl)
 {
     XMEMSET(d, 0, dl - sl);
     XMEMCPY(d + dl - sl, s, sl);
@@ -1035,7 +1035,7 @@ static void wc_xmss_rand_hash(XmssState* state, const byte* data,
         byte* key = pad + params->pad_len;
         byte* bm0 = key + params->n;
         byte* bm1 = bm0 + params->n;
-        const word32 len = params->pad_len + params->n + WC_XMSS_ADDR_LEN;
+        const word32 len = XMSS_HASH_PRF_DATA_LEN(params);
 
         /* Encode padding byte for PRF. */
         XMSS_PAD_ENC(XMSS_HASH_PADDING_PRF, state->prf_buf, params->pad_len);
@@ -1056,8 +1056,8 @@ static void wc_xmss_rand_hash(XmssState* state, const byte* data,
         wc_xmss_hash(state, state->prf_buf, len, bm1);
 
         XMSS_PAD_ENC(XMSS_HASH_PADDING_H, pad, params->pad_len);
-        xorbuf(bm0, data, 2 * params->n);
-        wc_xmss_hash(state, state->buf, params->pad_len + 3 * params->n,
+        xorbuf(bm0, data, 2U * params->n);
+        wc_xmss_hash(state, state->buf, XMSS_RAND_HASH_DATA_LEN(params),
             hash);
     }
 }
@@ -1221,7 +1221,7 @@ static void wc_xmss_rand_hash_lr(XmssState* state, const byte* left,
         byte* key = pad + params->pad_len;
         byte* bm0 = key + params->n;
         byte* bm1 = bm0 + params->n;
-        const word32 len = params->pad_len + params->n + WC_XMSS_ADDR_LEN;
+        const word32 len = XMSS_HASH_PRF_DATA_LEN(params);
 
         /* Encode padding byte for PRF. */
         XMSS_PAD_ENC(XMSS_HASH_PADDING_PRF, state->prf_buf, params->pad_len);
@@ -1244,8 +1244,8 @@ static void wc_xmss_rand_hash_lr(XmssState* state, const byte* left,
         XMSS_PAD_ENC(XMSS_HASH_PADDING_H, pad, params->pad_len);
         XMEMCPY(state->prf_buf, left, params->n);
         XMEMCPY(state->prf_buf + params->n, right, params->n);
-        xorbuf(bm0, state->prf_buf, 2 * params->n);
-        wc_xmss_hash(state, state->buf, params->pad_len + 3 * params->n,
+        xorbuf(bm0, state->prf_buf, 2U * params->n);
+        wc_xmss_hash(state, state->buf, XMSS_RAND_HASH_DATA_LEN(params),
             hash);
     }
 }
@@ -1277,7 +1277,7 @@ static void wc_xmss_hash_message(XmssState* state, const byte* random,
 {
     int ret;
     const XmssParams* params = state->params;
-    word32 padKeyLen = params->pad_len + 3 * params->n;
+    word32 padKeyLen = XMSS_RAND_HASH_DATA_LEN(params);
     /* Offsets into message hash data. */
     byte* padKey = state->buf;
     byte* pad = padKey;
@@ -1289,7 +1289,7 @@ static void wc_xmss_hash_message(XmssState* state, const byte* random,
     XMSS_PAD_ENC(XMSS_HASH_PADDING_HASH, pad, params->pad_len);
     XMEMCPY(key, random, params->n);
     XMEMCPY(root_sk, root, params->n);
-    XMEMSET(idx_sig, 0, params->n - idx_len);
+    XMEMSET(idx_sig, 0, (word32)(params->n - idx_len));
     XMEMCPY(idx_sig + params->n - idx_len, idx, idx_len);
 
     /* Hash the padding and key first. */
@@ -1360,8 +1360,8 @@ static void wc_xmss_prf(XmssState* state, const byte* key, const byte* m,
     XMEMCPY(m_buf, m, XMSS_PRF_M_LEN);
 
     /* Hash the PRF data. */
-    wc_xmss_hash(state, state->prf_buf, params->pad_len + params->n +
-        XMSS_PRF_M_LEN, prf);
+    wc_xmss_hash(state, state->prf_buf,
+        (word32)params->pad_len + params->n + XMSS_PRF_M_LEN, prf);
 }
 
 #ifdef XMSS_CALL_PRF_KEYGEN
@@ -1457,7 +1457,7 @@ static void wc_xmss_wots_get_wots_sk_sha256_32(XmssState* state,
     }
     for (i = 1; (ret == 0) && (i < params->wots_len); i++) {
         gen_seed += XMSS_SHA256_32_N;
-        addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = i;
+        addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = (byte)i;
         XMSS_SHA256_STATE_RESTORE(state, 64);
         ret = wc_Sha256Update(&state->digest.sha256, seed, XMSS_SHA256_32_N +
             WC_XMSS_ADDR_LEN);
@@ -1473,7 +1473,7 @@ static void wc_xmss_wots_get_wots_sk_sha256_32(XmssState* state,
     }
     for (i = 1; (ret == 0) && i < params->wots_len; i++) {
         gen_seed += XMSS_SHA256_32_N;
-        addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = i;
+        addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = (byte)i;
         ret = wc_Sha256Update(&state->digest.sha256, state->prf_buf,
             XMSS_SHA256_32_PAD_LEN + 2 * XMSS_SHA256_32_N + WC_XMSS_ADDR_LEN);
         if (ret == 0) {
@@ -1520,7 +1520,8 @@ static void wc_xmss_wots_get_wots_sk(XmssState* state, const byte* sk_seed,
     byte* s_xmss = pad + params->pad_len;
     byte* seed = s_xmss + params->n;
     byte* addr_buf = seed + params->n;
-    const word32 len = params->pad_len + params->n * 2 + WC_XMSS_ADDR_LEN;
+    const word32 len =
+        (word32)params->pad_len + params->n * 2U + WC_XMSS_ADDR_LEN;
 #endif /* XMSS_CALL_PRF_KEYGEN */
 
     /* Ensure hash address fields are 0. */
@@ -1536,7 +1537,7 @@ static void wc_xmss_wots_get_wots_sk(XmssState* state, const byte* sk_seed,
     wc_xmss_prf_keygen(state, sk_seed, state->buf, gen_seed);
     for (i = 1; i < params->wots_len; i++) {
         gen_seed += params->n;
-        addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = i;
+        addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = (byte)i;
         wc_xmss_prf_keygen(state, sk_seed, state->buf, gen_seed);
     }
 #else
@@ -1550,7 +1551,7 @@ static void wc_xmss_wots_get_wots_sk(XmssState* state, const byte* sk_seed,
     wc_xmss_hash(state, state->prf_buf, len, gen_seed);
     for (i = 1; i < params->wots_len; i++) {
         gen_seed += params->n;
-        addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = i;
+        addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = (byte)i;
         wc_xmss_hash(state, state->prf_buf, len, gen_seed);
     }
 #endif /* XMSS_CALL_PRF_KEYGEN */
@@ -1602,7 +1603,7 @@ static void wc_xmss_chain_sha256_32(XmssState* state, const byte* data,
             wc_xmss_chain_hash_sha256_32(state, data, addr, hash);
             /* Iterate 'steps' calls to the hash function. */
             for (i = start+1; i < (start+steps) && i < XMSS_WOTS_W; i++) {
-                addr[XMSS_ADDR_HASH * 4 + 3] = i;
+                addr[XMSS_ADDR_HASH * 4 + 3] = (byte)i;
                 wc_xmss_chain_hash_sha256_32(state, hash, addr, hash);
             }
         }
@@ -1627,7 +1628,7 @@ static void wc_xmss_chain_sha256_32(XmssState* state, const byte* data,
         wc_xmss_chain_hash_sha256_32(state, data, hash);
         /* Iterate 'steps' calls to the hash function. */
         for (i = start+1; i < (start+steps) && i < XMSS_WOTS_W; i++) {
-            addr_buf[XMSS_ADDR_HASH * 4 + 3] = i;
+            addr_buf[XMSS_ADDR_HASH * 4 + 3] = (byte)i;
             wc_xmss_chain_hash_sha256_32(state, hash, hash);
         }
 #endif /* !WC_XMSS_FULL_HASH */
@@ -1676,7 +1677,7 @@ static void wc_xmss_chain(XmssState* state, const byte* data,
         wc_xmss_chain_hash(state, data, hash);
         /* Iterate 'steps' calls to the hash function. */
         for (i = start+1; i < (start+steps) && i < XMSS_WOTS_W; i++) {
-            addr_buf[XMSS_ADDR_HASH * 4 + 3] = i;
+            addr_buf[XMSS_ADDR_HASH * 4 + 3] = (byte)i;
             wc_xmss_chain_hash(state, hash, hash);
         }
     }
@@ -1734,21 +1735,26 @@ static void wc_xmss_chain(XmssState* state, const byte* data,
 static void wc_xmss_msg_convert(const byte* m, word8 n, word8* msg)
 {
     word8 i;
+    /* csum is word16: the WOTS+ checksum below relies on arithmetic
+     * wrapping at 2^16 (max accumulated value 1920 fits, but the algorithm
+     * treats the field as a fixed-width 16-bit integer per RFC 8391
+     * Algorithm 7 step 4). Keep word16 and cast explicitly at each
+     * assignment to silence -Wconversion without changing semantics. */
     word16 csum = 0;
 
     /* Split each full byte of m into two bytes of msg. */
     for (i = 0; i < n; i++) {
-        msg[0] = m[i] >> 4;
-        msg[1] = m[i] & 0xf;
-        csum += XMSS_WOTS_W - 1 - msg[0];
-        csum += XMSS_WOTS_W - 1 - msg[1];
+        msg[0] = (word8)(m[i] >> 4);
+        msg[1] = (word8)(m[i] & 0xf);
+        csum = (word16)(csum + XMSS_WOTS_W - 1U - msg[0]);
+        csum = (word16)(csum + XMSS_WOTS_W - 1U - msg[1]);
         msg += 2;
     }
 
     /* Append checksum to message. (Maximum value: 1920 = 64 * 2 * 15) */
-    msg[0] = (csum >> 8)       ;
-    msg[1] = (csum >> 4) & 0x0f;
-    msg[2] = (csum     ) & 0x0f;
+    msg[0] = (word8)(csum >> 8)        ;
+    msg[1] = (word8)((csum >> 4) & 0x0f);
+    msg[2] = (word8)((csum     ) & 0x0f);
 }
 
 #ifndef WOLFSSL_XMSS_VERIFY_ONLY
@@ -1799,7 +1805,7 @@ static void wc_xmss_wots_gen_pk(XmssState* state, const byte* sk,
             pk);
         for (i = 1; i < params->wots_len; i++) {
             pk += params->n;
-            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = i;
+            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = (byte)i;
             wc_xmss_chain_sha256_32(state, pk, 0, XMSS_WOTS_W - 1, seed,
                 addr_buf, pk);
         }
@@ -1814,7 +1820,7 @@ static void wc_xmss_wots_gen_pk(XmssState* state, const byte* sk,
         wc_xmss_chain(state, pk, 0, XMSS_WOTS_W - 1, seed, addr_buf, pk);
         for (i = 1; i < params->wots_len; i++) {
             pk += params->n;
-            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = i;
+            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = (byte)i;
             wc_xmss_chain(state, pk, 0, XMSS_WOTS_W - 1, seed, addr_buf, pk);
         }
     }
@@ -1869,7 +1875,7 @@ static void wc_xmss_wots_sign(XmssState* state, const byte* m,
             sig);
         for (i = 1; i < params->wots_len; i++) {
             sig += params->n;
-            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = i;
+            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = (byte)i;
             wc_xmss_chain_sha256_32(state, sig, 0, state->encMsg[i], seed,
                 addr_buf, sig);
         }
@@ -1884,7 +1890,7 @@ static void wc_xmss_wots_sign(XmssState* state, const byte* m,
         wc_xmss_chain(state, sig, 0, state->encMsg[0], seed, addr_buf, sig);
         for (i = 1; i < params->wots_len; i++) {
             sig += params->n;
-            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = i;
+            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = (byte)i;
             wc_xmss_chain(state, sig, 0, state->encMsg[i], seed, addr_buf, sig);
         }
     }
@@ -1936,7 +1942,7 @@ static void wc_xmss_wots_pk_from_sig(XmssState* state, const byte* sig,
             sig += params->n;
             pk += params->n;
             /* Update chain. */
-            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = i;
+            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = (byte)i;
             wc_xmss_chain_sha256_32(state, sig, state->encMsg[i],
                 XMSS_WOTS_W - 1 - state->encMsg[i], seed, addr_buf, pk);
         }
@@ -1951,7 +1957,7 @@ static void wc_xmss_wots_pk_from_sig(XmssState* state, const byte* sig,
             sig += params->n;
             pk += params->n;
             /* Update chain. */
-            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = i;
+            addr_buf[XMSS_ADDR_CHAIN * 4 + 3] = (byte)i;
             wc_xmss_chain(state, sig, state->encMsg[i],
                 XMSS_WOTS_W - 1 - state->encMsg[i], seed, addr_buf, pk);
         }
@@ -2046,7 +2052,7 @@ static void wc_xmss_ltree(XmssState* state, byte* pk, const byte* seed,
             XMEMCPY(pk + len2 * params->n, pk + (len - 1) * params->n,
                 params->n);
         }
-        len = len2 + (len & 1);
+        len = (word8)(len2 + (len & 1));
     }
     /* Return compressed public key value pk[0]. */
     XMEMCPY(pk0, pk, params->n);
@@ -2326,19 +2332,19 @@ int wc_xmssmt_keygen(XmssState* state, const unsigned char* seed,
     /* Set first index to 0 in private key. */
     XMEMSET(sk_idx, 0, params->idx_len);
     /* Set private key seed and private key for PRF in to private key. */
-    XMEMCPY(sk_seed, seed_priv, 2 * n);
+    XMEMCPY(sk_seed, seed_priv, 2U * n);
     /* Set public key seed into public key. */
     XMEMCPY(pk_seed, seed_pub, n);
 
     /* Set all address values to zero. */
     XMEMSET(state->addr, 0, sizeof(HashAddress));
     /* Set depth into address. */
-    state->addr[XMSS_ADDR_LAYER] = params->d - 1;
+    state->addr[XMSS_ADDR_LAYER] = (word32)(params->d - 1);
     /* Compute root node into public key. */
     wc_xmss_treehash(state, sk_seed, pk_seed, 0, state->addr, pk_root, NULL);
 
     /* Append public key (root node and public seed) to private key. */
-    XMEMCPY(sk_pub, pk_root, 2 * n);
+    XMEMCPY(sk_pub, pk_root, 2U * n);
 
     /* Return any errors that occurred during hashing. */
     return state->ret;
@@ -2414,7 +2420,7 @@ int wc_xmssmt_sign(XmssState* state, const unsigned char* m, word32 mlen,
     const XmssParams* params = state->params;
     const word8 n = params->n;
     const word8 hs = params->sub_h;
-    const word16 hsn = (word16)hs * n;
+    const word16 hsn = (word16)((word16)hs * n);
     const byte* sk_seed = sk + params->idx_len;
     const byte* pk_seed = sk + params->idx_len + 3 * n;
     wc_Idx idx;
@@ -2539,7 +2545,7 @@ typedef struct BdsState {
  * @return  Index of working BDS state.
  */
 #define BDS_IDX(idx, i, hs, d)      \
-    (((((idx) >> ((hs) * ((i) + 1))) & 1) == 0) ? (i) : ((d) + (i)))
+    ((word8)(((((idx) >> ((hs) * ((i) + 1))) & 1) == 0) ? (i) : ((d) + (i))))
 /* Index to alternate BDS state accounting for swapping.
  *
  * @param [in] idx  Index of node.
@@ -2549,7 +2555,7 @@ typedef struct BdsState {
  * @return  Index of alternate BDS state.
  */
 #define BDS_ALT_IDX(idx, i, hs, d)  \
-    (((((idx) >> ((hs) * ((i) + 1))) & 1) == 0) ? ((d) + (i)) : (i))
+    ((word8)(((((idx) >> ((hs) * ((i) + 1))) & 1) == 0) ? ((d) + (i)) : (i)))
 
 /********************************************
  * Tree Hash APIs
@@ -2560,11 +2566,11 @@ typedef struct BdsState {
  * @param [in, out] bds  BDS state.
  * @param [in]      i    Index of tree hash.
  */
-static void wc_xmss_bds_state_treehash_init(BdsState* bds, int i)
+static void wc_xmss_bds_state_treehash_init(BdsState* bds, word32 i)
 {
-    byte* sk = bds->treeHash + i * 4;
+    byte* sk = bds->treeHash + i * 4U;
     c32to24(0, sk);
-    sk[3] = 0 | (1 << 7);
+    sk[3] = 0 | (1U << 7);
 }
 
 /* Set next index into tree hash data at specified index for the BDS state.
@@ -2618,7 +2624,7 @@ static void wc_xmss_bds_state_treehash_set(BdsState* bds, int i,
 {
     byte* sk = bds->treeHash + i * 4;
     c32to24(treeHash->nextIdx, sk);
-    sk[3] = treeHash->used | (treeHash->completed << 7);
+    sk[3] = (byte)(treeHash->used | (treeHash->completed << 7));
 }
 
 /********************************************
@@ -2636,7 +2642,7 @@ static void wc_xmss_bds_state_treehash_set(BdsState* bds, int i,
  */
 static int wc_xmss_bds_state_alloc(const XmssParams* params, BdsState** bds)
 {
-    const word8 cnt = 2 * params->d - 1;
+    const word8 cnt = (word8)(2 * params->d - 1);
     int ret = 0;
 
     if (*bds == NULL) {
@@ -2677,7 +2683,7 @@ static int wc_xmss_bds_state_load(const XmssState* state, byte* sk,
     const XmssParams* params = state->params;
     const word8 n = params->n;
     const word8 hs = params->sub_h;
-    const word8 hsk = params->sub_h - params->bds_k;
+    const word8 hsk = (word8)(params->sub_h - params->bds_k);
     const word8 k = params->bds_k;
     const word32 retainLen = XMSS_RETAIN_LEN(k, n);
     int i;
@@ -2731,14 +2737,14 @@ static int wc_xmss_bds_state_store(const XmssState* state, byte* sk,
     const XmssParams* params = state->params;
     const word8 n = params->n;
     const word8 hs = params->sub_h;
-    const word8 hsk = params->sub_h - params->bds_k;
+    const word8 hsk = (word8)(params->sub_h - params->bds_k);
     const word8 k = params->bds_k;
-    const word32 skip = (hs + 1) * n +            /* BdsState.stack */
+    const word32 skip = (word32)((hs + 1) * n +   /* BdsState.stack */
                         hs + 1 +                  /* BdsState.height */
                         hs * n +                  /* BdsState.authPath */
                         (hs >> 1) * n +           /* BdsState.keep */
                         hsk * 4 +                 /* BdsState.treeHash */
-                        hsk * n +                 /* BdsState.treeHashNode */
+                        hsk * n) +                /* BdsState.treeHashNode */
                         XMSS_RETAIN_LEN(k, n);    /* BdsState.retain */
 
     /* Ignore standard SK = idx || wots_sk || SK_PRF || root || SEED; */
@@ -2793,12 +2799,12 @@ static int wc_xmss_bds_state_store(const XmssState* state, byte* sk,
  * @param [out] root     Root node.
  */
 static void wc_xmss_bds_next_idx(XmssState* state, BdsState* bds,
-    const byte* sk_seed, const byte* pk_seed, HashAddress addr, int i,
+    const byte* sk_seed, const byte* pk_seed, HashAddress addr, word32 i,
     word8* height, word8* offset, word8** sp)
 {
     const XmssParams* params = state->params;
     const word8 hs = params->sub_h;
-    const word8 hsk = params->sub_h - params->bds_k;
+    const word8 hsk = (word8)(params->sub_h - params->bds_k);
     const word8 n = params->n;
     word8 o = *offset;
     word8* node = *sp;
@@ -2806,7 +2812,7 @@ static void wc_xmss_bds_next_idx(XmssState* state, BdsState* bds,
 
     /* Calculate WOTS+ public key. */
     addr[XMSS_ADDR_TYPE] = WC_XMSS_ADDR_TYPE_OTS;
-    addr[XMSS_ADDR_OTS] = i;
+    addr[XMSS_ADDR_OTS] = (word32)i;
     wc_xmss_wots_gen_pk(state, sk_seed, pk_seed, addr, state->pk);
     /* Calculate public value. */
     addr[XMSS_ADDR_TYPE] = WC_XMSS_ADDR_TYPE_LTREE;
@@ -2846,14 +2852,15 @@ static void wc_xmss_bds_next_idx(XmssState* state, BdsState* bds,
              *   h = H-K,...,H-2 and j = 2^(H-h-1)-2,...,0.
              * Retain high right nodes.
              */
-            word32 ro = (1 << (hs - 1 - h)) + h - hs + (((i >> h) - 3) >> 1);
+            word32 ro = (word32)(((word32)1U << (hs - 1 - h)) + h - hs +
+                (((i >> h) - 3) >> 1));
             XMEMCPY(bds->retain + ro * n, node, n);
         }
 
         node -= n;
         /* Calculate hash of node. */
         addr[XMSS_ADDR_TREE_HEIGHT] = h;
-        addr[XMSS_ADDR_TREE_INDEX] = i >> (h + 1);
+        addr[XMSS_ADDR_TREE_INDEX] = (word32)(i >> (h + 1));
         wc_xmss_rand_hash(state, node, pk_seed, addr, node);
 
         /* Update offset and height. */
@@ -2897,7 +2904,7 @@ static void wc_xmss_bds_treehash_initial(XmssState* state, BdsState* bds,
     byte* root)
 {
     const XmssParams* params = state->params;
-    const word8 hsk = params->sub_h - params->bds_k;
+    const word8 hsk = (word8)(params->sub_h - params->bds_k);
     const word8 n = params->n;
     word8* node = state->stack;
     HashAddress addrCopy;
@@ -3046,7 +3053,7 @@ static word8 wc_xmss_bds_treehash_updates(XmssState* state, BdsState* bds,
 {
     const XmssParams* params = state->params;
     const word8 hs = params->sub_h;
-    const word8 hsk = params->sub_h - params->bds_k;
+    const word8 hsk = (word8)(params->sub_h - params->bds_k);
 
     if (bds->treeHash == NULL) {
         state->ret = WC_FAILURE;
@@ -3082,7 +3089,7 @@ static word8 wc_xmss_bds_treehash_updates(XmssState* state, BdsState* bds,
                 byte* height = bds->height + bds->offset - treeHash->used;
 
                 for (j = 0; j < treeHash->used; j++) {
-                    lowH = min(height[j], lowH);
+                    lowH = (word8)min(height[j], lowH);
                 }
                 if (lowH < minH) {
                     /* New lowest height. */
@@ -3178,7 +3185,7 @@ static void wc_xmss_bds_auth_path(XmssState* state, BdsState* bds,
     const XmssParams* params = state->params;
     const word8 n = params->n;
     const word8 hs = params->sub_h;
-    const word8 hsk = params->sub_h - params->bds_k;
+    const word8 hsk = (word8)(params->sub_h - params->bds_k);
     word8 tau;
     byte* node = state->encMsg;
     word8 parent;
@@ -3229,7 +3236,7 @@ static void wc_xmss_bds_auth_path(XmssState* state, BdsState* bds,
         /* Step 4.a. AUTH[tau] <- g(<node>) */
         addr[XMSS_ADDR_TYPE] = WC_XMSS_ADDR_TYPE_TREE;
         addr[XMSS_ADDR_TREE_ZERO] = 0;
-        addr[XMSS_ADDR_TREE_HEIGHT] = tau - 1;
+        addr[XMSS_ADDR_TREE_HEIGHT] = (word32)(tau - 1);
         addr[XMSS_ADDR_TREE_INDEX] = leafIdx >> tau;
         wc_xmss_rand_hash(state, node, pk_seed, addr, authPath);
 
@@ -3245,8 +3252,8 @@ static void wc_xmss_bds_auth_path(XmssState* state, BdsState* bds,
             }
             /*   if h >= H - K then AUTH[h] <- RETAIN[h].pop()*/
             else {
-                word32 o = (1 << (hs - 1 - i)) + i - hs +
-                           (((leafIdx >> i) - 1) >> 1);
+                word32 o = (word32)(((word32)1U << (hs - 1 - i)) + i - hs +
+                           (((leafIdx >> i) - 1) >> 1));
                 XMEMCPY(authPath, bds->retain + o * n, n);
             }
             authPath += n;
@@ -3254,9 +3261,9 @@ static void wc_xmss_bds_auth_path(XmssState* state, BdsState* bds,
 
         /* Step 4.c. Initialize treehash instances for heights:
          *           0, ..., min{tau-1, H - K - 1} */
-        tau = min(tau, hsk);
+        tau = (word8)min(tau, hsk);
         for (i = 0; i < tau; i++) {
-            word32 startIdx = leafIdx + 1 + 3 * (1 << i);
+            word32 startIdx = leafIdx + 1U + 3U * ((word32)1U << i);
             if (startIdx < ((word32)1 << hs)) {
                 wc_xmss_bds_state_treehash_set_next_idx(bds, i, startIdx);
             }
@@ -3335,7 +3342,7 @@ int wc_xmss_keygen(XmssState* state, const unsigned char* seed,
         /* Set first index to 0 in private key. idx_len always 4. */
         *sk_idx = 0;
         /* Set private key seed and private key for PRF in to private key. */
-        XMEMCPY(sk_seeds, seed_priv, 2 * n);
+        XMEMCPY(sk_seeds, seed_priv, 2U * n);
         /* Set public key seed into public key. */
         XMEMCPY(pk_seed, seed_pub, n);
 
@@ -3353,7 +3360,7 @@ int wc_xmss_keygen(XmssState* state, const unsigned char* seed,
         byte* sk_root = sk + params->idx_len + 2 * n;
 
         /* Append public key (root node and public seed) to private key. */
-        XMEMCPY(sk_root, pk_root, 2 * n);
+        XMEMCPY(sk_root, pk_root, 2U * n);
 
         /* Store BDS state back into secret/private key. */
         ret = wc_xmss_bds_state_store(state, sk, bds);
@@ -3416,7 +3423,7 @@ int wc_xmss_sign(XmssState* state, const unsigned char* m, word32 mlen,
     const XmssParams* params = state->params;
     const word8 n = params->n;
     const word8 h = params->h;
-    const word8 hk = params->h - params->bds_k;
+    const word8 hk = (word8)(params->h - params->bds_k);
     const byte* sk_seed = sk + XMSS_IDX_LEN;
     const byte* pk_seed = sk + XMSS_IDX_LEN + 3 * n;
     byte node[WC_XMSS_MAX_N];
@@ -3488,7 +3495,7 @@ int wc_xmss_sign(XmssState* state, const unsigned char* m, word32 mlen,
     if (ret == 0) {
         sig += params->wots_sig_len;
         /*   Add authentication path (auth) and calc new root. */
-        XMEMCPY(sig, bds->authPath, h * n);
+        XMEMCPY(sig, bds->authPath, (word32)h * n);
         ret = state->ret;
     }
 
@@ -3612,7 +3619,7 @@ int wc_xmssmt_keygen(XmssState* state, const unsigned char* seed,
         /* Set first index to 0 in private key. */
         XMEMSET(sk, 0, params->idx_len);
         /* Set private key seed and private key for PRF in to private key. */
-        XMEMCPY(sk_seed, seed_priv, 2 * n);
+        XMEMCPY(sk_seed, seed_priv, 2U * n);
         /* Set public key seed into public key. */
         XMEMCPY(pk_seed, seed_pub, n);
 
@@ -3629,7 +3636,7 @@ int wc_xmssmt_keygen(XmssState* state, const unsigned char* seed,
         ret = state->ret;
         if (ret == 0) {
             /* Create signature for subtree for first index. */
-            state->addr[XMSS_ADDR_LAYER] = i+1;
+            state->addr[XMSS_ADDR_LAYER] = (word32)(i + 1);
             wc_xmss_wots_sign(state, pk_root, sk_seed, pk_seed, state->addr,
                 wots_sigs + i * params->wots_sig_len);
             ret = state->ret;
@@ -3648,7 +3655,7 @@ int wc_xmssmt_keygen(XmssState* state, const unsigned char* seed,
         unsigned char* sk_root = sk_seed + 2 * n;
 
         /* Append public key (root node and public seed) to private key. */
-        XMEMCPY(sk_root, pk_root, 2 * n);
+        XMEMCPY(sk_root, pk_root, 2U * n);
 
         /* Store BDS state back into secret/private key. */
         ret = wc_xmss_bds_state_store(state, sk, bds);
@@ -3855,7 +3862,7 @@ static int wc_xmssmt_sign_msg(XmssState* state, BdsState* bds, XmssIdx idx,
             state->ret = WC_FAILURE;
             return state->ret;
         }
-        XMEMCPY(sig, authPath, hs * n);
+        XMEMCPY(sig, authPath, (word32)hs * n);
         sig += hs * n;
 
         /* Remaining iterations from storage. */
@@ -3870,7 +3877,7 @@ static int wc_xmssmt_sign_msg(XmssState* state, BdsState* bds, XmssIdx idx,
                 state->ret = WC_FAILURE;
                 return state->ret;
             }
-            XMEMCPY(sig, authPath, hs * n);
+            XMEMCPY(sig, authPath, (word32)hs * n);
             sig += hs * n;
         }
         ret = state->ret;
@@ -3903,7 +3910,7 @@ static int wc_xmssmt_sign_next_idx(XmssState* state, BdsState* bds, XmssIdx idx,
     const word8 n = params->n;
     const word8 h = params->h;
     const word8 hs = params->sub_h;
-    const word8 hsk = params->sub_h - params->bds_k;
+    const word8 hsk = (word8)(params->sub_h - params->bds_k);
     const byte* sk_seed = sk + params->idx_len;
     const byte* pk_seed = sk + params->idx_len + 3 * n;
     XmssIdx idx_tree;
@@ -3950,7 +3957,7 @@ static int wc_xmssmt_sign_next_idx(XmssState* state, BdsState* bds, XmssIdx idx,
             if (ret == 0) {
                 /* HDSS, Algorithm 4.6: Step 5. */
                 updates = wc_xmss_bds_treehash_updates(state, &bds[bds_i],
-                    updates, sk_seed, pk_seed, state->addr);
+                    (word8)updates, sk_seed, pk_seed, state->addr);
                 ret = state->ret;
             }
 
@@ -3970,7 +3977,7 @@ static int wc_xmssmt_sign_next_idx(XmssState* state, BdsState* bds, XmssIdx idx,
         /* Last at height. */
         else {
             /* Set layer, tree and OTS leaf index into hash address. */
-            state->addr[XMSS_ADDR_LAYER] = i + 1;
+            state->addr[XMSS_ADDR_LAYER] = (word32)(i + 1);
             idx_tree = (idx + 1) >> ((i + 1) * hs);
             xmss_idx_get_tree_leaf(idx_tree, hs, &idx_tree, &idx_leaf);
             xmss_idx_set_addr_tree(idx_tree, state->addr);

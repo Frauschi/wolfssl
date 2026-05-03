@@ -18,17 +18,20 @@ jobs:
       matrix:
         config: [
           # Add new configs here
-          '--disable-asm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
-          '--enable-intelasm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
-          '--enable-smallstack --disable-asm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
-          '--enable-smallstack --enable-intelasm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
-          '--enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -DNO_INT128 -Wcast-qual"',
-          '--enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem CPPFLAGS="-Wdeclaration-after-statement -Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual" --enable-32bit CFLAGS=-m32',
-          '--enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem=yes,small CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual -DNO_INT128"',
-          '--enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem=yes,no-large-code CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual -DNO_INT128"',
-          '--enable-smallstack --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual -DNO_INT128"',
-          '--disable-intelasm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem CPPFLAGS="-DWOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM -DWOLFSSL_MLKEM_MAKEKEY_SMALL_MEM -Wdeclaration-after-statement -Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual" --enable-32bit CFLAGS=-m32',
-          '--disable-intelasm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem=yes,small CPPFLAGS="-DWOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM -DWOLFSSL_MLKEM_MAKEKEY_SMALL_MEM -Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual -DNO_INT128"',
+          '--disable-asm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem --enable-xmss CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
+          '--enable-intelasm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem --enable-xmss CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
+          '--enable-smallstack --disable-asm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem --enable-xmss CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
+          '--enable-smallstack --enable-intelasm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem --enable-xmss CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
+          '--enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem --enable-xmss CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -DNO_INT128 -Wcast-qual"',
+          '--enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem --enable-xmss CPPFLAGS="-Wdeclaration-after-statement -Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual" --enable-32bit CFLAGS=-m32',
+          '--enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem=yes,small --enable-xmss CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual -DNO_INT128"',
+          '--enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem=yes,no-large-code --enable-xmss CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual -DNO_INT128"',
+          '--enable-smallstack --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem --enable-xmss CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual -DNO_INT128"',
+          '--disable-intelasm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem --enable-xmss CPPFLAGS="-DWOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM -DWOLFSSL_MLKEM_MAKEKEY_SMALL_MEM -Wdeclaration-after-statement -Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual" --enable-32bit CFLAGS=-m32',
+          '--disable-intelasm --enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem=yes,small --enable-xmss CPPFLAGS="-DWOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM -DWOLFSSL_MLKEM_MAKEKEY_SMALL_MEM -Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual -DNO_INT128"',
+          # Dedicated rows exercising XMSS sub-options not covered by --enable-xmss default
+          '--enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem --enable-xmss=yes,small CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
+          '--enable-cryptonly --enable-all-crypto --disable-examples --disable-benchmark --disable-crypttests --enable-mlkem --enable-xmss=yes,verify-only CPPFLAGS="-Wdeclaration-after-statement -Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual" --enable-32bit CFLAGS=-m32',
         ]
     name: build library
     if: github.repository_owner == 'wolfssl'
@@ -50,3 +53,29 @@ jobs:
           echo "running ./configure ${{ matrix.config }}"
           ./configure ${{ matrix.config }} || $(exit 3)
           make -j 4 || $(exit 4)
+
+  # Compiler-clean (above) doesn't catch a bad cast that silently changes
+  # the wire output. Run testwolfcrypt's xmss_test under the same conversion
+  # flags on the default and small XMSS variants.
+  test_xmss_runtime:
+    strategy:
+      matrix:
+        config: [
+          '--enable-xmss CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
+          '--enable-xmss=yes,small CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
+        ]
+    name: test XMSS runtime
+    if: github.repository_owner == 'wolfssl'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout wolfSSL
+
+      - name: Build and run wolfCrypt XMSS tests
+        run: |
+          ./autogen.sh || $(exit 2)
+          echo "running ./configure ${{ matrix.config }}"
+          ./configure ${{ matrix.config }} || $(exit 3)
+          make -j 4 || $(exit 4)
+          ./wolfcrypt/test/testwolfcrypt || $(exit 5)
