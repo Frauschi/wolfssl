@@ -824,7 +824,7 @@ void wc_LmsKey_Free(LmsKey* key)
     #ifndef WOLFSSL_LMS_VERIFY_ONLY
         if (key->priv_data != NULL) {
             const LmsParams* params = key->params;
-            int priv_data_len = LMS_PRIV_DATA_LEN(params->levels,
+            word32 priv_data_len = LMS_PRIV_DATA_LEN(params->levels,
                 params->height, params->p, params->rootLevels,
                 params->cacheBits, params->hash_len);
 
@@ -958,7 +958,7 @@ int wc_LmsKey_SetContext(LmsKey* key, void* context)
 int wc_LmsKey_MakeKey(LmsKey* key, WC_RNG* rng)
 {
     int ret = 0;
-    int priv_data_len = 0;
+    word32 priv_data_len = 0;
 
     /* Validate parameters. */
     if ((key == NULL) || (rng == NULL)) {
@@ -1066,7 +1066,7 @@ int wc_LmsKey_MakeKey(LmsKey* key, WC_RNG* rng)
 int wc_LmsKey_Reload(LmsKey* key)
 {
     int ret = 0;
-    int priv_data_len = 0;
+    word32 priv_data_len = 0;
 
     /* Validate parameter. */
     if (key == NULL) {
@@ -1260,7 +1260,7 @@ int wc_LmsKey_Sign(LmsKey* key, byte* sig, word32* sigSz, const byte* msg,
             if (ret == 0) {
                 /* Sign message. */
                 ret = wc_hss_sign(state, key->priv_raw, &key->priv,
-                    key->priv_data, msg, msgSz, sig);
+                    key->priv_data, msg, (word32)msgSz, sig);
                 wc_lmskey_state_free(state);
             }
             ForceZero(state, sizeof(LmsState));
@@ -1276,7 +1276,7 @@ int wc_LmsKey_Sign(LmsKey* key, byte* sig, word32* sigSz, const byte* msg,
         /* Write private key to storage. */
 #ifdef WOLFSSL_WC_LMS_SERIALIZE_STATE
         const LmsParams* params = key->params;
-        int priv_data_len = LMS_PRIV_DATA_LEN(params->levels, params->height,
+        word32 priv_data_len = LMS_PRIV_DATA_LEN(params->levels, params->height,
             params->p, params->rootLevels, params->cacheBits,
             params->hash_len) + HSS_PRIVATE_KEY_LEN(key->params->hash_len);
 
@@ -1530,7 +1530,8 @@ int wc_LmsKey_Verify(LmsKey* key, const byte* sig, word32 sigSz,
             ret = wc_lmskey_state_init(state, key->params);
             if (ret == 0) {
                 /* Verify signature of message with public key. */
-                ret = wc_hss_verify(state, key->pub, msg, msgSz, sig, sigSz);
+                ret = wc_hss_verify(state, key->pub, msg, (word32)msgSz, sig,
+                    sigSz);
                 wc_lmskey_state_free(state);
             }
             ForceZero(state, sizeof(LmsState));
