@@ -209,7 +209,7 @@ do {                                                    \
  */
 #define IDX64_SET_ADDR_TREE(i, c, h, a, l)              \
     if ((c) > 4) {                                      \
-        (l) = w64GetLow32(i) & (((word32)1 << (h)) - 1);\
+        (l) = w64GetLow32(i) & (((word32)1U << (h)) - 1U);\
         (i) = w64ShiftRight(i, h);                      \
         (a)[XMSS_ADDR_TREE_HI] = w64GetHigh32(i);       \
         (a)[XMSS_ADDR_TREE] = w64GetLow32(i);           \
@@ -423,6 +423,11 @@ static void wc_idx_update(unsigned char* a, word32 l)
 static void wc_idx_copy(const unsigned char* s, word32 sl, unsigned char* d,
     word32 dl)
 {
+    /* Caller must size the destination at least as large as the source.
+     * Without this guard, dl - sl wraps to ~4 GB and corrupts memory. */
+    if (dl < sl) {
+        return;
+    }
     XMEMSET(d, 0, dl - sl);
     XMEMCPY(d + dl - sl, s, sl);
 }
@@ -1285,6 +1290,16 @@ static void wc_xmss_hash_message(XmssState* state, const byte* random,
     byte* root_sk = key + params->n;
     byte* idx_sig = root_sk + params->n;
 
+    /* idx_len encodes a leaf number (4 or 8 bytes per RFC 8391) and is
+     * front-padded into an n-byte field. n >= 24 for every supported
+     * parameter set, so idx_len <= n always holds in valid params, but
+     * guard explicitly: if the invariant is ever violated, the (word32)
+     * cast on the subtraction would otherwise produce a ~4 GB XMEMSET. */
+    if (idx_len > params->n) {
+        state->ret = WC_FAILURE;
+        return;
+    }
+
     /* Set prefix data before message. */
     XMSS_PAD_ENC(XMSS_HASH_PADDING_HASH, pad, params->pad_len);
     XMEMCPY(key, random, params->n);
@@ -2121,7 +2136,7 @@ static void wc_xmss_treehash(XmssState* state, const byte* sk_seed,
     HashAddress tree;
     word8 height[WC_XMSS_MAX_TREE_HEIGHT + 1];
     word8 offset = 0;
-    word32 max = (word32)1 << params->sub_h;
+    word32 max = (word32)1U << params->sub_h;
     word32 i;
 
     /* Copy hash address into one for each purpose.  */
@@ -2225,7 +2240,7 @@ static void wc_xmss_treehash(XmssState* state, const byte* sk_seed,
     HashAddress addr;
     word8 height[WC_XMSS_MAX_TREE_HEIGHT + 1];
     word8 offset = 0;
-    word32 max = (word32)1 << params->sub_h;
+    word32 max = (word32)1U << params->sub_h;
     word32 i;
 
     XMSS_ADDR_SET_SUBTREE(addr, subtree, 0);
@@ -2420,7 +2435,7 @@ int wc_xmssmt_sign(XmssState* state, const unsigned char* m, word32 mlen,
     const XmssParams* params = state->params;
     const word8 n = params->n;
     const word8 hs = params->sub_h;
-    const word16 hsn = (word16)((word16)hs * n);
+    const word16 hsn = (word16)(hs * n);
     const byte* sk_seed = sk + params->idx_len;
     const byte* pk_seed = sk + params->idx_len + 3 * n;
     wc_Idx idx;
@@ -2910,7 +2925,7 @@ static void wc_xmss_bds_treehash_initial(XmssState* state, BdsState* bds,
     HashAddress addrCopy;
     word8 height[WC_XMSS_MAX_TREE_HEIGHT + 1];
     word8 offset = 0;
-    word32 maxIdx = (word32)1 << params->sub_h;
+    word32 maxIdx = (word32)1U << params->sub_h;
     word32 i;
 
     /* First signing index will be 0 - setup BDS state. */
@@ -3124,7 +3139,7 @@ static word8 wc_xmss_bds_treehash_updates(XmssState* state, BdsState* bds,
 static void wc_xmss_bds_update(XmssState* state, BdsState* bds,
     const byte* sk_seed, const byte* pk_seed, const HashAddress addr)
 {
-    if (bds->next < ((word32)1 << state->params->sub_h)) {
+    if (bds->next < ((word32)1U << state->params->sub_h)) {
         const XmssParams* params = state->params;
         byte* sp = bds->stack + bds->offset * params->n;
         HashAddress addrCopy;
@@ -3264,7 +3279,7 @@ static void wc_xmss_bds_auth_path(XmssState* state, BdsState* bds,
         tau = (word8)min(tau, hsk);
         for (i = 0; i < tau; i++) {
             word32 startIdx = leafIdx + 1U + 3U * ((word32)1U << i);
-            if (startIdx < ((word32)1 << hs)) {
+            if (startIdx < ((word32)1U << hs)) {
                 wc_xmss_bds_state_treehash_set_next_idx(bds, i, startIdx);
             }
         }
@@ -3502,7 +3517,7 @@ int wc_xmss_sign(XmssState* state, const unsigned char* m, word32 mlen,
     if (ret == 0) {
         /* Update BDS state - update authentication path for next index. */
         /* Check not last node. */
-        if (idx < ((word32)1 << h) - 1) {
+        if (idx < ((word32)1U << h) - 1U) {
             /* Calculate next authentication path node. */
             wc_xmss_bds_auth_path(state, bds, idx, sk_seed, pk_seed,
                 state->addr);
@@ -3717,7 +3732,7 @@ static int xmss_idx_invalid(XmssIdx i, word8 h)
  */
 static void xmss_idx_get_tree_leaf(XmssIdx i, word8 h, XmssIdx* t, word32* l)
 {
-    *l = (word32)i & (((word32)1 << h) - 1);
+    *l = (word32)i & (((word32)1U << h) - 1U);
     *t = i >> h;
 }
 

@@ -55,14 +55,18 @@ jobs:
           make -j 4 || $(exit 4)
 
   # Compiler-clean (above) doesn't catch a bad cast that silently changes
-  # the wire output. Run testwolfcrypt's xmss_test under the same conversion
-  # flags on the default and small XMSS variants.
+  # the wire output. Run testwolfcrypt's xmss_test (and the verify-only
+  # RFC 8391 vectors) under the same conversion flags. The 32-bit row
+  # also exercises any width-dependent breakage in the tree-index
+  # arithmetic (XmssIdx narrows to word32 there).
   test_xmss_runtime:
     strategy:
       matrix:
         config: [
           '--enable-xmss CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
           '--enable-xmss=yes,small CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
+          '--enable-xmss=yes,verify-only CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
+          '--enable-xmss CPPFLAGS="-Wdeclaration-after-statement -Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual" --enable-32bit CFLAGS=-m32',
         ]
     name: test XMSS runtime
     if: github.repository_owner == 'wolfssl'
@@ -71,6 +75,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         name: Checkout wolfSSL
+
+      - name: Install multilib
+        uses: ./.github/actions/install-apt-deps
+        with:
+          packages: gcc-multilib
 
       - name: Build and run wolfCrypt XMSS tests
         run: |
