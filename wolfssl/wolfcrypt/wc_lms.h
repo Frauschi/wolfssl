@@ -479,11 +479,15 @@ enum wc_LmsState {
     #define LMS_PRIV_SMOOTH_LEN(l, h, rl, cb, hLen)     0U
 #endif
 
-/* Length of one LM-OTS y[]: the C randomizer plus p hashes. Always defined
- * (independent of WOLFSSL_LMS_NO_SIG_CACHE) because it is also used to walk
- * the in-memory signature layout, not just the y cache. */
-#define LMS_PRIV_Y_TREE_LEN(p, hLen)                                \
+/* Length of one LM-OTS y[]: the C randomizer plus p hashes. */
+#define LMOTS_Y_LEN(p, hLen)                                        \
     ((word32)(hLen) + (word32)(p) * (word32)(hLen))
+
+/* Length of one LM-OTS y[] when stored in the per-level y cache. Same value
+ * as LMOTS_Y_LEN; kept as a separate name for the cache call sites. Always
+ * defined (independent of WOLFSSL_LMS_NO_SIG_CACHE) because it is also used
+ * to walk the in-memory signature layout, not just the y cache. */
+#define LMS_PRIV_Y_TREE_LEN(p, hLen)    LMOTS_Y_LEN(p, hLen)
 
 #ifndef WOLFSSL_LMS_NO_SIG_CACHE
     /* Length of the y data cached in private key data. */

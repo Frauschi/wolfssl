@@ -55,3 +55,29 @@ jobs:
           echo "running ./configure ${{ matrix.config }}"
           ./configure ${{ matrix.config }} || $(exit 3)
           make -j 4 || $(exit 4)
+
+  # Compiler-clean (above) doesn't catch a bad cast that silently changes
+  # the wire output. Run testwolfcrypt's lms_test under the same conversion
+  # flags on the default and small LMS variants.
+  test_lms_runtime:
+    strategy:
+      matrix:
+        config: [
+          '--enable-lms CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
+          '--enable-lms=yes,small CPPFLAGS="-Wconversion -Warith-conversion -Wenum-conversion -Wfloat-conversion -Wsign-conversion -Wcast-qual"',
+        ]
+    name: test LMS runtime
+    if: github.repository_owner == 'wolfssl'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout wolfSSL
+
+      - name: Build and run wolfCrypt LMS tests
+        run: |
+          ./autogen.sh || $(exit 2)
+          echo "running ./configure ${{ matrix.config }}"
+          ./configure ${{ matrix.config }} || $(exit 3)
+          make -j 4 || $(exit 4)
+          ./wolfcrypt/test/testwolfcrypt || $(exit 5)

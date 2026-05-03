@@ -689,7 +689,11 @@ static WC_INLINE int wc_lmots_q_expand(byte* q, word8 n, word8 w, word8 ls,
     byte* qe)
 {
     int ret = 0;
-    unsigned int sum;
+    /* sum is word16: the small-variant checksum loop below relies on
+     * arithmetic wrapping at 2^16 (sum <<= w then sum >> (16 - w) reads the
+     * top byte of the rolled value). Switching to a wider type would let
+     * those high bits leak into subsequent reads. */
+    word16 sum;
     unsigned int i;
 
 #ifndef WOLFSSL_WC_LMS_SMALL
@@ -699,11 +703,11 @@ static WC_INLINE int wc_lmots_q_expand(byte* q, word8 n, word8 w, word8 ls,
             /* No expansion required, just copy. */
             XMEMCPY(qe, q, n);
             /* Start sum with all 2^w - 1s and subtract from that. */
-            sum = 0xffU * n;
+            sum = (word16)(0xffU * n);
             /* For each byte of the hash. */
             for (i = 0; i < n; i++) {
                 /* Subtract coefficient from sum. */
-                sum -= q[i];
+                sum = (word16)(sum - q[i]);
             }
             /* Put coefficients of checksum on the end. */
             qe[n + 0] = (word8)(sum >> 8);
@@ -711,15 +715,15 @@ static WC_INLINE int wc_lmots_q_expand(byte* q, word8 n, word8 w, word8 ls,
             break;
         /* Winternitz width of 4. */
         case 4:
-            sum = 2U * 0xfU * n;
+            sum = (word16)(2U * 0xfU * n);
             /* For each byte of the hash. */
             for (i = 0; i < n; i++) {
                 /* Get coefficient. */
                 qe[0] = (q[i] >> 4)      ;
                 qe[1] = (q[i]     ) & 0xf;
                 /* Subtract coefficients from sum. */
-                sum -= qe[0];
-                sum -= qe[1];
+                sum = (word16)(sum - qe[0]);
+                sum = (word16)(sum - qe[1]);
                 /* Move to next coefficients. */
                 qe += 2;
             }
@@ -730,7 +734,7 @@ static WC_INLINE int wc_lmots_q_expand(byte* q, word8 n, word8 w, word8 ls,
             break;
         /* Winternitz width of 2. */
         case 2:
-            sum = 4U * 0x3U * n;
+            sum = (word16)(4U * 0x3U * n);
             /* For each byte of the hash. */
             for (i = 0; i < n; i++) {
                 /* Get coefficients. */
@@ -739,10 +743,10 @@ static WC_INLINE int wc_lmots_q_expand(byte* q, word8 n, word8 w, word8 ls,
                 qe[2] = (q[i] >> 2) & 0x3;
                 qe[3] = (q[i]     ) & 0x3;
                 /* Subtract coefficients from sum. */
-                sum -= qe[0];
-                sum -= qe[1];
-                sum -= qe[2];
-                sum -= qe[3];
+                sum = (word16)(sum - qe[0]);
+                sum = (word16)(sum - qe[1]);
+                sum = (word16)(sum - qe[2]);
+                sum = (word16)(sum - qe[3]);
                 /* Move to next coefficients. */
                 qe += 4;
             }
@@ -755,7 +759,7 @@ static WC_INLINE int wc_lmots_q_expand(byte* q, word8 n, word8 w, word8 ls,
             break;
         /* Winternitz width of 1. */
         case 1:
-            sum = 8U * 0x01U * n;
+            sum = (word16)(8U * 0x01U * n);
             /* For each byte of the hash. */
             for (i = 0; i < n; i++) {
                 /* Get coefficients. */
@@ -768,14 +772,14 @@ static WC_INLINE int wc_lmots_q_expand(byte* q, word8 n, word8 w, word8 ls,
                 qe[6] = (q[i] >> 1) & 0x1;
                 qe[7] = (q[i]     ) & 0x1;
                 /* Subtract coefficients from sum. */
-                sum -= qe[0];
-                sum -= qe[1];
-                sum -= qe[2];
-                sum -= qe[3];
-                sum -= qe[4];
-                sum -= qe[5];
-                sum -= qe[6];
-                sum -= qe[7];
+                sum = (word16)(sum - qe[0]);
+                sum = (word16)(sum - qe[1]);
+                sum = (word16)(sum - qe[2]);
+                sum = (word16)(sum - qe[3]);
+                sum = (word16)(sum - qe[4]);
+                sum = (word16)(sum - qe[5]);
+                sum = (word16)(sum - qe[6]);
+                sum = (word16)(sum - qe[7]);
                 /* Move to next coefficients. */
                 qe += 8;
             }
@@ -811,7 +815,7 @@ static WC_INLINE int wc_lmots_q_expand(byte* q, word8 n, word8 w, word8 ls,
 
     if (ret == 0) {
         /* Start sum with all 2^w - 1s and subtract from that. */
-        sum = ((1U << w) - 1U) * ((n * 8U) / w);
+        sum = (word16)(((1U << w) - 1U) * ((n * 8U) / w));
         /* For each byte of the hash. */
         for (i = 0; i < n; i++) {
             /* Get next byte. */
@@ -821,7 +825,7 @@ static WC_INLINE int wc_lmots_q_expand(byte* q, word8 n, word8 w, word8 ls,
                 /* Get coefficient. */
                 *qe = (byte)(a >> (8 - w));
                 /* Subtract coefficient from sum. */
-                sum -= *qe;
+                sum = (word16)(sum - *qe);
                 /* Move to next coefficient. */
                 qe++;
                 /* Remove width bits. */
@@ -829,13 +833,13 @@ static WC_INLINE int wc_lmots_q_expand(byte* q, word8 n, word8 w, word8 ls,
             }
         }
         /* Shift sum up as required to pack it on the end of hash. */
-        sum <<= ls;
+        sum = (word16)(sum << ls);
         /* For each width bit of checksum. */
         for (j = 16 - w; j >= ls; j--) {
             /* Get coefficient. */
             *(qe++) = (byte)(sum >> (16 - w));
             /* Remove width bits. */
-            sum <<= w;
+            sum = (word16)(sum << w);
         }
     }
 #endif /* !WOLFSSL_WC_LMS_SMALL */
@@ -2242,7 +2246,8 @@ static int wc_lms_treehash_init(LmsState* state, LmsPrivState* privState,
             /* Copy out top root nodes. */
             if ((h > params->height - params->rootLevels) &&
                     ((i >> (h-1)) != ((i + 1) >> (h - 1)))) {
-                word32 off = (1U << (params->height - h)) + (i >> h) - 1U;
+                word32 off = ((word32)1U << (params->height - h)) +
+                    (i >> h) - 1U;
                 XMEMCPY(root + off * params->hash_len, temp, params->hash_len);
             }
 
@@ -2393,7 +2398,8 @@ static int wc_lms_treehash_update(LmsState* state, LmsPrivState* privState,
             if ((ret == 0) && (q == 0) && (!useRoot) &&
                     (h > params->height - params->rootLevels) &&
                     ((i >> (h-1)) != ((i + 1) >> (h - 1)))) {
-                word32 off = (1U << (params->height - h)) + (i >> h) - 1U;
+                word32 off = ((word32)1U << (params->height - h)) +
+                    (i >> h) - 1U;
                 XMEMCPY(privState->root + off * params->hash_len, temp,
                     params->hash_len);
             }
@@ -2506,8 +2512,8 @@ static void wc_lms_sig_copy(const LmsParams* params, const byte* y,
     c32toa(params->lmOtsType & LMS_H_W_MASK, sig);
     sig += LMS_TYPE_LEN;
     /* S = u32str(q) || ots_signature || ... */
-    XMEMCPY(sig, y, LMS_PRIV_Y_TREE_LEN(params->p, params->hash_len));
-    sig += LMS_PRIV_Y_TREE_LEN(params->p, params->hash_len);
+    XMEMCPY(sig, y, LMOTS_Y_LEN(params->p, params->hash_len));
+    sig += LMOTS_Y_LEN(params->p, params->hash_len);
     /* S = u32str(q) || ots_signature || u32str(type) || ... */
     c32toa(params->lmsType & LMS_H_W_MASK, sig);
 }
@@ -3001,7 +3007,7 @@ static int wc_hss_derive_seed_i(LmsState* state, const byte* id,
 /* Get q, index, of leaf at the specified level. */
 #define LMS_Q_AT_LEVEL(q, ls, l, h)                                 \
     (w64GetLow32(w64ShiftRight((q), (((ls) - 1 - (l)) * (h)))) &    \
-     ((1U << (h)) - 1U))
+     (((word32)1U << (h)) - 1U))
 
 /* Expand the seed and I for further levels and set q for each level.
  *
@@ -3069,7 +3075,7 @@ static int wc_hss_expand_private_key(LmsState* state, byte* priv,
 
         /* Get q for level from 64-bit composite. */
         q32 = w64GetLow32(w64ShiftRight(q, (int)(params->levels - 1U - i) *
-            params->height)) & ((1U << params->height) - 1U);
+            params->height)) & (((word32)1U << params->height) - 1U);
         /* Set q of tree. */
         c32toa(q32, priv);
 
@@ -3362,7 +3368,8 @@ static int wc_hss_update_auth_path(LmsState* state, HssPrivKey* priv_key,
                 word32 qm1a = LMS_AUTH_PATH_IDX(q - 1, h);
                 /* If different then copy in cached hash. */
                 if ((qa != qm1a) && (qa > maxq)) {
-                    word32 off = (1U << (params->height - h)) + (qa >> h) - 1U;
+                    word32 off = ((word32)1U << (params->height - h)) +
+                        (qa >> h) - 1U;
                     XMEMCPY(privState->auth_path + h * params->hash_len,
                         privState->root + off * params->hash_len,
                         params->hash_len);
@@ -3605,7 +3612,7 @@ int wc_hss_make_key(LmsState* state, WC_RNG* rng, byte* priv_raw,
 {
     const LmsParams* params = state->params;
     int ret = 0;
-    int i;
+    word32 i;
     byte* p = priv_raw;
     byte* pub_root = pub + LMS_L_LEN + LMS_TYPE_LEN + LMS_TYPE_LEN + LMS_I_LEN;
 
@@ -3619,7 +3626,7 @@ int wc_hss_make_key(LmsState* state, WC_RNG* rng, byte* priv_raw,
                       (params->lmOtsType & LMS_H_W_MASK));
     }
     /* Set rest of levels to an invalid value. */
-    for (; i < (int)HSS_MAX_LEVELS; i++) {
+    for (; i < HSS_MAX_LEVELS; i++) {
         p[i] = 0xff;
     }
     p += HSS_PRIV_KEY_PARAM_SET_LEN;
@@ -3744,7 +3751,7 @@ int wc_hss_sign(LmsState* state, byte* priv_raw, HssPrivKey* priv_key,
             ret = wc_lms_sign(state, p, msg, msgSz, sig);
             if (ret == 0) {
                 byte* s = sig + LMS_Q_LEN + LMS_TYPE_LEN +
-                    LMS_PRIV_Y_TREE_LEN(params->p, params->hash_len) +
+                    LMOTS_Y_LEN(params->p, params->hash_len) +
                     LMS_TYPE_LEN;
                 byte* priv_q = p;
                 byte* priv_seed = priv_q + LMS_Q_LEN;
@@ -3879,8 +3886,7 @@ static int wc_hss_sign_build_sig(LmsState* state, byte* priv_raw,
                     LMS_PRIV_Y_TREE_LEN(params->p, params->hash_len));
             }
         #endif /* !WOLFSSL_LMS_NO_SIG_CACHE */
-            s += LMS_PRIV_Y_TREE_LEN(params->p, params->hash_len) +
-                LMS_TYPE_LEN;
+            s += LMOTS_Y_LEN(params->p, params->hash_len) + LMS_TYPE_LEN;
 
             /* Copy the authentication path out of the private key. */
             XMEMCPY(s, priv_key->state[i].auth_path,

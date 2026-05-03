@@ -1492,6 +1492,7 @@ int wc_LmsKey_GetSigLen(const LmsKey* key, word32* len)
  * @param [in] msgSz  Length of the message in bytes.
  * @return  0 on success.
  * @return  BAD_FUNC_ARG when a key, sig or msg is NULL.
+ * @return  BAD_FUNC_ARG when msgSz is not greater than 0.
  * @return  SIG_VERIFY_E when signature did not verify message.
  * @return  BAD_STATE_E when wrong state for operation.
  * @return  BUFFER_E when sigSz is invalid for parameters.
@@ -1503,6 +1504,9 @@ int wc_LmsKey_Verify(LmsKey* key, const byte* sig, word32 sigSz,
 
     /* Validate parameters. */
     if ((key == NULL) || (sig == NULL) || (msg == NULL)) {
+        ret = BAD_FUNC_ARG;
+    }
+    if ((ret == 0) && (msgSz <= 0)) {
         ret = BAD_FUNC_ARG;
     }
     /* Check state. */
