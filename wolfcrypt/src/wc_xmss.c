@@ -1490,10 +1490,152 @@ int wc_XmssKey_ExportPubRaw(const XmssKey* key, byte* out, word32* outLen)
     return ret;
 }
 
+/* Imports a raw public key buffer from in array to XmssKey key, taking
+ * an is_xmssmt hint to disambiguate the XMSS / XMSS^MT OID namespaces
+ * when params have not yet been configured on the key.
+ *
+ * Accepts a key in INITED, PARMSET or VERIFYONLY state. WC_XMSS_STATE_OK
+ * is rejected because the key already has private material loaded and
+ * silently overwriting key->pk would create an inconsistent priv/pub
+ * pair. When state is INITED, params are derived from the 4-byte OID
+ * prefix at the start of the raw key (RFC 8391 Appendix B.1 / C.1)
+ * using is_xmssmt to pick the XMSS or XMSS^MT table; key->oid,
+ * key->is_xmssmt and key->params are populated only after the public
+ * key length check passes, so a length mismatch leaves the key in its
+ * original state. When params have already been set, the 4-byte OID
+ * prefix and the is_xmssmt hint are checked for consistency.
+ *
+ * @param [in, out] key        XMSS key.
+ * @param [in]      in         Array holding public key.
+ * @param [in]      inLen      Length of array in bytes.
+ * @param [in]      is_xmssmt  0 to search the XMSS table, non-zero to
+ *                             search the XMSS^MT table.
+ *
+ * @return  0 on success.
+ * @return  BAD_FUNC_ARG when a parameter is NULL or the OID prefix /
+ *          is_xmssmt hint contradicts pre-set params.
+ * @return  BUFFER_E if array is incorrect size.
+ * @return  BAD_STATE_E when wrong state for operation.
+ * @return  NOT_COMPILED_IN when the derived parameter set isn't built in.
+ */
+int wc_XmssKey_ImportPubRaw_ex(XmssKey* key, const byte* in, word32 inLen,
+    int is_xmssmt)
+{
+    int               ret = 0;
+    word32            oid = 0;
+    const XmssParams* matched = NULL;
+
+    /* Validate parameters. */
+    if ((key == NULL) || (in == NULL)) {
+        ret = BAD_FUNC_ARG;
+    }
+    if ((ret == 0) && (inLen < XMSS_OID_LEN)) {
+        ret = BUFFER_E;
+    }
+
+    /* Reject states where the key is unusable for re-import. INITED
+     * means params are unset (we'll derive them); PARMSET / VERIFYONLY
+     * means params are set without a working private key (we just
+     * overwrite the pub bytes). OK means a private key is already
+     * loaded; overwriting key->pk silently would desync priv/pub. */
+    if ((ret == 0) &&
+            (key->state != WC_XMSS_STATE_INITED) &&
+            (key->state != WC_XMSS_STATE_PARMSET) &&
+            (key->state != WC_XMSS_STATE_VERIFYONLY)) {
+        WOLFSSL_MSG("error: XMSS key not ready for import");
+        ret = BAD_STATE_E;
+    }
+
+    if (ret == 0) {
+        /* OID is encoded big-endian in the first 4 bytes. */
+        ato32(in, &oid);
+
+        if (key->state == WC_XMSS_STATE_INITED) {
+            /* Auto-derive params from OID prefix, using is_xmssmt hint.
+             * Hold the candidate in a local; commit to the key only
+             * after the length check below succeeds. */
+            ret = WC_NO_ERR_TRACE(NOT_COMPILED_IN);
+            if (is_xmssmt) {
+            #if WOLFSSL_XMSS_MAX_HEIGHT >= 20
+                unsigned int i;
+                for (i = 0; i < WC_XMSSMT_ALG_LEN; i++) {
+                    if (wc_xmssmt_alg[i].oid == oid) {
+                        matched = &wc_xmssmt_alg[i].params;
+                        ret = 0;
+                        break;
+                    }
+                }
+            #else
+                /* XMSS^MT disabled at compile time; ret stays at
+                 * NOT_COMPILED_IN. */
+                (void)oid;
+            #endif
+            }
+            else {
+            #if WOLFSSL_XMSS_MIN_HEIGHT <= 20
+                unsigned int i;
+                for (i = 0; i < WC_XMSS_ALG_LEN; i++) {
+                    if (wc_xmss_alg[i].oid == oid) {
+                        matched = &wc_xmss_alg[i].params;
+                        ret = 0;
+                        break;
+                    }
+                }
+            #else
+                /* XMSS disabled at compile time; ret stays at
+                 * NOT_COMPILED_IN. */
+                (void)oid;
+            #endif
+            }
+
+            if (ret != 0) {
+                WOLFSSL_MSG("error: XMSS OID from pub key not supported");
+            }
+        }
+        else {
+            /* Params already set; OID prefix and family must match. */
+            if (oid != key->oid) {
+                WOLFSSL_MSG("error: XMSS pub OID doesn't match set params");
+                ret = BAD_FUNC_ARG;
+            }
+            else if ((is_xmssmt ? 1 : 0) != key->is_xmssmt) {
+                WOLFSSL_MSG("error: XMSS is_xmssmt hint contradicts set params");
+                ret = BAD_FUNC_ARG;
+            }
+            else {
+                matched = key->params;
+            }
+        }
+    }
+
+    /* Length check using the candidate (auto-derived) or pre-set
+     * params, without committing yet. */
+    if ((ret == 0) && (inLen != (word32)(XMSS_OID_LEN + matched->pk_len))) {
+        ret = BUFFER_E;
+    }
+
+    if (ret == 0) {
+        /* Commit (no-op when params were already set) and copy pub
+         * bytes (skipping the OID prefix). */
+        if (key->state == WC_XMSS_STATE_INITED) {
+            key->params    = matched;
+            key->oid       = oid;
+            key->is_xmssmt = is_xmssmt ? 1 : 0;
+        }
+        XMEMCPY(key->pk, in + XMSS_OID_LEN, matched->pk_len);
+        key->state = WC_XMSS_STATE_VERIFYONLY;
+    }
+
+    return ret;
+}
+
 /* Imports a raw public key buffer from in array to XmssKey key.
  *
  * The XMSS parameters must be set first with wc_XmssKey_SetParamStr,
  * and inLen must match the length returned by wc_XmssKey_GetPubLen.
+ * If the caller only has the raw public-key bytes and has not yet
+ * configured the parameter set, use wc_XmssKey_ImportPubRaw_ex which
+ * derives parameters from the OID prefix at the start of the buffer.
  *
  * @param [in, out] key     XMSS key.
  * @param [in]      in      Array holding public key.
@@ -1562,7 +1704,7 @@ int wc_XmssKey_GetSigLen(const XmssKey* key, word32* len)
     int ret = 0;
 
     /* Validate parameters. */
-    if ((key == NULL) || (len == NULL)) {
+    if ((key == NULL) || (len == NULL) || (key->params == NULL)) {
         ret = BAD_FUNC_ARG;
     }
     /* Validate state. */

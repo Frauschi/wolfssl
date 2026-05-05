@@ -4647,6 +4647,17 @@ static int ParseCRL_Extensions(DecodedCRL* dcrl, const byte* buf, word32* inOutI
     /* SLH-DSA-SHAKE-256f: 2.16.840.1.101.3.4.3.31 */
     static const byte sigSlhDsa_Shake_256fOid[] = {96, 134, 72, 1, 101, 3, 4, 3, 31};
 #endif /* WOLFSSL_HAVE_SLHDSA */
+#ifdef WOLFSSL_HAVE_LMS
+    /* RFC 9802 id-alg-hss-lms-hashsig: 1.2.840.113549.1.9.16.3.17 */
+    static const byte sigHssLmsOid[] =
+        {42, 134, 72, 134, 247, 13, 1, 9, 16, 3, 17};
+#endif /* WOLFSSL_HAVE_LMS */
+#ifdef WOLFSSL_HAVE_XMSS
+    /* RFC 9802 id-alg-xmss-hashsig: 1.3.6.1.5.5.7.6.34 */
+    static const byte sigXmssOid[] = {43, 6, 1, 5, 5, 7, 6, 34};
+    /* RFC 9802 id-alg-xmssmt-hashsig: 1.3.6.1.5.5.7.6.35 */
+    static const byte sigXmssMtOid[] = {43, 6, 1, 5, 5, 7, 6, 35};
+#endif /* WOLFSSL_HAVE_XMSS */
 
 /* keyType */
 #ifndef NO_DSA
@@ -4978,6 +4989,17 @@ static int SlhDsaParamToKeyType(enum SlhDsaParam param)
 }
 #endif /* WOLFSSL_CERT_GEN */
 #endif /* WOLFSSL_HAVE_SLHDSA */
+#ifdef WOLFSSL_HAVE_LMS
+    /* RFC 9802 id-alg-hss-lms-hashsig: 1.2.840.113549.1.9.16.3.17 */
+    static const byte keyHssLmsOid[] =
+        {42, 134, 72, 134, 247, 13, 1, 9, 16, 3, 17};
+#endif /* WOLFSSL_HAVE_LMS */
+#ifdef WOLFSSL_HAVE_XMSS
+    /* RFC 9802 id-alg-xmss-hashsig: 1.3.6.1.5.5.7.6.34 */
+    static const byte keyXmssOid[] = {43, 6, 1, 5, 5, 7, 6, 34};
+    /* RFC 9802 id-alg-xmssmt-hashsig: 1.3.6.1.5.5.7.6.35 */
+    static const byte keyXmssMtOid[] = {43, 6, 1, 5, 5, 7, 6, 35};
+#endif /* WOLFSSL_HAVE_XMSS */
 
 /* curveType */
 #ifdef HAVE_ECC
@@ -5870,6 +5892,22 @@ const byte* OidFromId(word32 id, word32 type, word32* oidSz)
                     *oidSz = sizeof(sigSlhDsa_Shake_256fOid);
                     break;
             #endif /* WOLFSSL_HAVE_SLHDSA */
+            #ifdef WOLFSSL_HAVE_LMS
+                case CTC_HSS_LMS:
+                    oid = sigHssLmsOid;
+                    *oidSz = sizeof(sigHssLmsOid);
+                    break;
+            #endif /* WOLFSSL_HAVE_LMS */
+            #ifdef WOLFSSL_HAVE_XMSS
+                case CTC_XMSS:
+                    oid = sigXmssOid;
+                    *oidSz = sizeof(sigXmssOid);
+                    break;
+                case CTC_XMSSMT:
+                    oid = sigXmssMtOid;
+                    *oidSz = sizeof(sigXmssMtOid);
+                    break;
+            #endif /* WOLFSSL_HAVE_XMSS */
                 default:
                     break;
             }
@@ -6019,6 +6057,22 @@ const byte* OidFromId(word32 id, word32 type, word32* oidSz)
                     *oidSz = sizeof(keySlhDsa_Shake_256fOid);
                     break;
             #endif /* WOLFSSL_HAVE_SLHDSA */
+            #ifdef WOLFSSL_HAVE_LMS
+                case HSS_LMSk:
+                    oid = keyHssLmsOid;
+                    *oidSz = sizeof(keyHssLmsOid);
+                    break;
+            #endif /* WOLFSSL_HAVE_LMS */
+            #ifdef WOLFSSL_HAVE_XMSS
+                case XMSSk:
+                    oid = keyXmssOid;
+                    *oidSz = sizeof(keyXmssOid);
+                    break;
+                case XMSSMTk:
+                    oid = keyXmssMtOid;
+                    *oidSz = sizeof(keyXmssMtOid);
+                    break;
+            #endif /* WOLFSSL_HAVE_XMSS */
                 default:
                     break;
             }
@@ -12465,7 +12519,8 @@ void wc_FreeDecodedCert(DecodedCert* cert)
 }
 
 #if defined(HAVE_ED25519) || defined(HAVE_ED448) || defined(HAVE_FALCON) || \
-    defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_SLHDSA)
+    defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_SLHDSA) || \
+    defined(WOLFSSL_HAVE_LMS) || defined(WOLFSSL_HAVE_XMSS)
 /* Store the key data under the BIT_STRING in dynamically allocated data.
  *
  * @param [in, out] cert    Certificate object.
@@ -13386,6 +13441,22 @@ static int GetCertKey(DecodedCert* cert, const byte* source, word32* inOutIdx,
             ret = StoreKey(cert, source, &srcIdx, maxIdx);
             break;
     #endif /* WOLFSSL_HAVE_SLHDSA */
+    #ifdef WOLFSSL_HAVE_LMS
+        case HSS_LMSk:
+            cert->pkCurveOID = HSS_LMSk;
+            ret = StoreKey(cert, source, &srcIdx, maxIdx);
+            break;
+    #endif /* WOLFSSL_HAVE_LMS */
+    #ifdef WOLFSSL_HAVE_XMSS
+        case XMSSk:
+            cert->pkCurveOID = XMSSk;
+            ret = StoreKey(cert, source, &srcIdx, maxIdx);
+            break;
+        case XMSSMTk:
+            cert->pkCurveOID = XMSSMTk;
+            ret = StoreKey(cert, source, &srcIdx, maxIdx);
+            break;
+    #endif /* WOLFSSL_HAVE_XMSS */
     #ifndef NO_DSA
         case DSAk:
             cert->publicKey = source + pubIdx;
@@ -15863,6 +15934,13 @@ static WC_INLINE int IsSigAlgoECC(word32 algoOID)
               || (algoOID == SLH_DSA_SHA2_192Sk)
               || (algoOID == SLH_DSA_SHA2_256Sk)
         #endif
+        #ifdef WOLFSSL_HAVE_LMS
+              || (algoOID == HSS_LMSk)
+        #endif
+        #ifdef WOLFSSL_HAVE_XMSS
+              || (algoOID == XMSSk)
+              || (algoOID == XMSSMTk)
+        #endif
     );
 }
 
@@ -16218,6 +16296,25 @@ void FreeSignatureCtx(SignatureCtx* sigCtx)
             #endif
                 break;
         #endif /* WOLFSSL_HAVE_SLHDSA */
+        #ifdef WOLFSSL_HAVE_LMS
+            case HSS_LMSk:
+                wc_LmsKey_Free(sigCtx->key.lms);
+            #ifndef WOLFSSL_NO_MALLOC
+                XFREE(sigCtx->key.lms, sigCtx->heap, DYNAMIC_TYPE_LMS);
+                sigCtx->key.lms = NULL;
+            #endif
+                break;
+        #endif /* WOLFSSL_HAVE_LMS */
+        #ifdef WOLFSSL_HAVE_XMSS
+            case XMSSk:
+            case XMSSMTk:
+                wc_XmssKey_Free(sigCtx->key.xmss);
+            #ifndef WOLFSSL_NO_MALLOC
+                XFREE(sigCtx->key.xmss, sigCtx->heap, DYNAMIC_TYPE_XMSS);
+                sigCtx->key.xmss = NULL;
+            #endif
+                break;
+        #endif /* WOLFSSL_HAVE_XMSS */
             default:
                 break;
         } /* switch (keyOID) */
@@ -16416,6 +16513,17 @@ static int HashForSignature(const byte* buf, word32 bufSz, word32 sigOID,
             /* Hashes done in signing operation. */
             break;
     #endif
+    #ifdef WOLFSSL_HAVE_LMS
+        case CTC_HSS_LMS:
+            /* RFC 9802 sec 2: no digest is applied before signing. */
+            break;
+    #endif
+    #ifdef WOLFSSL_HAVE_XMSS
+        case CTC_XMSS:
+        case CTC_XMSSMT:
+            /* RFC 9802 sec 2: no digest is applied before signing. */
+            break;
+    #endif
 
         default:
             ret = HASH_TYPE_E;
@@ -16612,6 +16720,16 @@ static int SigOidMatchesKeyOid(word32 sigOID, word32 keyOID)
             return (sigOID == CTC_SLH_DSA_SHA2_192S);
         case SLH_DSA_SHA2_256Sk:
             return (sigOID == CTC_SLH_DSA_SHA2_256S);
+    #endif
+    #ifdef WOLFSSL_HAVE_LMS
+        case HSS_LMSk:
+            return (sigOID == CTC_HSS_LMS);
+    #endif
+    #ifdef WOLFSSL_HAVE_XMSS
+        case XMSSk:
+            return (sigOID == CTC_XMSS);
+        case XMSSMTk:
+            return (sigOID == CTC_XMSSMT);
     #endif
     }
 
@@ -17141,6 +17259,54 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                     break;
                 }
             #endif /* WOLFSSL_HAVE_SLHDSA */
+            #ifdef WOLFSSL_HAVE_LMS
+                case HSS_LMSk:
+                {
+                    sigCtx->verify = 0;
+                #ifndef WOLFSSL_NO_MALLOC
+                    sigCtx->key.lms = (LmsKey*)XMALLOC(sizeof(LmsKey),
+                        sigCtx->heap, DYNAMIC_TYPE_LMS);
+                    if (sigCtx->key.lms == NULL) {
+                        ERROR_OUT(MEMORY_E, exit_cs);
+                    }
+                #endif
+                    if ((ret = wc_LmsKey_Init(sigCtx->key.lms,
+                            sigCtx->heap, sigCtx->devId)) < 0) {
+                        goto exit_cs;
+                    }
+                    if ((ret = wc_LmsKey_ImportPubRaw(sigCtx->key.lms,
+                            key, keySz)) < 0) {
+                        WOLFSSL_MSG("ASN Key import error HSS/LMS");
+                        goto exit_cs;
+                    }
+                    break;
+                }
+            #endif /* WOLFSSL_HAVE_LMS */
+            #ifdef WOLFSSL_HAVE_XMSS
+                case XMSSk:
+                case XMSSMTk:
+                {
+                    int is_xmssmt = (keyOID == XMSSMTk);
+                    sigCtx->verify = 0;
+                #ifndef WOLFSSL_NO_MALLOC
+                    sigCtx->key.xmss = (XmssKey*)XMALLOC(sizeof(XmssKey),
+                        sigCtx->heap, DYNAMIC_TYPE_XMSS);
+                    if (sigCtx->key.xmss == NULL) {
+                        ERROR_OUT(MEMORY_E, exit_cs);
+                    }
+                #endif
+                    if ((ret = wc_XmssKey_Init(sigCtx->key.xmss,
+                            sigCtx->heap, sigCtx->devId)) < 0) {
+                        goto exit_cs;
+                    }
+                    if ((ret = wc_XmssKey_ImportPubRaw_ex(sigCtx->key.xmss,
+                            key, keySz, is_xmssmt)) < 0) {
+                        WOLFSSL_MSG("ASN Key import error XMSS/XMSS^MT");
+                        goto exit_cs;
+                    }
+                    break;
+                }
+            #endif /* WOLFSSL_HAVE_XMSS */
                 default:
                     WOLFSSL_MSG("Verify Key type unknown");
                     ret = ASN_UNKNOWN_OID_E;
@@ -17353,6 +17519,25 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                     break;
                 }
             #endif /* WOLFSSL_HAVE_SLHDSA */
+            #ifdef WOLFSSL_HAVE_LMS
+                case HSS_LMSk:
+                {
+                    ret = wc_LmsKey_Verify(sigCtx->key.lms, sig, sigSz,
+                        buf, (int)bufSz);
+                    sigCtx->verify = (ret == 0);
+                    break;
+                }
+            #endif /* WOLFSSL_HAVE_LMS */
+            #ifdef WOLFSSL_HAVE_XMSS
+                case XMSSk:
+                case XMSSMTk:
+                {
+                    ret = wc_XmssKey_Verify(sigCtx->key.xmss, sig, sigSz,
+                        buf, (int)bufSz);
+                    sigCtx->verify = (ret == 0);
+                    break;
+                }
+            #endif /* WOLFSSL_HAVE_XMSS */
                 default:
                     break;
             }  /* switch (keyOID) */
@@ -17575,6 +17760,33 @@ int ConfirmSignature(SignatureCtx* sigCtx,
                     break;
                 }
             #endif /* WOLFSSL_HAVE_SLHDSA */
+            #ifdef WOLFSSL_HAVE_LMS
+                case HSS_LMSk:
+                {
+                    if (sigCtx->verify == 1) {
+                        ret = 0;
+                    }
+                    else {
+                        WOLFSSL_MSG("HSS/LMS Verify didn't match");
+                        ret = ASN_SIG_CONFIRM_E;
+                    }
+                    break;
+                }
+            #endif /* WOLFSSL_HAVE_LMS */
+            #ifdef WOLFSSL_HAVE_XMSS
+                case XMSSk:
+                case XMSSMTk:
+                {
+                    if (sigCtx->verify == 1) {
+                        ret = 0;
+                    }
+                    else {
+                        WOLFSSL_MSG("XMSS/XMSS^MT Verify didn't match");
+                        ret = ASN_SIG_CONFIRM_E;
+                    }
+                    break;
+                }
+            #endif /* WOLFSSL_HAVE_XMSS */
                 default:
                     break;
             }  /* switch (keyOID) */
