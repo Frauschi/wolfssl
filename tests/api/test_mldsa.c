@@ -19,6 +19,17 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
  */
 
+/* NOTE: this file is named test_mldsa.c (canonical FIPS 204 spelling) but
+ * the test bodies still gate on legacy WOLFSSL_DILITHIUM_* names and call
+ * legacy wc_dilithium_* / dilithium_key APIs. That is intentional: the
+ * provider-side rename (Dilithium -> ML-DSA, see <wolfssl/wolfcrypt/dilithium.h>
+ * and <wolfssl/wolfcrypt/wc_mldsa.h>) keeps in-tree consumers on the
+ * pre-standardization spelling so the rename PR stays scoped to provider
+ * code only. A separate follow-up commit will migrate this file's call
+ * sites and #ifdef gates to canonical WOLFSSL_MLDSA_* / wc_MlDsaKey_*
+ * spellings; until then both spellings are kept in sync by the temporary
+ * compatibility shim in <wolfssl/wolfcrypt/dilithium.h>. */
+
 #include <tests/unit.h>
 
 #ifdef NO_INLINE

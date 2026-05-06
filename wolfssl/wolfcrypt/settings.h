@@ -380,6 +380,32 @@
     #endif
 #endif
 
+/* Forward propagation of the legacy parent gate to the canonical name
+ * (HAVE_DILITHIUM -> WOLFSSL_HAVE_MLDSA). Always active: required so that
+ * a user_settings.h or build flag using only the legacy spelling still
+ * compiles the canonical implementation file (wc_mldsa.c) and the
+ * conditional declarations in wc_mldsa.h. */
+#ifdef HAVE_DILITHIUM
+    #ifndef WOLFSSL_HAVE_MLDSA
+        #define WOLFSSL_HAVE_MLDSA
+    #endif
+#endif
+
+/* Reverse propagation (WOLFSSL_HAVE_MLDSA -> HAVE_DILITHIUM). Active by
+ * default, suppressible via WOLFSSL_NO_DILITHIUM_LEGACY_GATES.
+ * Required so that <wolfssl/internal.h> and
+ * <wolfssl/wolfcrypt/cryptocb.h> (which gate their transitive include of
+ * <wolfssl/wolfcrypt/dilithium.h> on HAVE_DILITHIUM), and unmigrated
+ * consumer code that #ifdef-gates on HAVE_DILITHIUM, keep working when
+ * the user enabled ML-DSA via the canonical name only. The sub-config
+ * gate translations live in <wolfssl/wolfcrypt/dilithium.h> alongside the
+ * legacy macro / inline shims; that header is reachable through
+ * HAVE_DILITHIUM whenever the canonical gate is set. */
+#if defined(WOLFSSL_HAVE_MLDSA) && !defined(HAVE_DILITHIUM) && \
+    !defined(WOLFSSL_NO_DILITHIUM_LEGACY_GATES)
+    #define HAVE_DILITHIUM
+#endif
+
 /* Ensure WOLFSSL_DEBUG_CERTS is set when DEBUG_WOLFSSL is enabled, unless
  * expressly requested otherwise.
  */
