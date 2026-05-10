@@ -434,11 +434,11 @@ int wc_SlhDsaKey_VerifyMsg(SlhDsaKey* key, const byte* mprime,
     (HashSLH-DSA) interface with deterministic randomness, per FIPS 205
     Algorithm 23 with the pre-hash domain separator (0x01). The caller must
     hash the application message with hashType first and pass the digest as
-    msg; this function does NOT hash msg.
+    hash; this function does NOT hash its input.
 
     \return 0 on success.
-    \return BAD_FUNC_ARG if key, msg, sig, or sigSz is NULL.
-    \return BAD_LENGTH_E if msgSz does not equal the digest size for hashType
+    \return BAD_FUNC_ARG if key, hash, sig, or sigSz is NULL.
+    \return BAD_LENGTH_E if hashSz does not equal the digest size for hashType
     (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 Section 10.2.2).
     \return NOT_COMPILED_IN if hashType is not supported in this build.
     \return MISSING_KEY if the private key has not been set.
@@ -446,9 +446,9 @@ int wc_SlhDsaKey_VerifyMsg(SlhDsaKey* key, const byte* mprime,
     \param [in] key Pointer to a private SlhDsaKey.
     \param [in] ctx Context string. May be NULL if ctxSz is 0.
     \param [in] ctxSz Length of the context string (0-255).
-    \param [in] msg Pointer to the pre-hashed message digest. msgSz must equal
-    the digest size for hashType.
-    \param [in] msgSz Length of the digest in bytes.
+    \param [in] hash Pointer to the pre-hashed message digest. hashSz must
+    equal the digest size for hashType.
+    \param [in] hashSz Length of the digest in bytes.
     \param [in] hashType Hash algorithm used for pre-hashing (selects OID).
     Supported: WC_HASH_TYPE_SHA224, WC_HASH_TYPE_SHA256, WC_HASH_TYPE_SHA384,
     WC_HASH_TYPE_SHA512, WC_HASH_TYPE_SHA512_224, WC_HASH_TYPE_SHA512_256,
@@ -478,7 +478,7 @@ int wc_SlhDsaKey_VerifyMsg(SlhDsaKey* key, const byte* mprime,
     \sa wc_SlhDsaKey_SignMsgDeterministic
 */
 int wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key,
-    const byte* ctx, byte ctxSz, const byte* msg, word32 msgSz,
+    const byte* ctx, byte ctxSz, const byte* hash, word32 hashSz,
     enum wc_HashType hashType, byte* sig, word32* sigSz);
 
 /*!
@@ -487,20 +487,20 @@ int wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key,
     \brief Signs a caller-pre-hashed message digest using the SLH-DSA external
     (HashSLH-DSA) interface with caller-provided additional randomness. The
     caller must hash the application message with hashType first and pass the
-    digest as msg; this function does NOT hash msg.
+    digest as hash; this function does NOT hash its input.
 
     \return 0 on success.
-    \return BAD_FUNC_ARG if key, msg, sig, sigSz, or addRnd is NULL.
-    \return BAD_LENGTH_E if msgSz does not equal the digest size for hashType
+    \return BAD_FUNC_ARG if key, hash, sig, sigSz, or addRnd is NULL.
+    \return BAD_LENGTH_E if hashSz does not equal the digest size for hashType
     (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 Section 10.2.2).
     \return NOT_COMPILED_IN if hashType is not supported in this build.
 
     \param [in] key Pointer to a private SlhDsaKey.
     \param [in] ctx Context string. May be NULL if ctxSz is 0.
     \param [in] ctxSz Length of the context string (0-255).
-    \param [in] msg Pointer to the pre-hashed message digest. msgSz must equal
-    the digest size for hashType.
-    \param [in] msgSz Length of the digest in bytes.
+    \param [in] hash Pointer to the pre-hashed message digest. hashSz must
+    equal the digest size for hashType.
+    \param [in] hashSz Length of the digest in bytes.
     \param [in] hashType Hash algorithm used for pre-hashing (selects OID).
     \param [out] sig Buffer to receive the signature.
     \param [in,out] sigSz On input, size of sig buffer. On output, actual
@@ -512,7 +512,7 @@ int wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key,
     \sa wc_SlhDsaKey_SignMsgWithRandom
 */
 int wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key,
-    const byte* ctx, byte ctxSz, const byte* msg, word32 msgSz,
+    const byte* ctx, byte ctxSz, const byte* hash, word32 hashSz,
     enum wc_HashType hashType, byte* sig, word32* sigSz, byte* addRnd);
 
 /*!
@@ -521,20 +521,20 @@ int wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key,
     \brief Signs a caller-pre-hashed message digest using the SLH-DSA external
     (HashSLH-DSA) interface with RNG-provided randomness. The caller must
     hash the application message with hashType first and pass the digest as
-    msg; this function does NOT hash msg.
+    hash; this function does NOT hash its input.
 
     \return 0 on success.
-    \return BAD_FUNC_ARG if key, msg, sig, sigSz, or rng is NULL.
-    \return BAD_LENGTH_E if msgSz does not equal the digest size for hashType
+    \return BAD_FUNC_ARG if key, hash, sig, sigSz, or rng is NULL.
+    \return BAD_LENGTH_E if hashSz does not equal the digest size for hashType
     (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 Section 10.2.2).
     \return NOT_COMPILED_IN if hashType is not supported in this build.
 
     \param [in] key Pointer to a private SlhDsaKey.
     \param [in] ctx Context string. May be NULL if ctxSz is 0.
     \param [in] ctxSz Length of the context string (0-255).
-    \param [in] msg Pointer to the pre-hashed message digest. msgSz must equal
-    the digest size for hashType.
-    \param [in] msgSz Length of the digest in bytes.
+    \param [in] hash Pointer to the pre-hashed message digest. hashSz must
+    equal the digest size for hashType.
+    \param [in] hashSz Length of the digest in bytes.
     \param [in] hashType Hash algorithm used for pre-hashing (selects OID).
     \param [out] sig Buffer to receive the signature.
     \param [in,out] sigSz On input, size of sig buffer. On output, actual
@@ -546,7 +546,7 @@ int wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key,
     \sa wc_SlhDsaKey_SignMsgDeterministic
 */
 int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx,
-    byte ctxSz, const byte* msg, word32 msgSz, enum wc_HashType hashType,
+    byte ctxSz, const byte* hash, word32 hashSz, enum wc_HashType hashType,
     byte* sig, word32* sigSz, WC_RNG* rng);
 
 /*!
@@ -554,13 +554,13 @@ int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx,
 
     \brief Verifies an SLH-DSA signature using the external HashSLH-DSA
     interface (FIPS 205 Algorithm 24). The caller must hash the application
-    message with hashType first and pass the digest as msg; this function
-    does NOT hash msg.
+    message with hashType first and pass the digest as hash; this function
+    does NOT hash its input.
 
     \return 0 on success (signature valid).
-    \return BAD_FUNC_ARG if key, msg, or sig is NULL.
+    \return BAD_FUNC_ARG if key, hash, or sig is NULL.
     \return BAD_LENGTH_E if sigSz does not match the parameter set, or if
-    msgSz does not equal the digest size for hashType (32 for SHAKE128, 64
+    hashSz does not equal the digest size for hashType (32 for SHAKE128, 64
     for SHAKE256 per FIPS 205 Section 10.2.2).
     \return NOT_COMPILED_IN if hashType is not supported in this build.
     \return MISSING_KEY if the public key has not been set.
@@ -569,9 +569,9 @@ int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx,
     \param [in] key Pointer to a public SlhDsaKey.
     \param [in] ctx Context string. May be NULL if ctxSz is 0.
     \param [in] ctxSz Length of the context string (0-255).
-    \param [in] msg Pointer to the pre-hashed message digest. msgSz must equal
-    the digest size for hashType.
-    \param [in] msgSz Length of the digest in bytes.
+    \param [in] hash Pointer to the pre-hashed message digest. hashSz must
+    equal the digest size for hashType.
+    \param [in] hashSz Length of the digest in bytes.
     \param [in] hashType Hash algorithm used for pre-hashing (selects OID).
     Must match the hash used during signing.
     \param [in] sig Pointer to the signature to verify.
@@ -599,7 +599,7 @@ int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx,
     \sa wc_SlhDsaKey_VerifyMsg
 */
 int wc_SlhDsaKey_VerifyHash(SlhDsaKey* key, const byte* ctx,
-    byte ctxSz, const byte* msg, word32 msgSz, enum wc_HashType hashType,
+    byte ctxSz, const byte* hash, word32 hashSz, enum wc_HashType hashType,
     const byte* sig, word32 sigSz);
 
 /*!

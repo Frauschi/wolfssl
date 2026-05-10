@@ -681,17 +681,17 @@ WOLFSSL_API int  wc_SlhDsaKey_VerifyMsg(SlhDsaKey* key, const byte* mprime,
 
 #ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
 WOLFSSL_API int  wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key,
-    const byte* ctx, byte ctxSz, const byte* msg, word32 msgSz,
+    const byte* ctx, byte ctxSz, const byte* hash, word32 hashSz,
     enum wc_HashType hashType, byte* sig, word32* sigSz);
 WOLFSSL_API int  wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key,
-    const byte* ctx, byte ctxSz, const byte* msg, word32 msgSz,
+    const byte* ctx, byte ctxSz, const byte* hash, word32 hashSz,
     enum wc_HashType hashType, byte* sig, word32* sigSz, byte* addRnd);
 WOLFSSL_API int  wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx,
-    byte ctxSz, const byte* msg, word32 msgSz, enum wc_HashType hashType,
+    byte ctxSz, const byte* hash, word32 hashSz, enum wc_HashType hashType,
     byte* sig, word32* sigSz, WC_RNG* rng);
 #endif /* WOLFSSL_SLHDSA_VERIFY_ONLY */
 WOLFSSL_API int  wc_SlhDsaKey_VerifyHash(SlhDsaKey* key, const byte* ctx,
-    byte ctxSz, const byte* msg, word32 msgSz, enum wc_HashType hashType,
+    byte ctxSz, const byte* hash, word32 hashSz, enum wc_HashType hashType,
     const byte* sig, word32 sigSz);
 
 #ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
