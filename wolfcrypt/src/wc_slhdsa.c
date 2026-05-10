@@ -7579,6 +7579,16 @@ int wc_SlhDsaKey_VerifyMsg(SlhDsaKey* key, const byte* mprime,
     return ret;
 }
 
+/* All HashSLH-DSA hash OIDs are DER-encoded as tag(0x06) + length(0x09) + 9
+ * bytes, so any approved hash OID is exactly 11 bytes. The PRF_msg / H_msg
+ * input for the SHA-2 path is the concatenation OID || PHM, bounded by
+ * SLHDSA_OID_MAX_LEN + WC_MAX_DIGEST_SIZE. WC_MAX_DIGEST_SIZE is the project-
+ * wide max digest size (>= 64 today) and absorbs any future hash with a
+ * larger digest as long as slhdsakey_validate_prehash continues to enforce
+ * hashSz <= WC_MAX_DIGEST_SIZE. */
+#define SLHDSA_OID_MAX_LEN     11
+#define SLHDSA_PHMSG_MAX_LEN   (SLHDSA_OID_MAX_LEN + WC_MAX_DIGEST_SIZE)
+
 #ifdef WOLFSSL_SHA224
 /* OID for SHA-224 for hash signing/verification. */
 static const byte slhdsakey_oid_sha224[] = {
@@ -7897,7 +7907,7 @@ static int slhdsakey_signhash_external(SlhDsaKey* key, const byte* ctx,
 #ifdef WOLFSSL_SLHDSA_SHA2
         if (SLHDSA_IS_SHA2(key->params->param)) {
             /* SHA2: Build oid||hash as message for PRF_msg/H_msg. */
-            byte phMsg[80]; /* Max: 11 byte OID + 64 byte hash */
+            byte phMsg[SLHDSA_PHMSG_MAX_LEN];
             word32 phMsgLen = (word32)oidLen + hashSz;
 
             XMEMCPY(phMsg, oid, oidLen);
@@ -8017,7 +8027,7 @@ int wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key, const byte* ctx,
         ret = MISSING_KEY;
     }
     else {
-        /* Pre-hash sign. */
+        /* HashSLH-DSA sign with caller-supplied digest. */
         ret = slhdsakey_signhash_external(key, ctx, ctxSz, hash, hashSz,
             hashType, sig, sigSz, key->sk + 2 * key->params->n);
     }
@@ -8056,7 +8066,7 @@ int wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key, const byte* ctx, byte ctxSz,
     const byte* hash, word32 hashSz, enum wc_HashType hashType, byte* sig,
     word32* sigSz, byte* addRnd)
 {
-    /* Pre-hash sign */
+    /* HashSLH-DSA sign with caller-supplied digest. */
     return slhdsakey_signhash_external(key, ctx, ctxSz, hash, hashSz, hashType,
         sig, sigSz, addRnd);
 }
@@ -8114,7 +8124,7 @@ int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx, byte ctxSz,
         ret = wc_RNG_GenerateBlock(rng, addRnd, key->params->n);
     }
     if (ret == 0) {
-        /* Pre-hash sign. */
+        /* HashSLH-DSA sign with caller-supplied digest. */
         ret = wc_SlhDsaKey_SignHashWithRandom(key, ctx, ctxSz, hash, hashSz,
             hashType, sig, sigSz, addRnd);
     }
@@ -8228,7 +8238,7 @@ int wc_SlhDsaKey_VerifyHash(SlhDsaKey* key, const byte* ctx, byte ctxSz,
 #ifdef WOLFSSL_SLHDSA_SHA2
         if (SLHDSA_IS_SHA2(key->params->param)) {
             /* SHA2: Build oid||hash as message for H_msg. */
-            byte phMsg[80]; /* Max: 11 byte OID + 64 byte hash */
+            byte phMsg[SLHDSA_PHMSG_MAX_LEN];
             word32 phMsgLen = (word32)oidLen + hashSz;
 
             XMEMCPY(phMsg, oid, oidLen);

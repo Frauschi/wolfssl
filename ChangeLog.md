@@ -5,9 +5,11 @@
 * **BREAKING (FIPS 205 SLH-DSA)**: `wc_SlhDsaKey_SignHash`,
   `wc_SlhDsaKey_SignHashDeterministic`, `wc_SlhDsaKey_SignHashWithRandom`, and
   `wc_SlhDsaKey_VerifyHash` now take the **caller-pre-hashed message digest**
-  via `hash`/`hashSz` parameters (renamed from `msg`/`msgSz`), matching
-  `wc_dilithium_sign_ctx_hash` / `wc_dilithium_verify_ctx_hash` exactly and
-  aligning with OpenSSL's HASH-ML-DSA, mldsa-native, leancrypto SLH-DSA, and
+  via `hash`/`hashSz` parameters (renamed from `msg`/`msgSz`), aligned with
+  ML-DSA's `wc_dilithium_sign_ctx_hash` / `wc_dilithium_verify_ctx_hash`
+  semantics (those use `hash` / `hashLen`; SLH-DSA keeps the local `Sz`
+  suffix convention) and with OpenSSL's HASH-ML-DSA, mldsa-native,
+  leancrypto SLH-DSA, and
   NIST ACVP `signatureInterface=external` / `preHash=preHash` test vectors.
   `hashSz` must equal `wc_HashGetDigestSize(hashType)` (32 bytes for SHAKE128,
   64 bytes for SHAKE256 per FIPS 205 Section 10.2.2); otherwise
