@@ -338,6 +338,7 @@ int wc_SlhDsaKey_Verify(SlhDsaKey* key, const byte* ctx,
     \sa wc_SlhDsaKey_SignMsgWithRandom
     \sa wc_SlhDsaKey_VerifyMsg
     \sa wc_SlhDsaKey_SignDeterministic
+    \sa wc_SlhDsaKey_SignHashDeterministic
 */
 int wc_SlhDsaKey_SignMsgDeterministic(SlhDsaKey* key,
     const byte* mprime, word32 mprimeSz, byte* sig, word32* sigSz);
@@ -381,6 +382,7 @@ int wc_SlhDsaKey_SignMsgDeterministic(SlhDsaKey* key,
 
     \sa wc_SlhDsaKey_SignMsgDeterministic
     \sa wc_SlhDsaKey_VerifyMsg
+    \sa wc_SlhDsaKey_SignHashWithRandom
 */
 int wc_SlhDsaKey_SignMsgWithRandom(SlhDsaKey* key,
     const byte* mprime, word32 mprimeSz, byte* sig, word32* sigSz,
@@ -420,6 +422,7 @@ int wc_SlhDsaKey_SignMsgWithRandom(SlhDsaKey* key,
 
     \sa wc_SlhDsaKey_SignMsgDeterministic
     \sa wc_SlhDsaKey_Verify
+    \sa wc_SlhDsaKey_VerifyHash
 */
 int wc_SlhDsaKey_VerifyMsg(SlhDsaKey* key, const byte* mprime,
     word32 mprimeSz, const byte* sig, word32 sigSz);
@@ -436,7 +439,7 @@ int wc_SlhDsaKey_VerifyMsg(SlhDsaKey* key, const byte* mprime,
     \return 0 on success.
     \return BAD_FUNC_ARG if key, msg, sig, or sigSz is NULL.
     \return BAD_LENGTH_E if msgSz does not equal the digest size for hashType
-    (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+    (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 Section 10.2.2).
     \return NOT_COMPILED_IN if hashType is not supported in this build.
     \return MISSING_KEY if the private key has not been set.
 
@@ -472,6 +475,7 @@ int wc_SlhDsaKey_VerifyMsg(SlhDsaKey* key, const byte* mprime,
     \sa wc_SlhDsaKey_SignHashWithRandom
     \sa wc_SlhDsaKey_SignHash
     \sa wc_SlhDsaKey_VerifyHash
+    \sa wc_SlhDsaKey_SignMsgDeterministic
 */
 int wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key,
     const byte* ctx, byte ctxSz, const byte* msg, word32 msgSz,
@@ -488,7 +492,7 @@ int wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key,
     \return 0 on success.
     \return BAD_FUNC_ARG if key, msg, sig, sigSz, or addRnd is NULL.
     \return BAD_LENGTH_E if msgSz does not equal the digest size for hashType
-    (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+    (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 Section 10.2.2).
     \return NOT_COMPILED_IN if hashType is not supported in this build.
 
     \param [in] key Pointer to a private SlhDsaKey.
@@ -505,6 +509,7 @@ int wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key,
 
     \sa wc_SlhDsaKey_SignHashDeterministic
     \sa wc_SlhDsaKey_VerifyHash
+    \sa wc_SlhDsaKey_SignMsgWithRandom
 */
 int wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key,
     const byte* ctx, byte ctxSz, const byte* msg, word32 msgSz,
@@ -521,7 +526,7 @@ int wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key,
     \return 0 on success.
     \return BAD_FUNC_ARG if key, msg, sig, sigSz, or rng is NULL.
     \return BAD_LENGTH_E if msgSz does not equal the digest size for hashType
-    (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+    (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 Section 10.2.2).
     \return NOT_COMPILED_IN if hashType is not supported in this build.
 
     \param [in] key Pointer to a private SlhDsaKey.
@@ -538,6 +543,7 @@ int wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key,
 
     \sa wc_SlhDsaKey_SignHashDeterministic
     \sa wc_SlhDsaKey_VerifyHash
+    \sa wc_SlhDsaKey_SignMsgDeterministic
 */
 int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx,
     byte ctxSz, const byte* msg, word32 msgSz, enum wc_HashType hashType,
@@ -555,7 +561,7 @@ int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx,
     \return BAD_FUNC_ARG if key, msg, or sig is NULL.
     \return BAD_LENGTH_E if sigSz does not match the parameter set, or if
     msgSz does not equal the digest size for hashType (32 for SHAKE128, 64
-    for SHAKE256 per FIPS 205 §10.2.2).
+    for SHAKE256 per FIPS 205 Section 10.2.2).
     \return NOT_COMPILED_IN if hashType is not supported in this build.
     \return MISSING_KEY if the public key has not been set.
     \return SIG_VERIFY_E if the signature is invalid.
@@ -590,6 +596,7 @@ int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx,
 
     \sa wc_SlhDsaKey_SignHashDeterministic
     \sa wc_SlhDsaKey_Verify
+    \sa wc_SlhDsaKey_VerifyMsg
 */
 int wc_SlhDsaKey_VerifyHash(SlhDsaKey* key, const byte* ctx,
     byte ctxSz, const byte* msg, word32 msgSz, enum wc_HashType hashType,

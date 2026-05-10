@@ -7661,7 +7661,7 @@ static const byte slhdsakey_oid_sha3_512[] = {
  * convention used by NIST ACVP signatureInterface=external / preHash test
  * vectors and other libraries (OpenSSL HASH-ML-DSA, leancrypto SLH-DSA,
  * mldsa-native pre_hash_internal). The expected digest length is fixed by
- * FIPS 205 §10.2.2 and equals wc_HashGetDigestSize(hashType) for the
+ * FIPS 205 Section 10.2.2 and equals wc_HashGetDigestSize(hashType) for the
  * fixed-output hashes; for SHAKE128/256 the standard fixes the XOF output to
  * 256/512 bits respectively.
  *
@@ -7676,7 +7676,7 @@ static const byte slhdsakey_oid_sha3_512[] = {
  * @return  BAD_LENGTH_E when msgSz does not equal the expected digest size.
  * @return  NOT_COMPILED_IN when hash algorithm not supported.
  */
-static int slhdsakey_prehash_msg(const byte* msg, word32 msgSz,
+static int slhdsakey_validate_prehash(const byte* msg, word32 msgSz,
     enum wc_HashType hashType, byte* ph, byte* phLen, const byte** oid,
     byte* oidLen)
 {
@@ -7730,7 +7730,7 @@ static int slhdsakey_prehash_msg(const byte* msg, word32 msgSz,
         case WC_HASH_TYPE_SHAKE128:
             *oid = slhdsakey_oid_shake128;
             *oidLen = (byte)sizeof(slhdsakey_oid_shake128);
-            /* FIPS 205 §10.2.2 fixes SHAKE128 PHM length at 256 bits. */
+            /* FIPS 205 Section 10.2.2 fixes SHAKE128 PHM length at 256 bits. */
             expectedLen = WC_SHA3_256_DIGEST_SIZE;
             break;
     #endif
@@ -7738,7 +7738,7 @@ static int slhdsakey_prehash_msg(const byte* msg, word32 msgSz,
         case WC_HASH_TYPE_SHAKE256:
             *oid = slhdsakey_oid_shake256;
             *oidLen = (byte)sizeof(slhdsakey_oid_shake256);
-            /* FIPS 205 §10.2.2 fixes SHAKE256 PHM length at 512 bits. */
+            /* FIPS 205 Section 10.2.2 fixes SHAKE256 PHM length at 512 bits. */
             expectedLen = WC_SHA3_512_DIGEST_SIZE;
             break;
     #endif
@@ -7844,7 +7844,7 @@ static int slhdsakey_prehash_msg(const byte* msg, word32 msgSz,
  *
  * The caller MUST pre-hash the application message with hashType before
  * calling and pass the digest as msg. msgSz must equal the digest size of
- * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+ * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 Section 10.2.2).
  *
  * @param [in]      key       SLH-DSA key.
  * @param [in]      ctx       Context of signing.
@@ -7893,7 +7893,7 @@ static int slhdsakey_signhash_external(SlhDsaKey* key, const byte* ctx,
     if (ret == 0) {
         /* Alg 23, Steps 8-23: Validate caller-supplied pre-hashed digest and
          * select OID for the chosen hash algorithm. */
-        ret = slhdsakey_prehash_msg(msg, msgSz, hashType, ph, &phLen, &oid,
+        ret = slhdsakey_validate_prehash(msg, msgSz, hashType, ph, &phLen, &oid,
             &oidLen);
     }
     if (ret == 0) {
@@ -7993,7 +7993,7 @@ static int slhdsakey_signhash_external(SlhDsaKey* key, const byte* ctx,
  * addrnd is the public key seed. The caller MUST pre-hash the application
  * message with hashType before calling and pass the digest as msg; msgSz must
  * equal the digest size of hashType (32 for SHAKE128, 64 for SHAKE256 per
- * FIPS 205 §10.2.2).
+ * FIPS 205 Section 10.2.2).
  *
  * @param [in]      key       SLH-DSA key.
  * @param [in]      ctx       Context of signing.
@@ -8040,7 +8040,7 @@ int wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key, const byte* ctx,
  *
  * The caller MUST pre-hash the application message with hashType before
  * calling and pass the digest as msg; msgSz must equal the digest size of
- * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+ * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 Section 10.2.2).
  *
  * @param [in]      key       SLH-DSA key.
  * @param [in]      ctx       Context of signing.
@@ -8076,7 +8076,7 @@ int wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key, const byte* ctx, byte ctxSz,
  *
  * The caller MUST pre-hash the application message with hashType before
  * calling and pass the digest as msg; msgSz must equal the digest size of
- * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+ * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 Section 10.2.2).
  *
  * @param [in]      key     SLH-DSA key.
  * @param [in]      ctx     Context of signing.
@@ -8180,7 +8180,7 @@ int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx, byte ctxSz,
  *
  * The caller MUST pre-hash the application message with hashType before
  * calling and pass the digest as msg; msgSz must equal the digest size of
- * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+ * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 Section 10.2.2).
  *
  * @param [in] key       SLH-DSA key.
  * @param [in] ctx       Context of signing.
@@ -8227,7 +8227,7 @@ int wc_SlhDsaKey_VerifyHash(SlhDsaKey* key, const byte* ctx, byte ctxSz,
     if (ret == 0) {
         /* Alg 24, Steps 4-19: Validate caller-supplied pre-hashed digest and
          * select OID for the chosen hash algorithm. */
-        ret = slhdsakey_prehash_msg(msg, msgSz, hashType, ph, &phLen, &oid,
+        ret = slhdsakey_validate_prehash(msg, msgSz, hashType, ph, &phLen, &oid,
             &oidLen);
     }
     if (ret == 0) {

@@ -12,9 +12,10 @@
   `wc_HashGetDigestSize(hashType)` (32 bytes for SHAKE128, 64 bytes for
   SHAKE256 per FIPS 205 §10.2.2); otherwise `BAD_LENGTH_E` is returned.
   Migration: hash the message yourself before the call. The pre-existing
-  `wc_SlhDsaKey_SignMsgDeterministic`, `wc_SlhDsaKey_SignMsgWithRandom`, and
-  `wc_SlhDsaKey_VerifyMsg` (FIPS 205 internal interface, M' supplied directly)
-  are unaffected and gain stricter input validation and doxygen coverage.
+  `wc_SlhDsaKey_SignMsgDeterministic` and `wc_SlhDsaKey_SignMsgWithRandom`
+  (FIPS 205 internal interface, M' supplied directly) are unaffected and
+  gain stricter input validation matching the `*Hash*` family.
+  `wc_SlhDsaKey_VerifyMsg` is unchanged. All three gain doxygen coverage.
 
 * TLS 1.3: zero traffic key staging buffers in `SetKeysSide()` once a
   CryptoCB callback has imported the AES key into a Secure Element

@@ -1081,6 +1081,13 @@ int test_wc_slhdsa_sign_hash(void)
         WC_HASH_TYPE_SHA256, sig, sigLen),
         WC_NO_ERR_TRACE(BAD_LENGTH_E));
 
+    /* Unsupported hashType (FIPS 205 doesn't list WC_HASH_TYPE_NONE) hits
+     * the default branch of slhdsakey_validate_prehash. */
+    sigLen = WC_SLHDSA_MAX_SIG_LEN;
+    ExpectIntEQ(wc_SlhDsaKey_SignHash(&key, ctx, sizeof(ctx), hash, 32,
+        WC_HASH_TYPE_NONE, sig, &sigLen, &rng),
+        WC_NO_ERR_TRACE(NOT_COMPILED_IN));
+
     /* Test SignHash with SHA-256. */
     sigLen = WC_SLHDSA_MAX_SIG_LEN;
     ExpectIntEQ(wc_SlhDsaKey_SignHash(&key, ctx, sizeof(ctx), hash, 32,
@@ -1145,7 +1152,7 @@ int test_wc_slhdsa_sign_hash(void)
 #endif
 
 #ifdef WOLFSSL_SHAKE256
-    /* SHAKE256 PHM is fixed at 512 bits per FIPS 205 §10.2.2. */
+    /* SHAKE256 PHM is fixed at 512 bits per FIPS 205 Section 10.2.2. */
     sigLen = WC_SLHDSA_MAX_SIG_LEN;
     ExpectIntEQ(wc_SlhDsaKey_SignHash(&key, ctx, sizeof(ctx), hash, 64,
         WC_HASH_TYPE_SHAKE256, sig, &sigLen, &rng), 0);
@@ -1206,6 +1213,11 @@ int test_wc_slhdsa_sign_msg(void)
     ExpectIntEQ(wc_SlhDsaKey_SignMsgDeterministic(&key, mprime, sizeof(mprime),
         sig, NULL), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
 
+    /* SignMsgDeterministic must reject sigSz smaller than params->sigLen. */
+    sigLen = 1;
+    ExpectIntEQ(wc_SlhDsaKey_SignMsgDeterministic(&key, mprime,
+        sizeof(mprime), sig, &sigLen), WC_NO_ERR_TRACE(BAD_LENGTH_E));
+
     /* Round-trip: Deterministic. */
     sigLen = WC_SLHDSA_MAX_SIG_LEN;
     ExpectIntEQ(wc_SlhDsaKey_SignMsgDeterministic(&key, mprime,
@@ -1220,7 +1232,14 @@ int test_wc_slhdsa_sign_msg(void)
     ExpectIntEQ(wc_SlhDsaKey_SignMsgWithRandom(&key, mprime, sizeof(mprime),
         sig, &sigLen, NULL), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
 
-    /* Round-trip: WithRandom. */
+    /* SignMsgWithRandom must reject sigSz smaller than params->sigLen. */
+    sigLen = 1;
+    ExpectIntEQ(wc_SlhDsaKey_SignMsgWithRandom(&key, mprime, sizeof(mprime),
+        sig, &sigLen, addRnd), WC_NO_ERR_TRACE(BAD_LENGTH_E));
+
+    /* Round-trip: WithRandom. Reset sigLen explicitly so the test doesn't
+     * silently rely on the previous call having set it to params->sigLen. */
+    sigLen = WC_SLHDSA_MAX_SIG_LEN;
     ExpectIntEQ(wc_SlhDsaKey_SignMsgWithRandom(&key, mprime, sizeof(mprime),
         sig, &sigLen, addRnd), 0);
     ExpectIntEQ(wc_SlhDsaKey_VerifyMsg(&key, mprime, sizeof(mprime), sig,
