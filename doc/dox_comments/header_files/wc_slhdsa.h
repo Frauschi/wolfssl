@@ -302,15 +302,19 @@ int wc_SlhDsaKey_Verify(SlhDsaKey* key, const byte* ctx,
 
     \brief Signs using the SLH-DSA internal interface with deterministic
     randomness. Unlike the external interface, M' is provided directly by
-    the caller — no 0x00||len(ctx)||ctx||M wrapping is performed. This
-    corresponds to FIPS 205 Algorithm 19 (slh_sign_internal) with opt_rand
-    set to PK.seed.
+    the caller — no wrapping is performed. This corresponds to FIPS 205
+    Algorithm 19 (slh_sign_internal) with opt_rand set to PK.seed.
 
-    Use this when the CAVP test framework or protocol layer has already
-    constructed M'.
+    Use this when the ACVP signatureInterface=internal test framework or a
+    protocol layer has already constructed M'. For HashSLH-DSA the caller
+    builds M' as 0x01 || ctxSz || ctx || OID(hashType) || PHM and passes it
+    in here, where PHM is the hash of the application message under hashType.
 
     \return 0 on success.
     \return BAD_FUNC_ARG if key, mprime, sig, or sigSz is NULL.
+    \return BAD_LENGTH_E if sigSz is less than the parameter set's signature
+    length.
+    \return MISSING_KEY if the private key has not been set.
 
     \param [in] key Pointer to a private SlhDsaKey.
     \param [in] mprime Pointer to the pre-constructed M' message.
@@ -344,10 +348,14 @@ int wc_SlhDsaKey_SignMsgDeterministic(SlhDsaKey* key,
     \brief Signs using the SLH-DSA internal interface with caller-provided
     additional randomness. M' is provided directly — no wrapping is performed.
     This corresponds to FIPS 205 Algorithm 19 (slh_sign_internal) with an
-    explicit opt_rand value.
+    explicit opt_rand value. See wc_SlhDsaKey_SignMsgDeterministic for the M'
+    layout used by HashSLH-DSA.
 
     \return 0 on success.
     \return BAD_FUNC_ARG if key, mprime, sig, sigSz, or addRnd is NULL.
+    \return BAD_LENGTH_E if sigSz is less than the parameter set's signature
+    length.
+    \return MISSING_KEY if the private key has not been set.
 
     \param [in] key Pointer to a private SlhDsaKey.
     \param [in] mprime Pointer to the pre-constructed M' message.
@@ -419,22 +427,28 @@ int wc_SlhDsaKey_VerifyMsg(SlhDsaKey* key, const byte* mprime,
 /*!
     \ingroup SLH_DSA
 
-    \brief Signs a pre-hashed message using the SLH-DSA external (HashSLH-DSA)
-    interface with deterministic randomness. The message is hashed with the
-    specified hash algorithm, then signed per FIPS 205 Algorithm 22 with the
-    pre-hash domain separator (0x01).
+    \brief Signs a caller-pre-hashed message digest using the SLH-DSA external
+    (HashSLH-DSA) interface with deterministic randomness, per FIPS 205
+    Algorithm 23 with the pre-hash domain separator (0x01). The caller must
+    hash the application message with hashType first and pass the digest as
+    msg; this function does NOT hash msg.
 
     \return 0 on success.
-    \return BAD_FUNC_ARG if key, msg, sig, or sigSz is NULL, or hashType
-    is unsupported.
+    \return BAD_FUNC_ARG if key, msg, sig, or sigSz is NULL.
+    \return BAD_LENGTH_E if msgSz does not equal the digest size for hashType
+    (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+    \return NOT_COMPILED_IN if hashType is not supported in this build.
+    \return MISSING_KEY if the private key has not been set.
 
     \param [in] key Pointer to a private SlhDsaKey.
     \param [in] ctx Context string. May be NULL if ctxSz is 0.
     \param [in] ctxSz Length of the context string (0-255).
-    \param [in] msg Pointer to the message to hash and sign.
-    \param [in] msgSz Length of the message.
-    \param [in] hashType Hash algorithm to use for pre-hashing. Supported:
-    WC_HASH_TYPE_SHA256, WC_HASH_TYPE_SHA384, WC_HASH_TYPE_SHA512,
+    \param [in] msg Pointer to the pre-hashed message digest. msgSz must equal
+    the digest size for hashType.
+    \param [in] msgSz Length of the digest in bytes.
+    \param [in] hashType Hash algorithm used for pre-hashing (selects OID).
+    Supported: WC_HASH_TYPE_SHA224, WC_HASH_TYPE_SHA256, WC_HASH_TYPE_SHA384,
+    WC_HASH_TYPE_SHA512, WC_HASH_TYPE_SHA512_224, WC_HASH_TYPE_SHA512_256,
     WC_HASH_TYPE_SHAKE128, WC_HASH_TYPE_SHAKE256, WC_HASH_TYPE_SHA3_224,
     WC_HASH_TYPE_SHA3_256, WC_HASH_TYPE_SHA3_384, WC_HASH_TYPE_SHA3_512.
     \param [out] sig Buffer to receive the signature.
@@ -447,10 +461,12 @@ int wc_SlhDsaKey_VerifyMsg(SlhDsaKey* key, const byte* mprime,
     byte sig[WC_SLHDSA_MAX_SIG_LEN];
     word32 sigSz = sizeof(sig);
     byte msg[] = "Hello World!";
+    byte digest[WC_SHA256_DIGEST_SIZE];
     int ret;
 
+    wc_Sha256Hash(msg, sizeof(msg), digest);
     ret = wc_SlhDsaKey_SignHashDeterministic(&key, NULL, 0,
-        msg, sizeof(msg), WC_HASH_TYPE_SHA256, sig, &sigSz);
+        digest, sizeof(digest), WC_HASH_TYPE_SHA256, sig, &sigSz);
     \endcode
 
     \sa wc_SlhDsaKey_SignHashWithRandom
@@ -464,18 +480,24 @@ int wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key,
 /*!
     \ingroup SLH_DSA
 
-    \brief Signs a pre-hashed message using the SLH-DSA external (HashSLH-DSA)
-    interface with caller-provided additional randomness.
+    \brief Signs a caller-pre-hashed message digest using the SLH-DSA external
+    (HashSLH-DSA) interface with caller-provided additional randomness. The
+    caller must hash the application message with hashType first and pass the
+    digest as msg; this function does NOT hash msg.
 
     \return 0 on success.
     \return BAD_FUNC_ARG if key, msg, sig, sigSz, or addRnd is NULL.
+    \return BAD_LENGTH_E if msgSz does not equal the digest size for hashType
+    (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+    \return NOT_COMPILED_IN if hashType is not supported in this build.
 
     \param [in] key Pointer to a private SlhDsaKey.
     \param [in] ctx Context string. May be NULL if ctxSz is 0.
     \param [in] ctxSz Length of the context string (0-255).
-    \param [in] msg Pointer to the message to hash and sign.
-    \param [in] msgSz Length of the message.
-    \param [in] hashType Hash algorithm to use for pre-hashing.
+    \param [in] msg Pointer to the pre-hashed message digest. msgSz must equal
+    the digest size for hashType.
+    \param [in] msgSz Length of the digest in bytes.
+    \param [in] hashType Hash algorithm used for pre-hashing (selects OID).
     \param [out] sig Buffer to receive the signature.
     \param [in,out] sigSz On input, size of sig buffer. On output, actual
     signature length.
@@ -491,18 +513,24 @@ int wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key,
 /*!
     \ingroup SLH_DSA
 
-    \brief Signs a pre-hashed message using the SLH-DSA external (HashSLH-DSA)
-    interface with RNG-provided randomness.
+    \brief Signs a caller-pre-hashed message digest using the SLH-DSA external
+    (HashSLH-DSA) interface with RNG-provided randomness. The caller must
+    hash the application message with hashType first and pass the digest as
+    msg; this function does NOT hash msg.
 
     \return 0 on success.
     \return BAD_FUNC_ARG if key, msg, sig, sigSz, or rng is NULL.
+    \return BAD_LENGTH_E if msgSz does not equal the digest size for hashType
+    (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+    \return NOT_COMPILED_IN if hashType is not supported in this build.
 
     \param [in] key Pointer to a private SlhDsaKey.
     \param [in] ctx Context string. May be NULL if ctxSz is 0.
     \param [in] ctxSz Length of the context string (0-255).
-    \param [in] msg Pointer to the message to hash and sign.
-    \param [in] msgSz Length of the message.
-    \param [in] hashType Hash algorithm to use for pre-hashing.
+    \param [in] msg Pointer to the pre-hashed message digest. msgSz must equal
+    the digest size for hashType.
+    \param [in] msgSz Length of the digest in bytes.
+    \param [in] hashType Hash algorithm used for pre-hashing (selects OID).
     \param [out] sig Buffer to receive the signature.
     \param [in,out] sigSz On input, size of sig buffer. On output, actual
     signature length.
@@ -518,21 +546,28 @@ int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx,
 /*!
     \ingroup SLH_DSA
 
-    \brief Verifies an SLH-DSA signature over a pre-hashed message
-    (HashSLH-DSA). The message is hashed with the specified hash algorithm
-    before verification.
+    \brief Verifies an SLH-DSA signature using the external HashSLH-DSA
+    interface (FIPS 205 Algorithm 24). The caller must hash the application
+    message with hashType first and pass the digest as msg; this function
+    does NOT hash msg.
 
     \return 0 on success (signature valid).
     \return BAD_FUNC_ARG if key, msg, or sig is NULL.
+    \return BAD_LENGTH_E if sigSz does not match the parameter set, or if
+    msgSz does not equal the digest size for hashType (32 for SHAKE128, 64
+    for SHAKE256 per FIPS 205 §10.2.2).
+    \return NOT_COMPILED_IN if hashType is not supported in this build.
+    \return MISSING_KEY if the public key has not been set.
     \return SIG_VERIFY_E if the signature is invalid.
 
     \param [in] key Pointer to a public SlhDsaKey.
     \param [in] ctx Context string. May be NULL if ctxSz is 0.
     \param [in] ctxSz Length of the context string (0-255).
-    \param [in] msg Pointer to the message to hash and verify.
-    \param [in] msgSz Length of the message.
-    \param [in] hashType Hash algorithm used for pre-hashing. Must match the
-    hash used during signing.
+    \param [in] msg Pointer to the pre-hashed message digest. msgSz must equal
+    the digest size for hashType.
+    \param [in] msgSz Length of the digest in bytes.
+    \param [in] hashType Hash algorithm used for pre-hashing (selects OID).
+    Must match the hash used during signing.
     \param [in] sig Pointer to the signature to verify.
     \param [in] sigSz Length of the signature.
 
@@ -542,10 +577,12 @@ int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx,
     byte sig[...];
     word32 sigSz;
     byte msg[] = "Hello World!";
+    byte digest[WC_SHA256_DIGEST_SIZE];
     int ret;
 
+    wc_Sha256Hash(msg, sizeof(msg), digest);
     ret = wc_SlhDsaKey_VerifyHash(&key, NULL, 0,
-        msg, sizeof(msg), WC_HASH_TYPE_SHA256, sig, sigSz);
+        digest, sizeof(digest), WC_HASH_TYPE_SHA256, sig, sigSz);
     if (ret == 0) {
         // signature is valid
     }

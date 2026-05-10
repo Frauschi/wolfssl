@@ -2,6 +2,20 @@
 
 ## Enhancements
 
+* **BREAKING (FIPS 205 SLH-DSA)**: `wc_SlhDsaKey_SignHash`,
+  `wc_SlhDsaKey_SignHashDeterministic`, `wc_SlhDsaKey_SignHashWithRandom`, and
+  `wc_SlhDsaKey_VerifyHash` now treat `msg`/`msgSz` as the **caller-pre-hashed
+  message digest**, matching `wc_dilithium_sign_ctx_hash` /
+  `wc_dilithium_verify_ctx_hash` and aligning with OpenSSL's HASH-ML-DSA,
+  mldsa-native, leancrypto SLH-DSA, and NIST ACVP `signatureInterface=external`
+  / `preHash=preHash` test vectors. `msgSz` must equal
+  `wc_HashGetDigestSize(hashType)` (32 bytes for SHAKE128, 64 bytes for
+  SHAKE256 per FIPS 205 §10.2.2); otherwise `BAD_LENGTH_E` is returned.
+  Migration: hash the message yourself before the call. The pre-existing
+  `wc_SlhDsaKey_SignMsgDeterministic`, `wc_SlhDsaKey_SignMsgWithRandom`, and
+  `wc_SlhDsaKey_VerifyMsg` (FIPS 205 internal interface, M' supplied directly)
+  are unaffected and gain stricter input validation and doxygen coverage.
+
 * TLS 1.3: zero traffic key staging buffers in `SetKeysSide()` once a
   CryptoCB callback has imported the AES key into a Secure Element
   (`aes->devCtx != NULL`).  Clears `keys->{client,server}_write_key`

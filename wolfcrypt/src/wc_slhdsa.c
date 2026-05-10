@@ -7266,9 +7266,11 @@ int wc_SlhDsaKey_Sign(SlhDsaKey* key, const byte* ctx, byte ctxSz,
     return ret;
 }
 
-/* Sign using internal interface -- M' provided directly (deterministic).
+/* Sign using the FIPS 205 internal interface (Algorithm 19) -- M' provided
+ * directly by the caller, deterministic variant (opt_rand = PK.seed).
  *
- * opt_rand = PK.seed for the deterministic variant.
+ * Used for HashSLH-DSA implementations that build M' externally and for ACVP
+ * signatureInterface=internal test vectors.
  *
  * @param [in]      key       SLH-DSA key.
  * @param [in]      mprime    M' message (already in internal format).
@@ -7276,16 +7278,29 @@ int wc_SlhDsaKey_Sign(SlhDsaKey* key, const byte* ctx, byte ctxSz,
  * @param [out]     sig       Buffer to hold signature.
  * @param [in, out] sigSz     On in, buffer length. On out, signature length.
  * @return  0 on success.
+ * @return  BAD_FUNC_ARG when key, key's parameters, mprime, sig or sigSz is
+ *          NULL.
+ * @return  BAD_LENGTH_E when sigSz is less than required signature length.
+ * @return  MISSING_KEY when private key not set.
+ * @return  MEMORY_E on dynamic memory allocation failure.
+ * @return  SHAKE-256 error return code on digest failure.
  */
 int wc_SlhDsaKey_SignMsgDeterministic(SlhDsaKey* key, const byte* mprime,
     word32 mprimeSz, byte* sig, word32* sigSz)
 {
-    int ret;
+    int ret = 0;
 
-    if ((key == NULL) || (key->params == NULL)) {
+    if ((key == NULL) || (key->params == NULL) || (mprime == NULL) ||
+            (sig == NULL) || (sigSz == NULL)) {
         ret = BAD_FUNC_ARG;
     }
-    else {
+    else if (*sigSz < key->params->sigLen) {
+        ret = BAD_LENGTH_E;
+    }
+    else if ((key->flags & WC_SLHDSA_FLAG_PRIVATE) == 0) {
+        ret = MISSING_KEY;
+    }
+    if (ret == 0) {
         ret = slhdsakey_sign_internal_msg(key, mprime, mprimeSz, sig, sigSz,
             key->sk + 2 * key->params->n);
     }
@@ -7293,7 +7308,11 @@ int wc_SlhDsaKey_SignMsgDeterministic(SlhDsaKey* key, const byte* mprime,
     return ret;
 }
 
-/* Sign using internal interface -- M' provided directly (with explicit random).
+/* Sign using the FIPS 205 internal interface (Algorithm 19) -- M' provided
+ * directly by the caller, with explicit randomness.
+ *
+ * Used for HashSLH-DSA implementations that build M' externally and for ACVP
+ * signatureInterface=internal test vectors.
  *
  * @param [in]      key       SLH-DSA key.
  * @param [in]      mprime    M' message (already in internal format).
@@ -7302,12 +7321,34 @@ int wc_SlhDsaKey_SignMsgDeterministic(SlhDsaKey* key, const byte* mprime,
  * @param [in, out] sigSz     On in, buffer length. On out, signature length.
  * @param [in]      addRnd    opt_rand value.
  * @return  0 on success.
+ * @return  BAD_FUNC_ARG when key, key's parameters, mprime, sig, sigSz or
+ *          addRnd is NULL.
+ * @return  BAD_LENGTH_E when sigSz is less than required signature length.
+ * @return  MISSING_KEY when private key not set.
+ * @return  MEMORY_E on dynamic memory allocation failure.
+ * @return  SHAKE-256 error return code on digest failure.
  */
 int wc_SlhDsaKey_SignMsgWithRandom(SlhDsaKey* key, const byte* mprime,
     word32 mprimeSz, byte* sig, word32* sigSz, const byte* addRnd)
 {
-    return slhdsakey_sign_internal_msg(key, mprime, mprimeSz, sig, sigSz,
-        addRnd);
+    int ret = 0;
+
+    if ((key == NULL) || (key->params == NULL) || (mprime == NULL) ||
+            (sig == NULL) || (sigSz == NULL) || (addRnd == NULL)) {
+        ret = BAD_FUNC_ARG;
+    }
+    else if (*sigSz < key->params->sigLen) {
+        ret = BAD_LENGTH_E;
+    }
+    else if ((key->flags & WC_SLHDSA_FLAG_PRIVATE) == 0) {
+        ret = MISSING_KEY;
+    }
+    if (ret == 0) {
+        ret = slhdsakey_sign_internal_msg(key, mprime, mprimeSz, sig, sigSz,
+            addRnd);
+    }
+
+    return ret;
 }
 
 #endif /* !WOLFSSL_SLHDSA_VERIFY_ONLY */
@@ -7613,70 +7654,75 @@ static const byte slhdsakey_oid_sha3_512[] = {
 #endif
 #endif
 
-/* Pre-hash the message with the hash specified.
+/* Validate and copy the caller-supplied pre-hashed message digest.
  *
- * @param [in]  msg       Message to hash.
- * @param [in]  msgSz     Length of message in bytes.
- * @param [in]  hashType  Hash algorithm.
- * @param [out] ph        Prehash buffer.
- * @param [out] phLen     Length of prehash data.
+ * The HashSLH-DSA family takes the digest as input rather than the full
+ * message. This mirrors the wc_dilithium_*_ctx_hash interface and matches the
+ * convention used by NIST ACVP signatureInterface=external / preHash test
+ * vectors and other libraries (OpenSSL HASH-ML-DSA, leancrypto SLH-DSA,
+ * mldsa-native pre_hash_internal). The expected digest length is fixed by
+ * FIPS 205 §10.2.2 and equals wc_HashGetDigestSize(hashType) for the
+ * fixed-output hashes; for SHAKE128/256 the standard fixes the XOF output to
+ * 256/512 bits respectively.
+ *
+ * @param [in]  msg       Caller-supplied pre-hashed message digest.
+ * @param [in]  msgSz     Length of the digest in bytes.
+ * @param [in]  hashType  Hash algorithm identifier (selects OID and length).
+ * @param [out] ph        Prehash buffer (filled by copy from msg).
+ * @param [out] phLen     Length of prehash data written.
  * @param [out] oid       OID data for hash algorithm.
  * @param [out] oidLen    Length of OID data for hash algorithm.
  * @return  0 on success.
+ * @return  BAD_LENGTH_E when msgSz does not equal the expected digest size.
  * @return  NOT_COMPILED_IN when hash algorithm not supported.
  */
 static int slhdsakey_prehash_msg(const byte* msg, word32 msgSz,
     enum wc_HashType hashType, byte* ph, byte* phLen, const byte** oid,
     byte* oidLen)
 {
-    int ret;
+    int ret = 0;
+    word32 expectedLen = 0;
 
     switch ((int)hashType) {
     #ifdef WOLFSSL_SHA224
         case WC_HASH_TYPE_SHA224:
             *oid = slhdsakey_oid_sha224;
             *oidLen = (byte)sizeof(slhdsakey_oid_sha224);
-            *phLen = WC_SHA224_DIGEST_SIZE;
-            ret = wc_Sha224Hash(msg, msgSz, ph);
+            expectedLen = WC_SHA224_DIGEST_SIZE;
             break;
     #endif
     #ifndef NO_SHA256
         case WC_HASH_TYPE_SHA256:
             *oid = slhdsakey_oid_sha256;
             *oidLen = (byte)sizeof(slhdsakey_oid_sha256);
-            *phLen = WC_SHA256_DIGEST_SIZE;
-            ret = wc_Sha256Hash(msg, msgSz, ph);
+            expectedLen = WC_SHA256_DIGEST_SIZE;
             break;
     #endif
     #ifdef WOLFSSL_SHA384
         case WC_HASH_TYPE_SHA384:
             *oid = slhdsakey_oid_sha384;
             *oidLen = (byte)sizeof(slhdsakey_oid_sha384);
-            *phLen = WC_SHA384_DIGEST_SIZE;
-            ret = wc_Sha384Hash(msg, msgSz, ph);
+            expectedLen = WC_SHA384_DIGEST_SIZE;
             break;
     #endif
 #ifdef WOLFSSL_SHA512
         case WC_HASH_TYPE_SHA512:
             *oid = slhdsakey_oid_sha512;
             *oidLen = (byte)sizeof(slhdsakey_oid_sha512);
-            *phLen = WC_SHA512_DIGEST_SIZE;
-            ret = wc_Sha512Hash(msg, msgSz, ph);
+            expectedLen = WC_SHA512_DIGEST_SIZE;
             break;
     #ifndef WOLFSSL_NOSHA512_224
         case WC_HASH_TYPE_SHA512_224:
             *oid = slhdsakey_oid_sha512_224;
             *oidLen = (byte)sizeof(slhdsakey_oid_sha512_224);
-            *phLen = WC_SHA512_224_DIGEST_SIZE;
-            ret = wc_Sha512_224Hash(msg, msgSz, ph);
+            expectedLen = WC_SHA512_224_DIGEST_SIZE;
             break;
     #endif
     #ifndef WOLFSSL_NOSHA512_256
         case WC_HASH_TYPE_SHA512_256:
             *oid = slhdsakey_oid_sha512_256;
             *oidLen = (byte)sizeof(slhdsakey_oid_sha512_256);
-            *phLen = WC_SHA512_256_DIGEST_SIZE;
-            ret = wc_Sha512_256Hash(msg, msgSz, ph);
+            expectedLen = WC_SHA512_256_DIGEST_SIZE;
             break;
     #endif
 #endif
@@ -7684,16 +7730,16 @@ static int slhdsakey_prehash_msg(const byte* msg, word32 msgSz,
         case WC_HASH_TYPE_SHAKE128:
             *oid = slhdsakey_oid_shake128;
             *oidLen = (byte)sizeof(slhdsakey_oid_shake128);
-            *phLen = WC_SHA3_256_DIGEST_SIZE;
-            ret = wc_Shake128Hash(msg, msgSz, ph, WC_SHA3_256_DIGEST_SIZE);
+            /* FIPS 205 §10.2.2 fixes SHAKE128 PHM length at 256 bits. */
+            expectedLen = WC_SHA3_256_DIGEST_SIZE;
             break;
     #endif
     #ifdef WOLFSSL_SHAKE256
         case WC_HASH_TYPE_SHAKE256:
             *oid = slhdsakey_oid_shake256;
             *oidLen = (byte)sizeof(slhdsakey_oid_shake256);
-            *phLen = WC_SHA3_512_DIGEST_SIZE;
-            ret = wc_Shake256Hash(msg, msgSz, ph, WC_SHA3_512_DIGEST_SIZE);
+            /* FIPS 205 §10.2.2 fixes SHAKE256 PHM length at 512 bits. */
+            expectedLen = WC_SHA3_512_DIGEST_SIZE;
             break;
     #endif
     #ifdef WOLFSSL_SHA3
@@ -7701,38 +7747,44 @@ static int slhdsakey_prehash_msg(const byte* msg, word32 msgSz,
         case WC_HASH_TYPE_SHA3_224:
             *oid = slhdsakey_oid_sha3_224;
             *oidLen = (byte)sizeof(slhdsakey_oid_sha3_224);
-            *phLen = WC_SHA3_224_DIGEST_SIZE;
-            ret = wc_Sha3_224Hash(msg, msgSz, ph);
+            expectedLen = WC_SHA3_224_DIGEST_SIZE;
             break;
     #endif
     #ifndef WOLFSSL_NOSHA3_256
         case WC_HASH_TYPE_SHA3_256:
             *oid = slhdsakey_oid_sha3_256;
             *oidLen = (byte)sizeof(slhdsakey_oid_sha3_256);
-            *phLen = WC_SHA3_256_DIGEST_SIZE;
-            ret = wc_Sha3_256Hash(msg, msgSz, ph);
+            expectedLen = WC_SHA3_256_DIGEST_SIZE;
             break;
     #endif
     #ifndef WOLFSSL_NOSHA3_384
         case WC_HASH_TYPE_SHA3_384:
             *oid = slhdsakey_oid_sha3_384;
             *oidLen = (byte)sizeof(slhdsakey_oid_sha3_384);
-            *phLen = WC_SHA3_384_DIGEST_SIZE;
-            ret = wc_Sha3_384Hash(msg, msgSz, ph);
+            expectedLen = WC_SHA3_384_DIGEST_SIZE;
             break;
     #endif
     #ifndef WOLFSSL_NOSHA3_512
         case WC_HASH_TYPE_SHA3_512:
             *oid = slhdsakey_oid_sha3_512;
             *oidLen = (byte)sizeof(slhdsakey_oid_sha3_512);
-            *phLen = WC_SHA3_512_DIGEST_SIZE;
-            ret = wc_Sha3_512Hash(msg, msgSz, ph);
+            expectedLen = WC_SHA3_512_DIGEST_SIZE;
             break;
     #endif
     #endif
         default:
             ret = NOT_COMPILED_IN;
             break;
+    }
+
+    if (ret == 0) {
+        if (msgSz != expectedLen) {
+            ret = BAD_LENGTH_E;
+        }
+        else {
+            XMEMCPY(ph, msg, msgSz);
+            *phLen = (byte)msgSz;
+        }
     }
 
     return ret;
@@ -7790,12 +7842,16 @@ static int slhdsakey_prehash_msg(const byte* msg, word32 msgSz,
  *
  * Note: ctx length is of type byte which means it can never be more than 255.
  *
+ * The caller MUST pre-hash the application message with hashType before
+ * calling and pass the digest as msg. msgSz must equal the digest size of
+ * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+ *
  * @param [in]      key       SLH-DSA key.
  * @param [in]      ctx       Context of signing.
  * @param [in]      ctxSz     Length of context in bytes.
- * @param [in]      msg       Message to sign.
- * @param [in]      msgSz     Length of message in bytes.
- * @param [in]      hashType  Hash algorithm to use in pre-hash.
+ * @param [in]      msg       Pre-hashed message digest to sign.
+ * @param [in]      msgSz     Length of digest in bytes.
+ * @param [in]      hashType  Hash algorithm used for pre-hash (selects OID).
  * @param [out]     sig       Buffer to hold signature.
  * @param [in, out] sigSz     On in, length of signature buffer.
  *                            On out, length of signature data.
@@ -7803,7 +7859,8 @@ static int slhdsakey_prehash_msg(const byte* msg, word32 msgSz,
  * @return  BAD_FUNC_ARG when key, key's parameters, msg, sig, sigSz or addRnd
  *          is NULL.
  * @return  BAD_FUNC_ARG when ctx is NULL but ctx length is greater than 0.
- * @return  BAD_LENGTH_E when sigSz is less than required signature length.
+ * @return  BAD_LENGTH_E when sigSz is less than required signature length, or
+ *          when msgSz does not equal the digest size for hashType.
  * @return  NOT_COMPILED in when hash algorithm is not supported.
  * @return  MEMORY_E on dynamic memory allocation failure.
  * @return  SHAKE-256 error return code on digest failure.
@@ -7834,8 +7891,8 @@ static int slhdsakey_signhash_external(SlhDsaKey* key, const byte* ctx,
         ret = BAD_FUNC_ARG;
     }
     if (ret == 0) {
-        /* Alg 23, Steps 8-23: Pre-hash message with hash algorithm specified.
-         */
+        /* Alg 23, Steps 8-23: Validate caller-supplied pre-hashed digest and
+         * select OID for the chosen hash algorithm. */
         ret = slhdsakey_prehash_msg(msg, msgSz, hashType, ph, &phLen, &oid,
             &oidLen);
     }
@@ -7931,23 +7988,27 @@ static int slhdsakey_signhash_external(SlhDsaKey* key, const byte* ctx,
     return ret;
 }
 
-/* Generate a deterministic pre-hash SLH-DSA signature.
+/* Generate a deterministic HashSLH-DSA signature.
  *
- * addrnd is the public key seed.
+ * addrnd is the public key seed. The caller MUST pre-hash the application
+ * message with hashType before calling and pass the digest as msg; msgSz must
+ * equal the digest size of hashType (32 for SHAKE128, 64 for SHAKE256 per
+ * FIPS 205 §10.2.2).
  *
  * @param [in]      key       SLH-DSA key.
  * @param [in]      ctx       Context of signing.
  * @param [in]      ctxSz     Length of context in bytes.
- * @param [in]      msg       Message to sign.
- * @param [in]      msgSz     Length of message in bytes.
- * @param [in]      hashType  Hash algorithm to use in pre-hash.
+ * @param [in]      msg       Pre-hashed message digest to sign.
+ * @param [in]      msgSz     Length of digest in bytes.
+ * @param [in]      hashType  Hash algorithm used for pre-hash (selects OID).
  * @param [out]     sig       Buffer to hold signature.
  * @param [in, out] sigSz     On in, length of signature buffer.
  *                            On out, length of signature data.
  * @return  0 on success.
  * @return  BAD_FUNC_ARG when key, key's parameters, msg, sig or sigSz is NULL.
  * @return  BAD_FUNC_ARG when ctx is NULL but ctx length is greater than 0.
- * @return  BAD_LENGTH_E when sigSz is less than required signature length.
+ * @return  BAD_LENGTH_E when sigSz is less than required signature length, or
+ *          when msgSz does not equal the digest size for hashType.
  * @return  MISSING_KEY when private key not set.
  * @return  MEMORY_E on dynamic memory allocation failure.
  * @return  SHAKE-256 error return code on digest failure.
@@ -7975,14 +8036,18 @@ int wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key, const byte* ctx,
     return ret;
 }
 
-/* Generate a pre-hash SLH-DSA signature.
+/* Generate a HashSLH-DSA signature with explicit randomness.
+ *
+ * The caller MUST pre-hash the application message with hashType before
+ * calling and pass the digest as msg; msgSz must equal the digest size of
+ * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
  *
  * @param [in]      key       SLH-DSA key.
  * @param [in]      ctx       Context of signing.
  * @param [in]      ctxSz     Length of context in bytes.
- * @param [in]      msg       Message to sign.
- * @param [in]      msgSz     Length of message in bytes.
- * @param [in]      hashType  Hash algorithm to use in pre-hash.
+ * @param [in]      msg       Pre-hashed message digest to sign.
+ * @param [in]      msgSz     Length of digest in bytes.
+ * @param [in]      hashType  Hash algorithm used for pre-hash (selects OID).
  * @param [out]     sig       Buffer to hold signature.
  * @param [in, out] sigSz     On in, length of signature buffer.
  *                            On out, length of signature data.
@@ -7991,7 +8056,8 @@ int wc_SlhDsaKey_SignHashDeterministic(SlhDsaKey* key, const byte* ctx,
  * @return  BAD_FUNC_ARG when key, key's parameters, msg, sig, sigSz or addrnd
  *          is NULL.
  * @return  BAD_FUNC_ARG when ctx is NULL but ctx length is greater than 0.
- * @return  BAD_LENGTH_E when sigSz is less than required signature length.
+ * @return  BAD_LENGTH_E when sigSz is less than required signature length, or
+ *          when msgSz does not equal the digest size for hashType.
  * @return  MISSING_KEY when private key not set.
  * @return  NOT_COMPILED in when hash algorithm is not supported.
  * @return  MEMORY_E on dynamic memory allocation failure.
@@ -8006,14 +8072,18 @@ int wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key, const byte* ctx, byte ctxSz,
         sig, sigSz, addRnd);
 }
 
-/* Generate a pre-hash SLH-DSA signature with a random number generator.
+/* Generate a HashSLH-DSA signature using an RNG for added randomness.
+ *
+ * The caller MUST pre-hash the application message with hashType before
+ * calling and pass the digest as msg; msgSz must equal the digest size of
+ * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
  *
  * @param [in]      key     SLH-DSA key.
  * @param [in]      ctx     Context of signing.
  * @param [in]      ctxSz   Length of context in bytes.
- * @param [in]      msg     Message to sign.
- * @param [in]      msgSz   Length of message in bytes.
- * @param [in]      hashType  Hash algorithm to use in pre-hash.
+ * @param [in]      msg     Pre-hashed message digest to sign.
+ * @param [in]      msgSz   Length of digest in bytes.
+ * @param [in]      hashType  Hash algorithm used for pre-hash (selects OID).
  * @param [out]     sig     Buffer to hold signature.
  * @param [in, out] sigSz   On in, length of signature buffer.
  *                          On out, length of signature data.
@@ -8022,6 +8092,8 @@ int wc_SlhDsaKey_SignHashWithRandom(SlhDsaKey* key, const byte* ctx, byte ctxSz,
  * @return  BAD_FUNC_ARG when key, key's parameters, msg, sig, sigSz or rng is
  *          NULL.
  * @return  BAD_FUNC_ARG when ctx is NULL but ctx length is greater than 0.
+ * @return  BAD_LENGTH_E when msgSz does not equal the digest size for
+ *          hashType.
  * @return  MISSING_KEY when private key not set.
  * @return  NOT_COMPILED in when hash algorithm is not supported.
  * @return  MEMORY_E on dynamic memory allocation failure.
@@ -8106,18 +8178,23 @@ int wc_SlhDsaKey_SignHash(SlhDsaKey* key, const byte* ctx, byte ctxSz,
  *  20: M' <- toByte(1, 1) || toByte(|ctx|, 1) || ctx || OID || PHM
  *  21: return slh_verify_internal(M', SIG, PK)
  *
+ * The caller MUST pre-hash the application message with hashType before
+ * calling and pass the digest as msg; msgSz must equal the digest size of
+ * hashType (32 for SHAKE128, 64 for SHAKE256 per FIPS 205 §10.2.2).
+ *
  * @param [in] key       SLH-DSA key.
  * @param [in] ctx       Context of signing.
  * @param [in] ctxSz     Length of context in bytes.
- * @param [in] msg       Message to sign.
- * @param [in] msgSz     Length of message in bytes.
- * @param [in] hashType  Hash algorithm to use in pre-hash.
+ * @param [in] msg       Pre-hashed message digest to verify against.
+ * @param [in] msgSz     Length of digest in bytes.
+ * @param [in] hashType  Hash algorithm used for pre-hash (selects OID).
  * @param [in] sig       Signature data.
  * @param [in] sigSz     Length of signature in bytes.
  * @return  0 on success.
  * @return  BAD_FUNC_ARG when key, key's parameters, msg or sig is NULL.
  * @return  BAD_FUNC_ARG when ctx is NULL but ctx length is greater than 0.
- * @return  BAD_LENGTH_E when signature size does not match parameters.
+ * @return  BAD_LENGTH_E when signature size does not match parameters, or
+ *          when msgSz does not equal the digest size for hashType.
  * @return  MISSING_KEY when public key not set.
  * @return  NOT_COMPILED in when hash algorithm is not supported.
  * @return  MEMORY_E on dynamic memory allocation failure.
@@ -8148,8 +8225,8 @@ int wc_SlhDsaKey_VerifyHash(SlhDsaKey* key, const byte* ctx, byte ctxSz,
         ret = MISSING_KEY;
     }
     if (ret == 0) {
-        /* Alg 24, Steps 4-19: Pre-hash message with hash algorithm specified.
-         */
+        /* Alg 24, Steps 4-19: Validate caller-supplied pre-hashed digest and
+         * select OID for the chosen hash algorithm. */
         ret = slhdsakey_prehash_msg(msg, msgSz, hashType, ph, &phLen, &oid,
             &oidLen);
     }
