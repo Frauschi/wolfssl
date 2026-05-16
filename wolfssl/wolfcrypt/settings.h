@@ -529,6 +529,21 @@
 /* ---------------------------------------------------------------------------
  * Dual Algorithm Certificate Required Features.
  * ---------------------------------------------------------------------------
+ *
+ * X9.146 dual-algorithm certificates carry two public keys (primary +
+ * alternative / "sapki") and two signatures over the same TBS. This
+ * implementation assumes the primary and alternative keys use *different*
+ * signature algorithms - that is the normal hybrid use case (e.g. ECDSA +
+ * ML-DSA). On the receive path the alternative public key is decoded into
+ * the matching ssl->peer*Key slot during cert parsing; if the algorithm
+ * collides with the primary's slot the handshake is rejected with
+ * PEER_KEY_ERROR.
+ *
+ * The verify path is the only feature that hard-requires WOLFSSL_ASN_TEMPLATE
+ * (for the parser fields wc_GeneratePreTBS reads). WOLFSSL_CERT_GEN and
+ * WOLFSSL_CERT_EXT are force-enabled so issuers can generate dual-alg certs;
+ * verify-only embedded builds may omit them once the corresponding code
+ * paths are isolated.
  */
 #ifdef WOLFSSL_DUAL_ALG_CERTS
     #ifdef NO_RSA
@@ -539,23 +554,14 @@
         #error "Need ECDSA or else dual alg cert example will not work."
     #endif
 
+    #undef WOLFSSL_ASN_TEMPLATE
+    #define WOLFSSL_ASN_TEMPLATE
+
     #undef WOLFSSL_CERT_GEN
     #define WOLFSSL_CERT_GEN
 
-    #undef WOLFSSL_CUSTOM_OID
-    #define WOLFSSL_CUSTOM_OID
-
-    #undef HAVE_OID_ENCODING
-    #define HAVE_OID_ENCODING
-
     #undef WOLFSSL_CERT_EXT
     #define WOLFSSL_CERT_EXT
-
-    #undef OPENSSL_EXTRA
-    #define OPENSSL_EXTRA
-
-    #undef HAVE_OID_DECODING
-    #define HAVE_OID_DECODING
 #endif /* WOLFSSL_DUAL_ALG_CERTS */
 
 /* RFC 8737 id-pe-acmeIdentifier (TLS-ALPN-01) requires SHA-256. */

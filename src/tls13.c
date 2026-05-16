@@ -10729,121 +10729,6 @@ static void FreeDcv13Args(WOLFSSL* ssl, void* pArgs)
     (void)ssl;
 }
 
-#ifdef WOLFSSL_DUAL_ALG_CERTS
-#ifndef NO_RSA
-/* ssl->peerCert->sapkiDer is the alternative public key. Hopefully it is a
- * RSA public key. Convert it into a usable public key. */
-static int decodeRsaKey(WOLFSSL* ssl)
-{
-    int keyRet;
-    word32 tmpIdx = 0;
-
-    if (ssl->peerRsaKeyPresent)
-        return INVALID_PARAMETER;
-
-    keyRet = AllocKey(ssl, DYNAMIC_TYPE_RSA, (void**)&ssl->peerRsaKey);
-    if (keyRet != 0)
-        return PEER_KEY_ERROR;
-
-    ssl->peerRsaKeyPresent = 1;
-    keyRet = wc_RsaPublicKeyDecode(ssl->peerCert.sapkiDer, &tmpIdx,
-                                   ssl->peerRsaKey,
-                                   ssl->peerCert.sapkiLen);
-    if (keyRet != 0)
-        return PEER_KEY_ERROR;
-
-    return 0;
-}
-#endif /* !NO_RSA */
-
-#ifdef HAVE_ECC
-/* ssl->peerCert->sapkiDer is the alternative public key. Hopefully it is a
- * ECC public key. Convert it into a usable public key. */
-static int decodeEccKey(WOLFSSL* ssl)
-{
-    int keyRet;
-    word32 tmpIdx = 0;
-
-    if (ssl->peerEccDsaKeyPresent)
-        return INVALID_PARAMETER;
-
-    keyRet = AllocKey(ssl, DYNAMIC_TYPE_ECC, (void**)&ssl->peerEccDsaKey);
-    if (keyRet != 0)
-        return PEER_KEY_ERROR;
-
-    ssl->peerEccDsaKeyPresent = 1;
-    keyRet = wc_EccPublicKeyDecode(ssl->peerCert.sapkiDer, &tmpIdx,
-                                   ssl->peerEccDsaKey,
-                                   ssl->peerCert.sapkiLen);
-    if (keyRet != 0)
-        return PEER_KEY_ERROR;
-
-    return 0;
-}
-#endif /* HAVE_ECC */
-
-#ifdef HAVE_DILITHIUM
-/* ssl->peerCert->sapkiDer is the alternative public key. Hopefully it is a
- * dilithium public key. Convert it into a usable public key. */
-static int decodeDilithiumKey(WOLFSSL* ssl, int level)
-{
-    int keyRet;
-    word32 tmpIdx = 0;
-
-    if (ssl->peerDilithiumKeyPresent)
-        return INVALID_PARAMETER;
-
-    keyRet = AllocKey(ssl, DYNAMIC_TYPE_DILITHIUM,
-                      (void**)&ssl->peerDilithiumKey);
-    if (keyRet != 0)
-        return PEER_KEY_ERROR;
-
-    ssl->peerDilithiumKeyPresent = 1;
-    keyRet = wc_dilithium_set_level(ssl->peerDilithiumKey, level);
-    if (keyRet != 0)
-        return PEER_KEY_ERROR;
-
-    keyRet = wc_Dilithium_PublicKeyDecode(ssl->peerCert.sapkiDer, &tmpIdx,
-                                          ssl->peerDilithiumKey,
-                                          ssl->peerCert.sapkiLen);
-    if (keyRet != 0)
-        return PEER_KEY_ERROR;
-
-    return 0;
-}
-#endif /* HAVE_DILITHIUM */
-
-#ifdef HAVE_FALCON
-/* ssl->peerCert->sapkiDer is the alternative public key. Hopefully it is a
- * falcon public key. Convert it into a usable public key. */
-static int decodeFalconKey(WOLFSSL* ssl, int level)
-{
-    int keyRet;
-    word32 tmpIdx = 0;
-
-    if (ssl->peerFalconKeyPresent)
-        return INVALID_PARAMETER;
-
-    keyRet = AllocKey(ssl, DYNAMIC_TYPE_FALCON, (void**)&ssl->peerFalconKey);
-    if (keyRet != 0)
-        return PEER_KEY_ERROR;
-
-    ssl->peerFalconKeyPresent = 1;
-    keyRet = wc_falcon_set_level(ssl->peerFalconKey, level);
-    if (keyRet != 0)
-        return PEER_KEY_ERROR;
-
-    keyRet = wc_Falcon_PublicKeyDecode(ssl->peerCert.sapkiDer, &tmpIdx,
-                                       ssl->peerFalconKey,
-                                       ssl->peerCert.sapkiLen);
-    if (keyRet != 0)
-        return PEER_KEY_ERROR;
-
-    return 0;
-}
-#endif /* HAVE_FALCON */
-#endif /* WOLFSSL_DUAL_ALG_CERTS */
-
 /* handle processing TLS v1.3 certificate_verify (15) */
 /* Parse and handle a TLS v1.3 CertificateVerify message.
  *
@@ -11000,52 +10885,24 @@ static int DoTls13CertificateVerify(WOLFSSL* ssl, byte* input,
             if ((ssl->sigSpec != NULL) &&
                 (*ssl->sigSpec != WOLFSSL_CKS_SIGSPEC_NATIVE)) {
 
+                /* The alternative public key was decoded into the matching
+                 * peer*Key slot during cert parsing (see ProcessPeerCerts);
+                 * here we just need to know which signature algorithm it
+                 * targets. */
                 word16 sa;
                 if (args->altSigAlgo == 0)
                     sa = ssl->options.peerSigAlgo;
                 else
                     sa = args->altSigAlgo;
 
-                switch(sa) {
-            #ifndef NO_RSA
-                case rsa_pss_sa_algo:
-                    ret = decodeRsaKey(ssl);
-                    break;
-            #endif
-            #ifdef HAVE_ECC
-                case ecc_dsa_sa_algo:
-                    ret = decodeEccKey(ssl);
-                    break;
-            #endif
-            #ifdef HAVE_DILITHIUM
-                case dilithium_level2_sa_algo:
-                    ret = decodeDilithiumKey(ssl, WC_ML_DSA_44);
-                    break;
-                case dilithium_level3_sa_algo:
-                    ret = decodeDilithiumKey(ssl, WC_ML_DSA_65);
-                    break;
-                case dilithium_level5_sa_algo:
-                    ret = decodeDilithiumKey(ssl, WC_ML_DSA_87);
-                    break;
-            #endif
-            #ifdef HAVE_FALCON
-                case falcon_level1_sa_algo:
-                    ret = decodeFalconKey(ssl, 1);
-                    break;
-                case falcon_level5_sa_algo:
-                    ret = decodeFalconKey(ssl, 5);
-                    break;
-            #endif
-                default:
-                    ERROR_OUT(PEER_KEY_ERROR, exit_dcv);
-                }
-
-                if (ret != 0)
-                    ERROR_OUT(ret, exit_dcv);
-
                 if (*ssl->sigSpec == WOLFSSL_CKS_SIGSPEC_ALTERNATIVE) {
-                    /* Now swap in the alternative by removing the native.
-                     * sa contains the alternative signature type. */
+                    /* Both peer*Key slots were populated during cert parsing
+                     * (primary from publicKey, alt from sapki). Free the slot
+                     * that does NOT match `sa` so the rest of the verify path
+                     * uses only the alternative key. The else-chain enumerates
+                     * the algorithms supported by the alt-key dispatch in
+                     * DecodePeerAltPubKey; if a future patch adds an
+                     * algorithm there, mirror it here. */
                 #ifndef NO_RSA
                     if (ssl->peerRsaKeyPresent && sa != rsa_pss_sa_algo) {
                         FreeKey(ssl, DYNAMIC_TYPE_RSA,

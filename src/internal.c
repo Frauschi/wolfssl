@@ -15935,6 +15935,255 @@ static int AdjustCMForParams(WOLFSSL* ssl)
 }
 #endif
 
+#ifdef WOLFSSL_DUAL_ALG_CERTS
+/* Decode the alternative public key (X9.146 sapki) carried in the peer's
+ * certificate into the matching ssl->peer*Key slot, mirroring the primary
+ * public key dispatch in ProcessPeerCerts. Called once per peer cert,
+ * after the primary key has been decoded.
+ *
+ * X9.146 dual-algorithm certificates assume primary alg != alt alg; if
+ * the alt key collides with the primary's slot we treat it as fatal.
+ * Unsupported alt-key OIDs are logged and skipped so a TLS 1.3 handshake
+ * that ends up purely native (sigSpec == NATIVE) still interoperates with
+ * peers carrying alt keys we do not (yet) implement; the alt-sig path's
+ * own validity check (validSigAlgo / "swap in alternative") fails the
+ * handshake later if the missing alt key is actually needed.
+ *
+ * Returns 0 on success or when an unsupported OID is silently skipped.
+ * Returns PEER_KEY_ERROR / *_KEY_SIZE_E (and sets args->fatal) when a
+ * recognised alt key fails to decode, collides with the primary, or
+ * violates the configured minimum-size policy.
+ */
+static int DecodePeerAltPubKey(WOLFSSL* ssl, ProcPeerCertArgs* args)
+{
+    int    ret      = 0;
+    int    keyRet   = 0;
+    word32 idx      = 0;
+    DecodedCert* dCert = args->dCert;
+
+    if (!dCert->extSapkiSet || dCert->sapkiDer == NULL || dCert->sapkiLen == 0)
+        return 0;
+
+    switch (dCert->sapkiOID) {
+#ifndef NO_RSA
+    #ifdef WC_RSA_PSS
+    case RSAPSSk:
+    #endif
+    case RSAk:
+    {
+        if (ssl->peerRsaKeyPresent) {
+            WOLFSSL_MSG("Dual-alg cert: native and alt keys collide on RSA slot");
+            args->fatal = 1;
+            ret = PEER_KEY_ERROR;
+            WOLFSSL_ERROR_VERBOSE(ret);
+            break;
+        }
+        if (ssl->peerRsaKey == NULL) {
+            keyRet = AllocKey(ssl, DYNAMIC_TYPE_RSA,
+                              (void**)&ssl->peerRsaKey);
+        }
+        else {
+            keyRet = ReuseKey(ssl, DYNAMIC_TYPE_RSA, ssl->peerRsaKey);
+        }
+        if (keyRet == 0) {
+            keyRet = wc_RsaPublicKeyDecode(dCert->sapkiDer, &idx,
+                                           ssl->peerRsaKey, dCert->sapkiLen);
+        }
+        if (keyRet != 0) {
+            args->fatal = 1;
+            ret = PEER_KEY_ERROR;
+            WOLFSSL_ERROR_VERBOSE(ret);
+            break;
+        }
+        ssl->peerRsaKeyPresent = 1;
+        if (!ssl->options.verifyNone &&
+            wc_RsaEncryptSize(ssl->peerRsaKey) < ssl->options.minRsaKeySz) {
+            WOLFSSL_MSG("Peer alt RSA key is too small");
+            args->fatal = 1;
+            ret = RSA_KEY_SIZE_E;
+            WOLFSSL_ERROR_VERBOSE(ret);
+        }
+        break;
+    }
+#endif /* !NO_RSA */
+#ifdef HAVE_ECC
+    #if defined(WOLFSSL_SM2) && defined(WOLFSSL_SM3)
+    case SM2k:
+    #endif
+    case ECDSAk:
+    {
+        if (ssl->peerEccDsaKeyPresent) {
+            WOLFSSL_MSG("Dual-alg cert: native and alt keys collide on ECC slot");
+            args->fatal = 1;
+            ret = PEER_KEY_ERROR;
+            WOLFSSL_ERROR_VERBOSE(ret);
+            break;
+        }
+        if (ssl->peerEccDsaKey == NULL) {
+            keyRet = AllocKey(ssl, DYNAMIC_TYPE_ECC,
+                              (void**)&ssl->peerEccDsaKey);
+        }
+        else {
+            keyRet = ReuseKey(ssl, DYNAMIC_TYPE_ECC, ssl->peerEccDsaKey);
+        }
+        if (keyRet == 0) {
+            keyRet = wc_EccPublicKeyDecode(dCert->sapkiDer, &idx,
+                                           ssl->peerEccDsaKey,
+                                           dCert->sapkiLen);
+        }
+        if (keyRet != 0) {
+            args->fatal = 1;
+            ret = PEER_KEY_ERROR;
+            WOLFSSL_ERROR_VERBOSE(ret);
+            break;
+        }
+        ssl->peerEccDsaKeyPresent = 1;
+        if (!ssl->options.verifyNone &&
+            wc_ecc_size(ssl->peerEccDsaKey) < ssl->options.minEccKeySz) {
+            WOLFSSL_MSG("Peer alt ECC key is too small");
+            args->fatal = 1;
+            ret = ECC_KEY_SIZE_E;
+            WOLFSSL_ERROR_VERBOSE(ret);
+        }
+        break;
+    }
+#endif /* HAVE_ECC */
+#ifdef HAVE_FALCON
+    case FALCON_LEVEL1k:
+    case FALCON_LEVEL5k:
+    {
+        int falconLevel;
+        if (dCert->sapkiOID == FALCON_LEVEL1k)
+            falconLevel = 1;
+        else
+            falconLevel = 5;
+
+        if (ssl->peerFalconKeyPresent) {
+            WOLFSSL_MSG("Dual-alg cert: native and alt keys collide on Falcon slot");
+            args->fatal = 1;
+            ret = PEER_KEY_ERROR;
+            WOLFSSL_ERROR_VERBOSE(ret);
+            break;
+        }
+        if (ssl->peerFalconKey == NULL) {
+            keyRet = AllocKey(ssl, DYNAMIC_TYPE_FALCON,
+                              (void**)&ssl->peerFalconKey);
+        }
+        else {
+            keyRet = ReuseKey(ssl, DYNAMIC_TYPE_FALCON, ssl->peerFalconKey);
+        }
+        if (keyRet == 0) {
+            keyRet = wc_falcon_set_level(ssl->peerFalconKey, falconLevel);
+        }
+        if (keyRet == 0) {
+            keyRet = wc_Falcon_PublicKeyDecode(dCert->sapkiDer, &idx,
+                                               ssl->peerFalconKey,
+                                               dCert->sapkiLen);
+        }
+        if (keyRet != 0) {
+            args->fatal = 1;
+            ret = PEER_KEY_ERROR;
+            WOLFSSL_ERROR_VERBOSE(ret);
+            break;
+        }
+        ssl->peerFalconKeyPresent = 1;
+        if (!ssl->options.verifyNone &&
+            FALCON_MAX_KEY_SIZE < ssl->options.minFalconKeySz) {
+            WOLFSSL_MSG("Peer alt Falcon key is too small");
+            args->fatal = 1;
+            ret = FALCON_KEY_SIZE_E;
+            WOLFSSL_ERROR_VERBOSE(ret);
+        }
+        break;
+    }
+#endif /* HAVE_FALCON */
+#if defined(HAVE_DILITHIUM) && !defined(WOLFSSL_DILITHIUM_NO_VERIFY)
+    case ML_DSA_LEVEL2k:
+    case ML_DSA_LEVEL3k:
+    case ML_DSA_LEVEL5k:
+    #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
+    case DILITHIUM_LEVEL2k:
+    case DILITHIUM_LEVEL3k:
+    case DILITHIUM_LEVEL5k:
+    #endif
+    {
+        int dilithiumLevel;
+        switch (dCert->sapkiOID) {
+        case ML_DSA_LEVEL2k:
+            dilithiumLevel = WC_ML_DSA_44; break;
+        case ML_DSA_LEVEL3k:
+            dilithiumLevel = WC_ML_DSA_65; break;
+        case ML_DSA_LEVEL5k:
+            dilithiumLevel = WC_ML_DSA_87; break;
+        #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
+        case DILITHIUM_LEVEL2k:
+            dilithiumLevel = WC_ML_DSA_44_DRAFT; break;
+        case DILITHIUM_LEVEL3k:
+            dilithiumLevel = WC_ML_DSA_65_DRAFT; break;
+        case DILITHIUM_LEVEL5k:
+            dilithiumLevel = WC_ML_DSA_87_DRAFT; break;
+        #endif
+        default:
+            args->fatal = 1;
+            ret = PEER_KEY_ERROR;
+            WOLFSSL_ERROR_VERBOSE(ret);
+            return ret;
+        }
+
+        if (ssl->peerDilithiumKeyPresent) {
+            WOLFSSL_MSG("Dual-alg cert: native and alt keys collide on Dilithium slot");
+            args->fatal = 1;
+            ret = PEER_KEY_ERROR;
+            WOLFSSL_ERROR_VERBOSE(ret);
+            break;
+        }
+        if (ssl->peerDilithiumKey == NULL) {
+            keyRet = AllocKey(ssl, DYNAMIC_TYPE_DILITHIUM,
+                              (void**)&ssl->peerDilithiumKey);
+        }
+        else {
+            keyRet = ReuseKey(ssl, DYNAMIC_TYPE_DILITHIUM,
+                              ssl->peerDilithiumKey);
+        }
+        if (keyRet == 0) {
+            keyRet = wc_dilithium_set_level(ssl->peerDilithiumKey,
+                                            dilithiumLevel);
+        }
+        if (keyRet == 0) {
+            keyRet = wc_Dilithium_PublicKeyDecode(dCert->sapkiDer, &idx,
+                                                  ssl->peerDilithiumKey,
+                                                  dCert->sapkiLen);
+        }
+        if (keyRet != 0) {
+            args->fatal = 1;
+            ret = PEER_KEY_ERROR;
+            WOLFSSL_ERROR_VERBOSE(ret);
+            break;
+        }
+        ssl->peerDilithiumKeyPresent = 1;
+        if (!ssl->options.verifyNone &&
+            DILITHIUM_MAX_KEY_SIZE < ssl->options.minDilithiumKeySz) {
+            WOLFSSL_MSG("Peer alt Dilithium key is too small");
+            args->fatal = 1;
+            ret = DILITHIUM_KEY_SIZE_E;
+            WOLFSSL_ERROR_VERBOSE(ret);
+        }
+        break;
+    }
+#endif /* HAVE_DILITHIUM */
+    default:
+        /* Cert carries an alt-key whose algorithm we don't implement.
+         * Don't fail here - a purely-native handshake never consults the
+         * alt key, and a non-native handshake will fail later via the
+         * normal validSigAlgo / "swap in alternative" path. */
+        WOLFSSL_MSG("Peer alt public key OID not supported; ignoring");
+        break;
+    }
+
+    return ret;
+}
+#endif /* WOLFSSL_DUAL_ALG_CERTS */
+
 int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                      word32 totalSz)
 {
@@ -17640,6 +17889,12 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                     default:
                         break;
                 }
+
+            #ifdef WOLFSSL_DUAL_ALG_CERTS
+                if (ret == 0) {
+                    ret = DecodePeerAltPubKey(ssl, args);
+                }
+            #endif
 
                 /* args->dCert free'd in function cleanup after callback */
             } /* if (count > 0) */
