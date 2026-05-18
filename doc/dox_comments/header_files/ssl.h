@@ -4545,6 +4545,1834 @@ WOLFSSL_METHOD* wolfSSLv23_client_method(void);
 /*!
     \ingroup IO
 
+    \brief Allocates and initializes a new WOLFSSL_BIO using the supplied
+    BIO method. The returned BIO has a reference count of one and is in an
+    uninitialized state until first used or explicitly initialized. Mirrors
+    OpenSSL's BIO_new().
+
+    \return WOLFSSL_BIO* pointer to the newly created BIO on success.
+    \return NULL on memory allocation failure or when method is NULL.
+
+    \param method pointer to a WOLFSSL_BIO_METHOD describing the BIO type
+    (for example wolfSSL_BIO_s_mem(), wolfSSL_BIO_f_base64()).
+
+    _Example_
+    \code
+    WOLFSSL_BIO* bio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem());
+    if (bio == NULL) {
+        // handle error
+    }
+    \endcode
+
+    \sa wolfSSL_BIO_free
+    \sa wolfSSL_BIO_s_mem
+    \sa wolfSSL_BIO_new_mem_buf
+*/
+WOLFSSL_BIO* wolfSSL_BIO_new(WOLFSSL_BIO_METHOD* method);
+
+/*!
+    \ingroup IO
+
+    \brief Frees a single WOLFSSL_BIO object. The BIO is detached from any
+    chain it is part of (only this node is freed; see wolfSSL_BIO_free_all
+    to free a full chain). If the BIO owns its underlying resource (file
+    descriptor, FILE*, memory buffer) according to the close flag, that
+    resource is released as well.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if bio is NULL or an error occurred.
+
+    \param bio WOLFSSL_BIO to free.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* bio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem());
+    // use bio
+    wolfSSL_BIO_free(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_new
+    \sa wolfSSL_BIO_free_all
+    \sa wolfSSL_BIO_vfree
+*/
+int  wolfSSL_BIO_free(WOLFSSL_BIO* bio);
+
+/*!
+    \ingroup IO
+
+    \brief Frees a single WOLFSSL_BIO object without returning a status.
+    Equivalent to wolfSSL_BIO_free() but with a void return, matching
+    OpenSSL's BIO_vfree().
+
+    \return none No return value.
+
+    \param bio WOLFSSL_BIO to free.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* bio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem());
+    wolfSSL_BIO_vfree(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_free
+    \sa wolfSSL_BIO_free_all
+*/
+void wolfSSL_BIO_vfree(WOLFSSL_BIO* bio);
+
+/*!
+    \ingroup IO
+
+    \brief Frees a chain of WOLFSSL_BIO objects. Walks the BIO chain
+    starting at bio and frees each node in turn. Mirrors OpenSSL's
+    BIO_free_all().
+
+    \return none No return value.
+
+    \param bio head of the BIO chain to free.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* b64 = wolfSSL_BIO_new(wolfSSL_BIO_f_base64());
+    WOLFSSL_BIO* mem = wolfSSL_BIO_new(wolfSSL_BIO_s_mem());
+    b64 = wolfSSL_BIO_push(b64, mem);
+    // ... use chain ...
+    wolfSSL_BIO_free_all(b64);
+    \endcode
+
+    \sa wolfSSL_BIO_free
+    \sa wolfSSL_BIO_push
+*/
+void wolfSSL_BIO_free_all(WOLFSSL_BIO* bio);
+
+/*!
+    \ingroup IO
+
+    \brief Reads a line (terminated by '\n' or the end of input) from a
+    BIO into buf, NUL-terminating the result. At most sz-1 bytes are read.
+    Behaviour depends on the BIO method; not all BIO types implement gets.
+
+    \return >=0 number of bytes read into buf (excluding the terminating
+    NUL).
+    \return WOLFSSL_BIO_ERROR (-1) on error or when the method does not
+    support gets.
+
+    \param bio source WOLFSSL_BIO.
+    \param buf destination buffer.
+    \param sz size of buf in bytes.
+
+    _Example_
+    \code
+    char line[128];
+    int n = wolfSSL_BIO_gets(bio, line, sizeof(line));
+    \endcode
+
+    \sa wolfSSL_BIO_puts
+    \sa wolfSSL_BIO_read
+*/
+int wolfSSL_BIO_gets(WOLFSSL_BIO* bio, char* buf, int sz);
+
+/*!
+    \ingroup IO
+
+    \brief Writes a NUL-terminated string to a BIO. Equivalent to calling
+    wolfSSL_BIO_write() with len set to strlen(buf).
+
+    \return >=0 number of bytes written.
+    \return WOLFSSL_BIO_ERROR (-1) on error.
+
+    \param bio destination WOLFSSL_BIO.
+    \param buf NUL-terminated string to write.
+
+    _Example_
+    \code
+    wolfSSL_BIO_puts(bio, "hello\n");
+    \endcode
+
+    \sa wolfSSL_BIO_gets
+    \sa wolfSSL_BIO_write
+*/
+int wolfSSL_BIO_puts(WOLFSSL_BIO* bio, const char* buf);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the next BIO in the chain after bio. BIO chains are
+    typically built with wolfSSL_BIO_push().
+
+    \return WOLFSSL_BIO* pointer to the next BIO in the chain.
+    \return NULL if bio is NULL or if bio is the last in the chain.
+
+    \param bio current WOLFSSL_BIO.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* nxt = wolfSSL_BIO_next(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_push
+    \sa wolfSSL_BIO_pop
+*/
+WOLFSSL_BIO* wolfSSL_BIO_next(WOLFSSL_BIO* bio);
+
+/*!
+    \ingroup IO
+
+    \brief Walks the BIO chain starting at bio and returns the first BIO
+    whose method type matches the supplied type. Mirrors OpenSSL's
+    BIO_find_type().
+
+    \return WOLFSSL_BIO* pointer to the matching BIO.
+    \return NULL if no matching BIO is found.
+
+    \param bio head of the BIO chain to search.
+    \param type BIO type constant (for example WOLFSSL_BIO_SSL,
+    WOLFSSL_BIO_MEMORY).
+
+    _Example_
+    \code
+    WOLFSSL_BIO* ssl_bio = wolfSSL_BIO_find_type(chain, WOLFSSL_BIO_SSL);
+    \endcode
+
+    \sa wolfSSL_BIO_next
+    \sa wolfSSL_BIO_method_type
+*/
+WOLFSSL_BIO* wolfSSL_BIO_find_type(WOLFSSL_BIO* bio, int type);
+
+/*!
+    \ingroup IO
+
+    \brief Reads up to len bytes from a BIO into buf. The exact behaviour
+    depends on the BIO method (memory, socket, file, filter chain, ...).
+    Filter BIOs forward the call down the chain.
+
+    \return >0 number of bytes read.
+    \return 0 on EOF for some BIO types.
+    \return WOLFSSL_BIO_ERROR (-1) on error; callers should check
+    wolfSSL_BIO_should_retry() to determine whether the operation can be
+    retried later.
+
+    \param bio source WOLFSSL_BIO.
+    \param buf destination buffer.
+    \param len maximum number of bytes to read.
+
+    _Example_
+    \code
+    char buf[256];
+    int n = wolfSSL_BIO_read(bio, buf, sizeof(buf));
+    \endcode
+
+    \sa wolfSSL_BIO_write
+    \sa wolfSSL_BIO_should_retry
+*/
+int  wolfSSL_BIO_read(WOLFSSL_BIO* bio, void* buf, int len);
+
+/*!
+    \ingroup IO
+
+    \brief Writes up to len bytes from data to a BIO. The exact behaviour
+    depends on the BIO method. Filter BIOs forward the call down the
+    chain.
+
+    \return >0 number of bytes written.
+    \return 0 or WOLFSSL_BIO_ERROR (-1) on error; callers should check
+    wolfSSL_BIO_should_retry() to determine whether the operation can be
+    retried later.
+
+    \param bio destination WOLFSSL_BIO.
+    \param data buffer of bytes to write.
+    \param len number of bytes to write.
+
+    _Example_
+    \code
+    wolfSSL_BIO_write(bio, "hello", 5);
+    \endcode
+
+    \sa wolfSSL_BIO_read
+    \sa wolfSSL_BIO_should_retry
+*/
+int  wolfSSL_BIO_write(WOLFSSL_BIO* bio, const void* data, int len);
+
+/*!
+    \ingroup IO
+
+    \brief Pushes a BIO (or BIO chain) onto the end of another BIO. After
+    the call, top becomes the head of the chain and append is reachable
+    via wolfSSL_BIO_next(). Mirrors OpenSSL's BIO_push().
+
+    \return WOLFSSL_BIO* pointer to top (the new head of the chain).
+
+    \param top BIO that becomes the head of the new chain.
+    \param append BIO (or chain) to append after top.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* b64 = wolfSSL_BIO_new(wolfSSL_BIO_f_base64());
+    WOLFSSL_BIO* mem = wolfSSL_BIO_new(wolfSSL_BIO_s_mem());
+    b64 = wolfSSL_BIO_push(b64, mem);
+    \endcode
+
+    \sa wolfSSL_BIO_pop
+    \sa wolfSSL_BIO_next
+*/
+WOLFSSL_BIO* wolfSSL_BIO_push(WOLFSSL_BIO* top, WOLFSSL_BIO* append);
+
+/*!
+    \ingroup IO
+
+    \brief Removes bio from the chain it is part of and returns the BIO
+    that was next in the chain (or NULL if there is none). The removed
+    BIO is not freed.
+
+    \return WOLFSSL_BIO* pointer to the next BIO that was linked after
+    bio, or NULL if bio was the last (or only) element.
+
+    \param bio BIO to remove from its chain.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* next = wolfSSL_BIO_pop(chain);
+    \endcode
+
+    \sa wolfSSL_BIO_push
+    \sa wolfSSL_BIO_free
+*/
+WOLFSSL_BIO* wolfSSL_BIO_pop(WOLFSSL_BIO* bio);
+
+/*!
+    \ingroup IO
+
+    \brief Flushes any buffered data on a BIO. For filter BIOs this may
+    write out pending state (for example finalising a base64 stream).
+    Mirrors OpenSSL's BIO_flush().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio WOLFSSL_BIO to flush.
+
+    _Example_
+    \code
+    wolfSSL_BIO_flush(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_write
+*/
+int  wolfSSL_BIO_flush(WOLFSSL_BIO* bio);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the number of bytes immediately available to read from
+    a BIO without performing I/O on the underlying transport. For an SSL
+    BIO this returns the number of bytes in the SSL read buffer.
+
+    \return >=0 number of bytes pending on the BIO.
+    \return 0 if nothing is pending or bio is NULL.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    int pending = wolfSSL_BIO_pending(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_ctrl_pending
+    \sa wolfSSL_BIO_wpending
+*/
+int  wolfSSL_BIO_pending(WOLFSSL_BIO* bio);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the BIO information callback previously installed with
+    wolfSSL_BIO_set_callback(), or NULL if none has been set.
+
+    \return wolf_bio_info_cb the currently installed callback, or NULL.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    wolf_bio_info_cb cb = wolfSSL_BIO_get_callback(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_set_callback
+    \sa wolfSSL_BIO_get_callback_arg
+*/
+wolf_bio_info_cb wolfSSL_BIO_get_callback(WOLFSSL_BIO *bio);
+
+/*!
+    \ingroup IO
+
+    \brief Stores a caller-supplied pointer that will be passed to the
+    BIO information callback installed with wolfSSL_BIO_set_callback().
+    Mirrors OpenSSL's BIO_set_callback_arg().
+
+    \return none No return value.
+
+    \param bio WOLFSSL_BIO to update.
+    \param arg opaque pointer made available to the callback through
+    wolfSSL_BIO_get_callback_arg().
+
+    _Example_
+    \code
+    wolfSSL_BIO_set_callback_arg(bio, (char*)my_ctx);
+    \endcode
+
+    \sa wolfSSL_BIO_set_callback
+    \sa wolfSSL_BIO_get_callback_arg
+*/
+void  wolfSSL_BIO_set_callback_arg(WOLFSSL_BIO *bio, char *arg);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the callback argument pointer previously stored with
+    wolfSSL_BIO_set_callback_arg().
+
+    \return char* the stored callback argument, or NULL if none.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    char* arg = wolfSSL_BIO_get_callback_arg(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_set_callback_arg
+*/
+char* wolfSSL_BIO_get_callback_arg(const WOLFSSL_BIO *bio);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the singleton WOLFSSL_BIO_METHOD describing the
+    message-digest filter BIO. Data written to or read through this
+    filter is fed into an EVP_MD context, allowing transparent hashing
+    of streamed data.
+
+    \return WOLFSSL_BIO_METHOD* pointer to the static message-digest BIO
+    method.
+
+    \param none No parameters.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* md = wolfSSL_BIO_new(wolfSSL_BIO_f_md());
+    \endcode
+
+    \sa wolfSSL_BIO_new
+    \sa wolfSSL_BIO_get_md_ctx
+*/
+WOLFSSL_BIO_METHOD* wolfSSL_BIO_f_md(void);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the singleton WOLFSSL_BIO_METHOD describing the
+    buffering filter BIO. A buffer BIO accumulates data so that small
+    reads or writes on the downstream BIO are batched.
+
+    \return WOLFSSL_BIO_METHOD* pointer to the static buffer BIO method.
+
+    \param none No parameters.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* buf = wolfSSL_BIO_new(wolfSSL_BIO_f_buffer());
+    \endcode
+
+    \sa wolfSSL_BIO_new
+    \sa wolfSSL_BIO_set_write_buffer_size
+*/
+WOLFSSL_BIO_METHOD* wolfSSL_BIO_f_buffer(void);
+
+/*!
+    \ingroup IO
+
+    \brief Sets the size of the internal write buffer used by a buffer
+    filter BIO created from wolfSSL_BIO_f_buffer().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if bio is NULL or allocation fails.
+
+    \param bio buffer filter BIO to configure.
+    \param size requested write buffer size in bytes.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* buf = wolfSSL_BIO_new(wolfSSL_BIO_f_buffer());
+    wolfSSL_BIO_set_write_buffer_size(buf, 16384);
+    \endcode
+
+    \sa wolfSSL_BIO_f_buffer
+*/
+long wolfSSL_BIO_set_write_buffer_size(WOLFSSL_BIO* bio, long size);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the singleton WOLFSSL_BIO_METHOD describing the SSL
+    filter BIO. An SSL BIO carries TLS-protected data: reads and writes
+    are passed through a WOLFSSL session attached with
+    wolfSSL_BIO_set_ssl().
+
+    \return WOLFSSL_BIO_METHOD* pointer to the static SSL BIO method.
+
+    \param none No parameters.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* sb = wolfSSL_BIO_new(wolfSSL_BIO_f_ssl());
+    wolfSSL_BIO_set_ssl(sb, ssl, BIO_CLOSE);
+    \endcode
+
+    \sa wolfSSL_BIO_set_ssl
+    \sa wolfSSL_BIO_new_ssl
+*/
+WOLFSSL_BIO_METHOD* wolfSSL_BIO_f_ssl(void);
+
+/*!
+    \ingroup IO
+
+    \brief Allocates a datagram socket BIO wrapping the provided UDP file
+    descriptor. The closeF flag controls whether the BIO closes the
+    descriptor on free (BIO_CLOSE) or leaves it open (BIO_NOCLOSE).
+
+    \return WOLFSSL_BIO* new datagram BIO on success.
+    \return NULL on allocation failure.
+
+    \param fd UDP socket file descriptor.
+    \param closeF BIO_CLOSE or BIO_NOCLOSE.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* dgram = wolfSSL_BIO_new_dgram(sockfd, BIO_NOCLOSE);
+    \endcode
+
+    \sa wolfSSL_BIO_s_datagram
+    \sa wolfSSL_BIO_new_socket
+*/
+WOLFSSL_BIO* wolfSSL_BIO_new_dgram(int fd, int closeF);
+
+/*!
+    \ingroup IO
+
+    \brief Reports whether end-of-input has been reached on a BIO. For
+    a memory BIO this returns non-zero once the read index has reached
+    the end of the buffer; for file/socket BIOs it reflects the
+    underlying transport.
+
+    \return 1 if the BIO is at EOF.
+    \return 0 if more data may be available.
+
+    \param b WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    if (wolfSSL_BIO_eof(bio)) {
+        // no more data
+    }
+    \endcode
+
+    \sa wolfSSL_BIO_read
+    \sa wolfSSL_BIO_pending
+*/
+int         wolfSSL_BIO_eof(WOLFSSL_BIO* b);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the singleton WOLFSSL_BIO_METHOD for an in-memory
+    source/sink BIO. Writes append to an internal growing buffer and
+    reads consume it.
+
+    \return WOLFSSL_BIO_METHOD* pointer to the static memory BIO method.
+
+    \param none No parameters.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* mem = wolfSSL_BIO_new(wolfSSL_BIO_s_mem());
+    \endcode
+
+    \sa wolfSSL_BIO_new
+    \sa wolfSSL_BIO_new_mem_buf
+*/
+WOLFSSL_BIO_METHOD* wolfSSL_BIO_s_mem(void);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the singleton WOLFSSL_BIO_METHOD describing the
+    base64 filter BIO. Data written through this filter is base64
+    encoded; data read through it is base64 decoded.
+
+    \return WOLFSSL_BIO_METHOD* pointer to the static base64 BIO method.
+
+    \param none No parameters.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* b64 = wolfSSL_BIO_new(wolfSSL_BIO_f_base64());
+    \endcode
+
+    \sa wolfSSL_BIO_new
+    \sa wolfSSL_BIO_push
+*/
+WOLFSSL_BIO_METHOD* wolfSSL_BIO_f_base64(void);
+
+/*!
+    \ingroup IO
+
+    \brief Sets one or more flags on a BIO using a bitwise OR of
+    WOLFSSL_BIO_FLAG_* values. Existing flags are preserved.
+
+    \return none No return value.
+
+    \param bio WOLFSSL_BIO to modify.
+    \param flags bitmask of WOLFSSL_BIO_FLAG_* values to set.
+
+    _Example_
+    \code
+    wolfSSL_BIO_set_flags(bio, WOLFSSL_BIO_FLAG_READ);
+    \endcode
+
+    \sa wolfSSL_BIO_clear_flags
+    \sa wolfSSL_BIO_should_retry
+*/
+void wolfSSL_BIO_set_flags(WOLFSSL_BIO* bio, int flags);
+
+/*!
+    \ingroup IO
+
+    \brief Clears the supplied flag bits on a BIO. Flags not in the
+    mask are left untouched.
+
+    \return none No return value.
+
+    \param bio WOLFSSL_BIO to modify.
+    \param flags bitmask of WOLFSSL_BIO_FLAG_* values to clear.
+
+    _Example_
+    \code
+    wolfSSL_BIO_clear_flags(bio, WOLFSSL_BIO_FLAG_RETRY);
+    \endcode
+
+    \sa wolfSSL_BIO_set_flags
+    \sa wolfSSL_BIO_clear_retry_flags
+*/
+void wolfSSL_BIO_clear_flags(WOLFSSL_BIO *bio, int flags);
+
+/*!
+    \ingroup IO
+
+    \brief Retrieves the file descriptor associated with a socket or
+    file-descriptor BIO. If fd is non-NULL the descriptor is written
+    there as well as returned.
+
+    \return >=0 the file descriptor on success.
+    \return WOLFSSL_FAILURE (-1) on error.
+
+    \param bio WOLFSSL_BIO to query.
+    \param fd optional output pointer that receives the descriptor.
+
+    _Example_
+    \code
+    int sock;
+    wolfSSL_BIO_get_fd(bio, &sock);
+    \endcode
+
+    \sa wolfSSL_BIO_set_fd
+    \sa wolfSSL_BIO_new_socket
+*/
+int wolfSSL_BIO_get_fd(WOLFSSL_BIO *bio, int* fd);
+
+/*!
+    \ingroup IO
+
+    \brief Stores a caller-supplied opaque pointer on a BIO at the
+    given ex_data index. Indices are allocated with
+    wolfSSL_BIO_get_ex_new_index().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio WOLFSSL_BIO to update.
+    \param idx ex_data index.
+    \param data opaque pointer to store.
+
+    _Example_
+    \code
+    wolfSSL_BIO_set_ex_data(bio, idx, my_ptr);
+    \endcode
+
+    \sa wolfSSL_BIO_get_ex_data
+*/
+int wolfSSL_BIO_set_ex_data(WOLFSSL_BIO *bio, int idx, void *data);
+
+/*!
+    \ingroup IO
+
+    \brief Retrieves the opaque pointer previously stored on a BIO at
+    the given ex_data index.
+
+    \return void* the stored pointer, or NULL if none.
+
+    \param bio WOLFSSL_BIO to query.
+    \param idx ex_data index.
+
+    _Example_
+    \code
+    void* p = wolfSSL_BIO_get_ex_data(bio, idx);
+    \endcode
+
+    \sa wolfSSL_BIO_set_ex_data
+*/
+void *wolfSSL_BIO_get_ex_data(WOLFSSL_BIO *bio, int idx);
+
+/*!
+    \ingroup IO
+
+    \brief Enables or disables non-blocking mode on a BIO. When set,
+    socket BIOs report retryable conditions through
+    wolfSSL_BIO_should_retry() instead of blocking.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio WOLFSSL_BIO to update.
+    \param on non-zero to enable non-blocking mode, zero to disable.
+
+    _Example_
+    \code
+    wolfSSL_BIO_set_nbio(bio, 1);
+    \endcode
+
+    \sa wolfSSL_BIO_should_retry
+*/
+long wolfSSL_BIO_set_nbio(WOLFSSL_BIO* bio, long on);
+
+/*!
+    \ingroup IO
+
+    \brief Stores a custom data pointer on a BIO. Used by custom BIO
+    methods (created via wolfSSL_BIO_meth_new()) to attach private
+    state to each instance.
+
+    \return none No return value.
+
+    \param bio WOLFSSL_BIO to update.
+    \param ptr opaque pointer to store.
+
+    _Example_
+    \code
+    wolfSSL_BIO_set_data(bio, my_state);
+    \endcode
+
+    \sa wolfSSL_BIO_get_data
+    \sa wolfSSL_BIO_meth_new
+*/
+void wolfSSL_BIO_set_data(WOLFSSL_BIO* bio, void* ptr);
+
+/*!
+    \ingroup IO
+
+    \brief Retrieves the custom data pointer previously stored on a
+    BIO with wolfSSL_BIO_set_data().
+
+    \return void* the stored pointer, or NULL if none.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    void* state = wolfSSL_BIO_get_data(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_set_data
+*/
+void* wolfSSL_BIO_get_data(WOLFSSL_BIO* bio);
+
+/*!
+    \ingroup IO
+
+    \brief Sets the shutdown flag on a BIO. The flag governs whether
+    the BIO will close the underlying resource (file descriptor, FILE*,
+    etc.) when it is freed. Use BIO_CLOSE to close on free, BIO_NOCLOSE
+    to leave the resource open.
+
+    \return none No return value.
+
+    \param bio WOLFSSL_BIO to update.
+    \param shut new shutdown flag value (BIO_CLOSE or BIO_NOCLOSE).
+
+    _Example_
+    \code
+    wolfSSL_BIO_set_shutdown(bio, BIO_NOCLOSE);
+    \endcode
+
+    \sa wolfSSL_BIO_get_shutdown
+    \sa wolfSSL_BIO_set_close
+*/
+void wolfSSL_BIO_set_shutdown(WOLFSSL_BIO* bio, int shut);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the current shutdown flag for a BIO.
+
+    \return BIO_CLOSE if the BIO will close its resource on free.
+    \return BIO_NOCLOSE otherwise.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    int s = wolfSSL_BIO_get_shutdown(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_set_shutdown
+*/
+int wolfSSL_BIO_get_shutdown(WOLFSSL_BIO* bio);
+
+/*!
+    \ingroup IO
+
+    \brief Clears the WOLFSSL_BIO_FLAG_READ, WOLFSSL_BIO_FLAG_WRITE and
+    WOLFSSL_BIO_FLAG_RETRY flags on a BIO. Mirrors OpenSSL's
+    BIO_clear_retry_flags().
+
+    \return none No return value.
+
+    \param bio WOLFSSL_BIO to update.
+
+    _Example_
+    \code
+    wolfSSL_BIO_clear_retry_flags(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_should_retry
+    \sa wolfSSL_BIO_set_flags
+*/
+void wolfSSL_BIO_clear_retry_flags(WOLFSSL_BIO* bio);
+
+/*!
+    \ingroup IO
+
+    \brief Reports whether the last operation on a BIO failed in a way
+    that can be retried (typically because a non-blocking socket would
+    block).
+
+    \return 1 if the operation should be retried.
+    \return 0 otherwise.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    if (wolfSSL_BIO_read(bio, buf, len) <= 0) {
+        if (wolfSSL_BIO_should_retry(bio)) {
+            // try again later
+        }
+    }
+    \endcode
+
+    \sa wolfSSL_BIO_should_read
+    \sa wolfSSL_BIO_should_write
+*/
+int wolfSSL_BIO_should_retry(WOLFSSL_BIO *bio);
+
+/*!
+    \ingroup IO
+
+    \brief Reports whether the last retryable failure on a BIO was a
+    read that should be retried.
+
+    \return 1 if the BIO is waiting on a readable condition.
+    \return 0 otherwise.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    if (wolfSSL_BIO_should_read(bio)) {
+        // wait for readability and retry
+    }
+    \endcode
+
+    \sa wolfSSL_BIO_should_retry
+    \sa wolfSSL_BIO_should_write
+*/
+int wolfSSL_BIO_should_read(WOLFSSL_BIO *bio);
+
+/*!
+    \ingroup IO
+
+    \brief Reports whether the last retryable failure on a BIO was a
+    write that should be retried.
+
+    \return 1 if the BIO is waiting on a writable condition.
+    \return 0 otherwise.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    if (wolfSSL_BIO_should_write(bio)) {
+        // wait for writability and retry
+    }
+    \endcode
+
+    \sa wolfSSL_BIO_should_retry
+    \sa wolfSSL_BIO_should_read
+*/
+int wolfSSL_BIO_should_write(WOLFSSL_BIO *bio);
+
+/*!
+    \ingroup IO
+
+    \brief Allocates a new, empty WOLFSSL_BIO_METHOD for use as a custom
+    BIO type. The caller fills it in with wolfSSL_BIO_meth_set_*() and
+    eventually releases it with wolfSSL_BIO_meth_free().
+
+    \return WOLFSSL_BIO_METHOD* pointer to the new method on success.
+    \return NULL on memory allocation failure.
+
+    \param type BIO type constant to assign (commonly an application
+    chosen value).
+    \param name human-readable name for diagnostics.
+
+    _Example_
+    \code
+    WOLFSSL_BIO_METHOD* m = wolfSSL_BIO_meth_new(BIO_TYPE_SOURCE_SINK,
+                                                 "my-bio");
+    \endcode
+
+    \sa wolfSSL_BIO_meth_free
+    \sa wolfSSL_BIO_meth_set_read
+*/
+WOLFSSL_BIO_METHOD *wolfSSL_BIO_meth_new(int type, const char* name);
+
+/*!
+    \ingroup IO
+
+    \brief Frees a WOLFSSL_BIO_METHOD previously allocated with
+    wolfSSL_BIO_meth_new(). Does not free BIOs that reference the
+    method; the caller must ensure no live BIO still uses it.
+
+    \return none No return value.
+
+    \param biom WOLFSSL_BIO_METHOD to free.
+
+    _Example_
+    \code
+    wolfSSL_BIO_meth_free(m);
+    \endcode
+
+    \sa wolfSSL_BIO_meth_new
+*/
+void wolfSSL_BIO_meth_free(WOLFSSL_BIO_METHOD* biom);
+
+/*!
+    \ingroup IO
+
+    \brief Installs the write callback for a custom BIO method. The
+    callback is invoked for wolfSSL_BIO_write() on BIOs created from
+    this method.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if biom is NULL.
+
+    \param biom custom BIO method to update.
+    \param biom_write write callback to install.
+
+    _Example_
+    \code
+    wolfSSL_BIO_meth_set_write(m, my_write_cb);
+    \endcode
+
+    \sa wolfSSL_BIO_meth_new
+    \sa wolfSSL_BIO_meth_set_read
+*/
+int wolfSSL_BIO_meth_set_write(WOLFSSL_BIO_METHOD* biom, wolfSSL_BIO_meth_write_cb biom_write);
+
+/*!
+    \ingroup IO
+
+    \brief Installs the read callback for a custom BIO method. The
+    callback is invoked for wolfSSL_BIO_read() on BIOs created from
+    this method.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if biom is NULL.
+
+    \param biom custom BIO method to update.
+    \param biom_read read callback to install.
+
+    _Example_
+    \code
+    wolfSSL_BIO_meth_set_read(m, my_read_cb);
+    \endcode
+
+    \sa wolfSSL_BIO_meth_new
+    \sa wolfSSL_BIO_meth_set_write
+*/
+int wolfSSL_BIO_meth_set_read(WOLFSSL_BIO_METHOD* biom, wolfSSL_BIO_meth_read_cb biom_read);
+
+/*!
+    \ingroup IO
+
+    \brief Installs the puts callback for a custom BIO method. The
+    callback is invoked for wolfSSL_BIO_puts() on BIOs created from
+    this method.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if biom is NULL.
+
+    \param biom custom BIO method to update.
+    \param biom_puts puts callback to install.
+
+    _Example_
+    \code
+    wolfSSL_BIO_meth_set_puts(m, my_puts_cb);
+    \endcode
+
+    \sa wolfSSL_BIO_meth_new
+*/
+int wolfSSL_BIO_meth_set_puts(WOLFSSL_BIO_METHOD* biom, wolfSSL_BIO_meth_puts_cb biom_puts);
+
+/*!
+    \ingroup IO
+
+    \brief Installs the gets callback for a custom BIO method. The
+    callback is invoked for wolfSSL_BIO_gets() on BIOs created from
+    this method.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if biom is NULL.
+
+    \param biom custom BIO method to update.
+    \param biom_gets gets callback to install.
+
+    _Example_
+    \code
+    wolfSSL_BIO_meth_set_gets(m, my_gets_cb);
+    \endcode
+
+    \sa wolfSSL_BIO_meth_new
+*/
+int wolfSSL_BIO_meth_set_gets(WOLFSSL_BIO_METHOD* biom, wolfSSL_BIO_meth_gets_cb biom_gets);
+
+/*!
+    \ingroup IO
+
+    \brief Installs the ctrl callback for a custom BIO method. The
+    callback handles BIO_ctrl() requests dispatched through
+    wolfSSL_BIO_ctrl() and wolfSSL_BIO_int_ctrl().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if biom is NULL.
+
+    \param biom custom BIO method to update.
+    \param biom_ctrl ctrl callback to install.
+
+    _Example_
+    \code
+    wolfSSL_BIO_meth_set_ctrl(m, my_ctrl_cb);
+    \endcode
+
+    \sa wolfSSL_BIO_meth_new
+    \sa wolfSSL_BIO_ctrl
+*/
+int wolfSSL_BIO_meth_set_ctrl(WOLFSSL_BIO_METHOD* biom, wolfSSL_BIO_meth_ctrl_get_cb biom_ctrl);
+
+/*!
+    \ingroup IO
+
+    \brief Installs the create callback for a custom BIO method. The
+    callback is invoked when a BIO is allocated from this method, and
+    can be used to set per-instance state.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if biom is NULL.
+
+    \param biom custom BIO method to update.
+    \param biom_create create callback to install.
+
+    _Example_
+    \code
+    wolfSSL_BIO_meth_set_create(m, my_create_cb);
+    \endcode
+
+    \sa wolfSSL_BIO_meth_new
+    \sa wolfSSL_BIO_meth_set_destroy
+*/
+int wolfSSL_BIO_meth_set_create(WOLFSSL_BIO_METHOD* biom, wolfSSL_BIO_meth_create_cb biom_create);
+
+/*!
+    \ingroup IO
+
+    \brief Installs the destroy callback for a custom BIO method. The
+    callback is invoked when a BIO using this method is freed, allowing
+    per-instance state to be released.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if biom is NULL.
+
+    \param biom custom BIO method to update.
+    \param biom_destroy destroy callback to install.
+
+    _Example_
+    \code
+    wolfSSL_BIO_meth_set_destroy(m, my_destroy_cb);
+    \endcode
+
+    \sa wolfSSL_BIO_meth_new
+    \sa wolfSSL_BIO_meth_set_create
+*/
+int wolfSSL_BIO_meth_set_destroy(WOLFSSL_BIO_METHOD* biom, wolfSSL_BIO_meth_destroy_cb biom_destroy);
+
+/*!
+    \ingroup IO
+
+    \brief Creates a memory BIO that reads from the supplied buffer.
+    The BIO does not take ownership of buf; the buffer must remain
+    valid for the lifetime of the BIO. If len is -1 the length is
+    computed with strlen() on buf.
+
+    \return WOLFSSL_BIO* new memory BIO on success.
+    \return NULL on allocation failure or when buf is NULL.
+
+    \param buf source buffer.
+    \param len length of buf in bytes, or -1 to use strlen(buf).
+
+    _Example_
+    \code
+    const char* pem = "-----BEGIN ...";
+    WOLFSSL_BIO* bio = wolfSSL_BIO_new_mem_buf(pem, -1);
+    \endcode
+
+    \sa wolfSSL_BIO_s_mem
+    \sa wolfSSL_BIO_new
+*/
+WOLFSSL_BIO* wolfSSL_BIO_new_mem_buf(const void* buf, int len);
+
+/*!
+    \ingroup IO
+
+    \brief Associates a WOLFSSL session with an SSL filter BIO. The flag
+    parameter controls whether the BIO closes the WOLFSSL on free
+    (BIO_CLOSE) or leaves the application to free it (BIO_NOCLOSE).
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if b is not an SSL BIO.
+
+    \param b SSL filter BIO (created from wolfSSL_BIO_f_ssl()).
+    \param ssl WOLFSSL session to attach.
+    \param flag BIO_CLOSE or BIO_NOCLOSE.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* sb = wolfSSL_BIO_new(wolfSSL_BIO_f_ssl());
+    wolfSSL_BIO_set_ssl(sb, ssl, BIO_CLOSE);
+    \endcode
+
+    \sa wolfSSL_BIO_get_ssl
+    \sa wolfSSL_BIO_new_ssl
+*/
+long wolfSSL_BIO_set_ssl(WOLFSSL_BIO* b, WOLFSSL* ssl, int flag);
+
+/*!
+    \ingroup IO
+
+    \brief Retrieves the WOLFSSL session associated with an SSL filter
+    BIO.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if bio is not an SSL BIO or ssl is NULL.
+
+    \param bio SSL filter BIO to query.
+    \param ssl output pointer that receives the WOLFSSL session.
+
+    _Example_
+    \code
+    WOLFSSL* ssl;
+    wolfSSL_BIO_get_ssl(sb, &ssl);
+    \endcode
+
+    \sa wolfSSL_BIO_set_ssl
+    \sa wolfSSL_BIO_new_ssl
+*/
+long wolfSSL_BIO_get_ssl(WOLFSSL_BIO* bio, WOLFSSL** ssl);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the BIO method type identifier (for example
+    WOLFSSL_BIO_SSL, WOLFSSL_BIO_MEMORY) of a BIO.
+
+    \return int BIO method type, or WOLFSSL_FAILURE if b is NULL.
+
+    \param b WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    int type = wolfSSL_BIO_method_type(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_find_type
+*/
+int wolfSSL_BIO_method_type(const WOLFSSL_BIO *b);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the singleton WOLFSSL_BIO_METHOD describing the file
+    source/sink BIO. Used to build BIOs that read from or write to a
+    FILE*.
+
+    \return WOLFSSL_BIO_METHOD* pointer to the static file BIO method.
+
+    \param none No parameters.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* fb = wolfSSL_BIO_new(wolfSSL_BIO_s_file());
+    \endcode
+
+    \sa wolfSSL_BIO_new
+    \sa wolfSSL_BIO_new_fp
+    \sa wolfSSL_BIO_read_filename
+*/
+WOLFSSL_BIO_METHOD *wolfSSL_BIO_s_file(void);
+
+/*!
+    \ingroup IO
+
+    \brief Creates a file-descriptor BIO wrapping the supplied fd. The
+    close_flag controls whether the BIO closes the descriptor when it
+    is freed.
+
+    \return WOLFSSL_BIO* new BIO on success.
+    \return NULL on allocation failure.
+
+    \param fd file descriptor.
+    \param close_flag BIO_CLOSE or BIO_NOCLOSE.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* bio = wolfSSL_BIO_new_fd(fd, BIO_NOCLOSE);
+    \endcode
+
+    \sa wolfSSL_BIO_set_fd
+    \sa wolfSSL_BIO_get_fd
+*/
+WOLFSSL_BIO *wolfSSL_BIO_new_fd(int fd, int close_flag);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the singleton WOLFSSL_BIO_METHOD describing the
+    paired memory BIO. A pair of such BIOs created with
+    wolfSSL_BIO_new_bio_pair() act as two ends of an in-memory pipe.
+
+    \return WOLFSSL_BIO_METHOD* pointer to the static BIO-pair method.
+
+    \param none No parameters.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* a = wolfSSL_BIO_new(wolfSSL_BIO_s_bio());
+    WOLFSSL_BIO* b = wolfSSL_BIO_new(wolfSSL_BIO_s_bio());
+    wolfSSL_BIO_make_bio_pair(a, b);
+    \endcode
+
+    \sa wolfSSL_BIO_make_bio_pair
+    \sa wolfSSL_BIO_new_bio_pair
+*/
+WOLFSSL_BIO_METHOD *wolfSSL_BIO_s_bio(void);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the singleton WOLFSSL_BIO_METHOD describing the
+    datagram (UDP) source/sink BIO.
+
+    \return WOLFSSL_BIO_METHOD* pointer to the static datagram BIO
+    method.
+
+    \param none No parameters.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* d = wolfSSL_BIO_new(wolfSSL_BIO_s_datagram());
+    \endcode
+
+    \sa wolfSSL_BIO_new
+    \sa wolfSSL_BIO_new_dgram
+*/
+WOLFSSL_BIO_METHOD *wolfSSL_BIO_s_datagram(void);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the singleton WOLFSSL_BIO_METHOD describing the null
+    sink BIO. Writes are discarded and reads return EOF; useful as a
+    bit-bucket in BIO chains.
+
+    \return WOLFSSL_BIO_METHOD* pointer to the static null BIO method.
+
+    \param none No parameters.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* n = wolfSSL_BIO_new(wolfSSL_BIO_s_null());
+    \endcode
+
+    \sa wolfSSL_BIO_new
+*/
+WOLFSSL_BIO_METHOD *wolfSSL_BIO_s_null(void);
+
+/*!
+    \ingroup IO
+
+    \brief Creates a connect BIO that, when activated with
+    wolfSSL_BIO_do_connect(), opens a TCP connection. The string
+    parameter contains either a hostname or a "host:port" combination.
+
+    \return WOLFSSL_BIO* new connect BIO on success.
+    \return NULL on allocation failure or when str is NULL.
+
+    \param str hostname or "host:port" target.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* c = wolfSSL_BIO_new_connect("example.com:443");
+    wolfSSL_BIO_do_connect(c);
+    \endcode
+
+    \sa wolfSSL_BIO_set_conn_hostname
+    \sa wolfSSL_BIO_set_conn_port
+    \sa wolfSSL_BIO_do_connect
+*/
+WOLFSSL_BIO *wolfSSL_BIO_new_connect(const char *str);
+
+/*!
+    \ingroup IO
+
+    \brief Creates an accept BIO that, when activated with
+    wolfSSL_BIO_do_accept(), listens for incoming TCP connections on
+    the given port.
+
+    \return WOLFSSL_BIO* new accept BIO on success.
+    \return NULL on allocation failure.
+
+    \param port port number or service name to listen on.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* a = wolfSSL_BIO_new_accept("4433");
+    wolfSSL_BIO_do_accept(a);
+    \endcode
+
+    \sa wolfSSL_BIO_do_accept
+*/
+WOLFSSL_BIO *wolfSSL_BIO_new_accept(const char *port);
+
+/*!
+    \ingroup IO
+
+    \brief Sets the hostname (and optionally port, when provided in
+    "host:port" form) for a connect BIO.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param b connect BIO to update.
+    \param name hostname or "host:port" string.
+
+    _Example_
+    \code
+    wolfSSL_BIO_set_conn_hostname(c, "example.com");
+    \endcode
+
+    \sa wolfSSL_BIO_new_connect
+    \sa wolfSSL_BIO_set_conn_port
+*/
+long wolfSSL_BIO_set_conn_hostname(WOLFSSL_BIO* b, char* name);
+
+/*!
+    \ingroup IO
+
+    \brief Sets the port (service name or numeric port) for a connect
+    BIO.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param b connect BIO to update.
+    \param port port number or service name string.
+
+    _Example_
+    \code
+    wolfSSL_BIO_set_conn_port(c, "443");
+    \endcode
+
+    \sa wolfSSL_BIO_set_conn_hostname
+    \sa wolfSSL_BIO_new_connect
+*/
+long wolfSSL_BIO_set_conn_port(WOLFSSL_BIO *b, char* port);
+
+/*!
+    \ingroup IO
+
+    \brief Initiates the outgoing TCP connection for a connect BIO
+    (typically one created with wolfSSL_BIO_new_connect()).
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param b connect BIO to activate.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* c = wolfSSL_BIO_new_connect("example.com:443");
+    if (wolfSSL_BIO_do_connect(c) != WOLFSSL_SUCCESS) {
+        // handle error
+    }
+    \endcode
+
+    \sa wolfSSL_BIO_new_connect
+    \sa wolfSSL_BIO_do_handshake
+*/
+long wolfSSL_BIO_do_connect(WOLFSSL_BIO *b);
+
+/*!
+    \ingroup IO
+
+    \brief Activates an accept BIO. The first call binds and listens on
+    the configured port; subsequent calls accept a new incoming
+    connection and return a connected BIO chained to the accept BIO.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param b accept BIO to activate.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* a = wolfSSL_BIO_new_accept("4433");
+    wolfSSL_BIO_do_accept(a);  // bind and listen
+    wolfSSL_BIO_do_accept(a);  // accept a connection
+    \endcode
+
+    \sa wolfSSL_BIO_new_accept
+*/
+int wolfSSL_BIO_do_accept(WOLFSSL_BIO *b);
+
+/*!
+    \ingroup IO
+
+    \brief Allocates an SSL filter BIO and attaches a freshly created
+    WOLFSSL session derived from ctx. If client is non-zero the session
+    is initialised in client mode; otherwise server mode.
+
+    \return WOLFSSL_BIO* new SSL BIO on success.
+    \return NULL on allocation or session-creation failure.
+
+    \param ctx WOLFSSL_CTX used to create the WOLFSSL session.
+    \param client non-zero for client mode, zero for server mode.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* sb = wolfSSL_BIO_new_ssl(ctx, 1);
+    \endcode
+
+    \sa wolfSSL_BIO_new_ssl_connect
+    \sa wolfSSL_BIO_get_ssl
+*/
+WOLFSSL_BIO* wolfSSL_BIO_new_ssl(WOLFSSL_CTX* ctx, int client);
+
+/*!
+    \ingroup IO
+
+    \brief Builds a BIO chain consisting of an SSL filter BIO (client
+    mode) on top of a connect BIO, ready for use with
+    wolfSSL_BIO_set_conn_hostname() and wolfSSL_BIO_do_handshake().
+
+    \return WOLFSSL_BIO* new SSL/connect BIO chain on success.
+    \return NULL on allocation failure.
+
+    \param ctx WOLFSSL_CTX used to create the WOLFSSL session.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* bio = wolfSSL_BIO_new_ssl_connect(ctx);
+    wolfSSL_BIO_set_conn_hostname(bio, "example.com:443");
+    wolfSSL_BIO_do_handshake(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_new_ssl
+    \sa wolfSSL_BIO_do_handshake
+*/
+WOLFSSL_BIO* wolfSSL_BIO_new_ssl_connect(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup IO
+
+    \brief Drives the TLS handshake on an SSL filter BIO (or BIO chain
+    rooted at one). Equivalent to calling wolfSSL_connect() or
+    wolfSSL_accept() on the underlying WOLFSSL session.
+
+    \return WOLFSSL_SUCCESS on a completed handshake.
+    \return WOLFSSL_FAILURE on error; wolfSSL_BIO_should_retry() may
+    indicate a retryable condition.
+
+    \param b SSL BIO (or chain) to handshake on.
+
+    _Example_
+    \code
+    wolfSSL_BIO_do_handshake(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_new_ssl_connect
+    \sa wolfSSL_BIO_should_retry
+*/
+long wolfSSL_BIO_do_handshake(WOLFSSL_BIO *b);
+
+/*!
+    \ingroup IO
+
+    \brief Shuts down the TLS session attached to an SSL filter BIO,
+    sending the close_notify alert.
+
+    \return none No return value.
+
+    \param b SSL filter BIO to shut down.
+
+    _Example_
+    \code
+    wolfSSL_BIO_ssl_shutdown(sb);
+    \endcode
+
+    \sa wolfSSL_BIO_set_ssl
+    \sa wolfSSL_shutdown
+*/
+void wolfSSL_BIO_ssl_shutdown(WOLFSSL_BIO* b);
+
+/*!
+    \ingroup IO
+
+    \brief Dispatches a control operation to a BIO. The cmd argument
+    selects the operation (one of the BIO_CTRL_* / BIO_C_* constants),
+    larg and parg supply additional parameters. Mirrors OpenSSL's
+    BIO_ctrl().
+
+    \return long result of the operation; meaning depends on cmd.
+
+    \param bp WOLFSSL_BIO target.
+    \param cmd control operation identifier.
+    \param larg long argument associated with cmd.
+    \param parg pointer argument associated with cmd.
+
+    _Example_
+    \code
+    wolfSSL_BIO_ctrl(bio, BIO_CTRL_RESET, 0, NULL);
+    \endcode
+
+    \sa wolfSSL_BIO_int_ctrl
+    \sa wolfSSL_BIO_ctrl_pending
+*/
+long wolfSSL_BIO_ctrl(WOLFSSL_BIO *bp, int cmd, long larg, void *parg);
+
+/*!
+    \ingroup IO
+
+    \brief Dispatches a control operation to a BIO with two integer
+    arguments. Mirrors OpenSSL's BIO_int_ctrl().
+
+    \return long result of the operation; meaning depends on cmd.
+
+    \param bp WOLFSSL_BIO target.
+    \param cmd control operation identifier.
+    \param larg long argument associated with cmd.
+    \param iarg int argument associated with cmd.
+
+    _Example_
+    \code
+    wolfSSL_BIO_int_ctrl(bio, BIO_C_SET_FD, BIO_NOCLOSE, fd);
+    \endcode
+
+    \sa wolfSSL_BIO_ctrl
+*/
+long wolfSSL_BIO_int_ctrl(WOLFSSL_BIO *bp, int cmd, long larg, int iarg);
+
+/*!
+    \ingroup IO
+
+    \brief Increments the reference count of a BIO. The matching call
+    to wolfSSL_BIO_free() must be made for each successful up_ref to
+    actually release the BIO.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if b is NULL.
+
+    \param b WOLFSSL_BIO to share.
+
+    _Example_
+    \code
+    wolfSSL_BIO_up_ref(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_new
+    \sa wolfSSL_BIO_free
+*/
+int  wolfSSL_BIO_up_ref(WOLFSSL_BIO *b);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the cumulative number of bytes read from a BIO over
+    its lifetime.
+
+    \return word64 number of bytes read.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    word64 n = wolfSSL_BIO_number_read(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_number_written
+    \sa wolfSSL_BIO_read
+*/
+word64 wolfSSL_BIO_number_read(WOLFSSL_BIO *bio);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the cumulative number of bytes written to a BIO over
+    its lifetime.
+
+    \return word64 number of bytes written.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    word64 n = wolfSSL_BIO_number_written(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_number_read
+    \sa wolfSSL_BIO_write
+*/
+word64 wolfSSL_BIO_number_written(WOLFSSL_BIO *bio);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the current file offset (tell) of a file BIO.
+    Mirrors OpenSSL's BIO_tell().
+
+    \return >=0 current offset.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio file BIO to query.
+
+    _Example_
+    \code
+    int pos = wolfSSL_BIO_tell(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_seek
+    \sa wolfSSL_BIO_s_file
+*/
+int  wolfSSL_BIO_tell(WOLFSSL_BIO* bio);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the total length in bytes of the data held in a
+    memory BIO, or for a file BIO the length of the underlying file.
+
+    \return >=0 length in bytes.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    int len = wolfSSL_BIO_get_len(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_pending
+*/
+int wolfSSL_BIO_get_len(WOLFSSL_BIO *bio);
+
+/*!
+    \ingroup IO
+
+    \brief Writes formatted output to a BIO. Behaves like fprintf() but
+    targets a BIO instead of a FILE*.
+
+    \return >=0 number of bytes written on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio destination WOLFSSL_BIO.
+    \param format printf-style format string.
+
+    _Example_
+    \code
+    wolfSSL_BIO_printf(bio, "value = %d\n", n);
+    \endcode
+
+    \sa wolfSSL_BIO_write
+    \sa wolfSSL_BIO_dump
+*/
+int wolfSSL_BIO_printf(WOLFSSL_BIO* bio, const char* format, ...);
+
+/*!
+    \ingroup IO
+
+    \brief Writes a hex/ASCII dump of length bytes from buf to a BIO,
+    similar to OpenSSL's BIO_dump(). Each line shows offsets and both
+    hex and printable forms.
+
+    \return >=0 number of bytes written to the BIO.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio destination WOLFSSL_BIO.
+    \param buf data to dump.
+    \param length number of bytes from buf to dump.
+
+    _Example_
+    \code
+    wolfSSL_BIO_dump(bio, data, len);
+    \endcode
+
+    \sa wolfSSL_BIO_printf
+*/
+int wolfSSL_BIO_dump(WOLFSSL_BIO *bio, const char* buf, int length);
+
+/*!
+    \ingroup IO
+
+    \brief Returns the number of bytes currently buffered for writing
+    on a BIO (for example pending bytes in a buffer filter BIO).
+
+    \return >=0 number of bytes pending write.
+    \return 0 if nothing is pending or bio is NULL.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    size_t w = wolfSSL_BIO_wpending(bio);
+    \endcode
+
+    \sa wolfSSL_BIO_pending
+    \sa wolfSSL_BIO_ctrl_pending
+*/
+size_t wolfSSL_BIO_wpending(const WOLFSSL_BIO *bio);
+
+/*!
+    \ingroup IO
+
+    \brief Reports whether the BIO type supports the pending operation
+    (wolfSSL_BIO_pending() / wolfSSL_BIO_ctrl_pending()). Mirrors
+    OpenSSL's BIO_supports_pending().
+
+    \return 1 if pending is supported by this BIO.
+    \return 0 otherwise.
+
+    \param bio WOLFSSL_BIO to query.
+
+    _Example_
+    \code
+    if (wolfSSL_BIO_supports_pending(bio)) {
+        int n = wolfSSL_BIO_pending(bio);
+    }
+    \endcode
+
+    \sa wolfSSL_BIO_pending
+*/
+int wolfSSL_BIO_supports_pending(const WOLFSSL_BIO *bio);
+
+/*!
+    \ingroup IO
+
+    \brief Opens the named file for reading and associates it with a
+    file BIO. Equivalent to OpenSSL's BIO_read_filename().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error (file not found, allocation failure).
+
+    \param b file BIO created from wolfSSL_BIO_s_file().
+    \param name path of the file to open for reading.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* b = wolfSSL_BIO_new(wolfSSL_BIO_s_file());
+    wolfSSL_BIO_read_filename(b, "cert.pem");
+    \endcode
+
+    \sa wolfSSL_BIO_s_file
+    \sa wolfSSL_BIO_new_file
+*/
+int wolfSSL_BIO_read_filename(WOLFSSL_BIO *b, const char *name);
+
+/*!
+    \ingroup IO
+
+    \brief Allocates a new file BIO wrapping an already-opened FILE*.
+    The c flag (BIO_CLOSE or BIO_NOCLOSE) controls whether the BIO
+    closes the FILE* when freed.
+
+    \return WOLFSSL_BIO* new BIO on success.
+    \return NULL on allocation failure.
+
+    \param fp opened FILE*.
+    \param c BIO_CLOSE or BIO_NOCLOSE.
+
+    _Example_
+    \code
+    XFILE fp = XFOPEN("file.bin", "rb");
+    WOLFSSL_BIO* bio = wolfSSL_BIO_new_fp(fp, BIO_CLOSE);
+    \endcode
+
+    \sa wolfSSL_BIO_set_fp
+    \sa wolfSSL_BIO_new_file
+*/
+WOLFSSL_BIO* wolfSSL_BIO_new_fp(XFILE fp, int c);
+
+/*!
+    \ingroup IO
+
+    \brief Allocates a new socket source/sink BIO wrapping the supplied
+    file descriptor. The flag (BIO_CLOSE or BIO_NOCLOSE) controls
+    whether the BIO closes the descriptor when freed.
+
+    \return WOLFSSL_BIO* new socket BIO on success.
+    \return NULL on allocation failure.
+
+    \param sfd connected socket file descriptor.
+    \param flag BIO_CLOSE or BIO_NOCLOSE.
+
+    _Example_
+    \code
+    WOLFSSL_BIO* sb = wolfSSL_BIO_new_socket(sockfd, BIO_NOCLOSE);
+    \endcode
+
+    \sa wolfSSL_BIO_s_socket
+    \sa wolfSSL_BIO_new_fd
+*/
+WOLFSSL_BIO*        wolfSSL_BIO_new_socket(int sfd, int flag);
+
+/*!
+    \ingroup IO
+
     \brief This is used to set a byte pointer to the start of the
     internal memory buffer.
 
