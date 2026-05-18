@@ -19259,3 +19259,1921 @@ void wolfSSL_ASN1_TYPE_free(WOLFSSL_ASN1_TYPE* at);
     \sa wolfSSL_ASN1_STRING_type
 */
 const char *wolfSSL_ASN1_tag2str(int tag);
+
+/*!
+    \ingroup Setup
+    \brief Equivalent to wolfSSL_CTX_new() but allows a custom heap hint
+    to be passed in for static memory or custom allocator use. The heap
+    pointer is stored in the context and used for subsequent allocations.
+
+    \return WOLFSSL_CTX* On success, returns a pointer to a newly created
+    WOLFSSL_CTX structure.
+    \return NULL on failure.
+
+    \param method pointer to the desired WOLFSSL_METHOD.
+    \param heap heap hint pointer used for memory allocations.
+
+    _Example_
+    \code
+    WOLFSSL_CTX* ctx = wolfSSL_CTX_new_ex(wolfTLSv1_3_client_method(), myHeap);
+    \endcode
+
+    \sa wolfSSL_CTX_new
+    \sa wolfSSL_CTX_free
+*/
+WOLFSSL_CTX* wolfSSL_CTX_new_ex(WOLFSSL_METHOD* method, void* heap);
+
+/*!
+    \ingroup Setup
+    \brief Increments the reference count of the WOLFSSL_CTX so it is
+    not freed until matching wolfSSL_CTX_free() calls have been made.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    if (wolfSSL_CTX_up_ref(ctx) != WOLFSSL_SUCCESS) {
+        // error
+    }
+    \endcode
+
+    \sa wolfSSL_CTX_new
+    \sa wolfSSL_CTX_free
+*/
+int wolfSSL_CTX_up_ref(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the size in bytes of the internal WOLFSSL_CTX structure.
+    Useful for static memory builds when allocating buffers up front.
+
+    \return int Size in bytes of the WOLFSSL_CTX structure.
+
+    _Example_
+    \code
+    int size = wolfSSL_CTX_GetObjectSize();
+    \endcode
+
+    \sa wolfSSL_GetObjectSize
+    \sa wolfSSL_METHOD_GetObjectSize
+*/
+int wolfSSL_CTX_GetObjectSize(void);
+
+/*!
+    \ingroup Setup
+    \brief Returns the heap hint that was associated with the
+    WOLFSSL_CTX when it was created (or with the WOLFSSL when one
+    is provided). Used internally for custom allocator support.
+
+    \return void* The heap hint pointer.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param ssl optional pointer to a WOLFSSL session; when non-NULL its
+    heap hint is returned, otherwise the ctx heap is returned.
+
+    _Example_
+    \code
+    void* heap = wolfSSL_CTX_GetHeap(ctx, NULL);
+    \endcode
+
+    \sa wolfSSL_CTX_new_ex
+*/
+void* wolfSSL_CTX_GetHeap(WOLFSSL_CTX* ctx, WOLFSSL* ssl);
+
+/*!
+    \ingroup Setup
+    \brief Indicates whether any of the private key callbacks (PK)
+    such as ECC sign, RSA sign, or DH agree are registered with the
+    context.
+
+    \return 1 If at least one private key callback is set.
+    \return 0 Otherwise.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    if (wolfSSL_CTX_IsPrivatePkSet(ctx)) { ... }
+    \endcode
+
+    \sa wolfSSL_CTX_SetEccSignCb
+    \sa wolfSSL_CTX_SetRsaSignCb
+*/
+int wolfSSL_CTX_IsPrivatePkSet(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Allocates and seeds a new random number generator inside
+    the WOLFSSL_CTX. Used so that internal RNG operations can be
+    shared by sessions created from the context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_new_rng(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_new
+*/
+int wolfSSL_CTX_new_rng(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Enables or disables the Encrypt-Then-MAC extension (RFC 7366)
+    for sessions created from this context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param set non-zero to allow Encrypt-Then-MAC, 0 to disallow.
+
+    _Example_
+    \code
+    wolfSSL_CTX_AllowEncryptThenMac(ctx, 1);
+    \endcode
+
+    \sa wolfSSL_AllowEncryptThenMac
+*/
+int wolfSSL_CTX_AllowEncryptThenMac(WOLFSSL_CTX* ctx, int set);
+
+/*!
+    \ingroup Setup
+    \brief Disables the TLS Extended Master Secret extension (RFC 7627)
+    for sessions created from this context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_DisableExtendedMasterSecret(ctx);
+    \endcode
+
+    \sa wolfSSL_DisableExtendedMasterSecret
+*/
+int wolfSSL_CTX_DisableExtendedMasterSecret(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup OCSP
+    \brief Disables OCSP stapling (TLS Certificate Status Request extension)
+    for sessions created from this context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_DisableOCSPStapling(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_EnableOCSPStapling
+*/
+int wolfSSL_CTX_DisableOCSPStapling(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup OCSP
+    \brief Enables the OCSP must-staple TLS extension on sessions
+    created from this context. When set, the peer is required to
+    provide a stapled OCSP response.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_EnableOCSPMustStaple(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_DisableOCSPMustStaple
+*/
+int wolfSSL_CTX_EnableOCSPMustStaple(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup OCSP
+    \brief Disables the OCSP must-staple extension on sessions
+    created from this context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_DisableOCSPMustStaple(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_EnableOCSPMustStaple
+*/
+int wolfSSL_CTX_DisableOCSPMustStaple(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup CertManager
+    \brief Returns the internal WOLFSSL_CERT_MANAGER associated with
+    the given context. Use this to share CA data, CRLs, and OCSP state
+    with code that takes a cert manager.
+
+    \return WOLFSSL_CERT_MANAGER* On success.
+    \return NULL If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    WOLFSSL_CERT_MANAGER* cm = wolfSSL_CTX_GetCertManager(ctx);
+    \endcode
+
+    \sa wolfSSL_CertManagerNew
+*/
+WOLFSSL_CERT_MANAGER* wolfSSL_CTX_GetCertManager(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Loads a CRL file (PEM or DER) into the context's cert
+    manager. The file may be monitored for changes when supported.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return < 0 On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param path path to the CRL file.
+    \param type WOLFSSL_FILETYPE_PEM or WOLFSSL_FILETYPE_ASN1.
+
+    _Example_
+    \code
+    wolfSSL_CTX_LoadCRLFile(ctx, "./crl.pem", WOLFSSL_FILETYPE_PEM);
+    \endcode
+
+    \sa wolfSSL_CTX_LoadCRL
+    \sa wolfSSL_CTX_EnableCRL
+*/
+int wolfSSL_CTX_LoadCRLFile(WOLFSSL_CTX* ctx, const char* path, int type);
+
+/*!
+    \ingroup Setup
+    \brief Disables session tickets for TLS 1.2 sessions created from
+    the context. TLS 1.3 ticket handling is unaffected.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_NoTicketTLSv12(ctx);
+    \endcode
+
+    \sa wolfSSL_NoTicketTLSv12
+*/
+int wolfSSL_CTX_NoTicketTLSv12(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup CertManager
+    \brief Registers an application callback used to fetch a CRL when
+    it is not available locally. The callback receives the issuer URL
+    and provides the CRL contents back to wolfSSL.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb CbCrlIO callback used to retrieve CRLs.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetCRL_IOCb(ctx, myCrlIoCb);
+    \endcode
+
+    \sa wolfSSL_CTX_EnableCRL
+    \sa wolfSSL_CTX_LoadCRL
+*/
+int wolfSSL_CTX_SetCRL_IOCb(WOLFSSL_CTX* ctx, CbCrlIO cb);
+
+/*!
+    \ingroup CertsKeys
+    \brief Registers a callback used to perform ECC key generation
+    on behalf of wolfSSL (PK callback). The callback signature is
+    typedef int (*CallbackEccKeyGen)(WOLFSSL* ssl, ecc_key* key,
+    unsigned int keySz, int ecc_curve, void* ctx);
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb CallbackEccKeyGen callback to register.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetEccKeyGenCb(ctx, myEccKeyGenCb);
+    \endcode
+
+    \sa wolfSSL_CTX_SetEccSignCb
+    \sa wolfSSL_CTX_SetEccSharedSecretCb
+*/
+void wolfSSL_CTX_SetEccKeyGenCb(WOLFSSL_CTX* ctx, CallbackEccKeyGen cb);
+
+/*!
+    \ingroup CertsKeys
+    \brief Registers a callback used to perform ECC shared secret
+    derivation. The callback signature is
+    typedef int (*CallbackEccSharedSecret)(WOLFSSL* ssl, ecc_key* otherKey,
+    unsigned char* pubKeyDer, word32* pubKeySz, unsigned char* out,
+    word32* outlen, int side, void* ctx);
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb CallbackEccSharedSecret to register.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetEccSharedSecretCb(ctx, myEccSharedSecretCb);
+    \endcode
+
+    \sa wolfSSL_CTX_SetEccSignCb
+    \sa wolfSSL_CTX_SetEccKeyGenCb
+*/
+void wolfSSL_CTX_SetEccSharedSecretCb(WOLFSSL_CTX* ctx, CallbackEccSharedSecret cb);
+
+/*!
+    \ingroup Setup
+    \brief Enables or disables the Encrypted Client Hello (ECH) extension
+    on sessions created from the context.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param enable non-zero to enable ECH, 0 to disable.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetEchEnable(ctx, 1);
+    \endcode
+
+    \sa wolfSSL_SetEchConfigs
+*/
+void wolfSSL_CTX_SetEchEnable(WOLFSSL_CTX* ctx, byte enable);
+
+/*!
+    \ingroup CertsKeys
+    \brief Registers a callback used to perform combined MAC + encrypt
+    in a single operation. The callback signature is
+    typedef int (*CallbackEncryptMac)(WOLFSSL* ssl, unsigned char* macOut,
+    int content, int macVerify, unsigned char* encOut,
+    const unsigned char* encIn, unsigned int encSz, void* ctx);
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb CallbackEncryptMac to register.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetEncryptMacCb(ctx, myEncMacCb);
+    \endcode
+
+    \sa wolfSSL_CTX_SetMacEncryptCb
+    \sa wolfSSL_CTX_SetVerifyMacCb
+*/
+void wolfSSL_CTX_SetEncryptMacCb(WOLFSSL_CTX* ctx, CallbackEncryptMac cb);
+
+/*!
+    \ingroup CertsKeys
+    \brief Registers a callback used to perform HKDF-Extract for TLS 1.3
+    key schedule derivations. The callback signature is
+    typedef int (*CallbackHKDFExtract)(byte* prk, const byte* salt,
+    word32 saltLen, byte* ikm, word32 ikmLen, int digest, void* ctx);
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb CallbackHKDFExtract to register.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetHKDFExtractCb(ctx, myHkdfExtractCb);
+    \endcode
+
+    \sa wolfSSL_CTX_SetTlsFinishedCb
+*/
+void wolfSSL_CTX_SetHKDFExtractCb(WOLFSSL_CTX* ctx, CallbackHKDFExtract cb);
+
+/*!
+    \ingroup CertsKeys
+    \brief Registers a callback used to perform RSA-PSS signing. The
+    callback signature is
+    typedef int (*CallbackRsaPssSign)(WOLFSSL* ssl, const unsigned char* in,
+    unsigned int inSz, unsigned char* out, unsigned int* outSz,
+    int hash, int mgf, const unsigned char* keyDer, unsigned int keySz,
+    void* ctx);
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb CallbackRsaPssSign to register.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetRsaPssSignCb(ctx, myPssSignCb);
+    \endcode
+
+    \sa wolfSSL_CTX_SetRsaSignCb
+*/
+void wolfSSL_CTX_SetRsaPssSignCb(WOLFSSL_CTX* ctx, CallbackRsaPssSign cb);
+
+/*!
+    \ingroup CertsKeys
+    \brief Registers a callback used to verify an RSA signature that
+    was produced earlier by the registered RSA sign callback. Used
+    for self-test of the sign operation. The callback signature is
+    the same as the RSA verify callback.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb CallbackRsaVerify to register.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetRsaSignCheckCb(ctx, myRsaVerifyCb);
+    \endcode
+
+    \sa wolfSSL_CTX_SetRsaSignCb
+    \sa wolfSSL_CTX_SetRsaVerifyCb
+*/
+void wolfSSL_CTX_SetRsaSignCheckCb(WOLFSSL_CTX* ctx, CallbackRsaVerify cb);
+
+/*!
+    \ingroup CertsKeys
+    \brief Registers a callback invoked when the TLS Finished message
+    is being computed, allowing an external module to supply the value.
+    The callback signature is
+    typedef int (*CallbackTlsFinished)(WOLFSSL* ssl, const byte* side,
+    const byte* handshake_hash, word32 hashSz, byte* hashes, void* ctx);
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb CallbackTlsFinished to register.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetTlsFinishedCb(ctx, myFinishedCb);
+    \endcode
+
+    \sa wolfSSL_CTX_SetHKDFExtractCb
+*/
+void wolfSSL_CTX_SetTlsFinishedCb(WOLFSSL_CTX* ctx, CallbackTlsFinished cb);
+
+/*!
+    \ingroup Setup
+    \brief Sets the size (in bytes) of the ephemeral ECDHE key that
+    will be generated for sessions created from this context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL or sz is invalid.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param sz key size in bytes (e.g. 32 for P-256).
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetTmpEC_DHE_Sz(ctx, 32);
+    \endcode
+
+    \sa wolfSSL_SetTmpEC_DHE_Sz
+*/
+int wolfSSL_CTX_SetTmpEC_DHE_Sz(WOLFSSL_CTX* ctx, word16 sz);
+
+/*!
+    \ingroup CertsKeys
+    \brief Registers a callback used to verify a MAC over received
+    data when MAC and decrypt are performed in separate operations.
+    The callback signature is
+    typedef int (*CallbackVerifyMac)(WOLFSSL* ssl, const byte* message,
+    word32 messageSz, word32 macSz, word32 content, void* ctx);
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb CallbackVerifyMac to register.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetVerifyMacCb(ctx, myVerifyMacCb);
+    \endcode
+
+    \sa wolfSSL_CTX_SetEncryptMacCb
+*/
+void wolfSSL_CTX_SetVerifyMacCb(WOLFSSL_CTX* ctx, CallbackVerifyMac cb);
+
+/*!
+    \ingroup CertsKeys
+    \brief Registers a callback used to generate an X25519 key pair.
+    The callback signature is
+    typedef int (*CallbackX25519KeyGen)(WOLFSSL* ssl, struct curve25519_key* key,
+    unsigned int keySz, void* ctx);
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb CallbackX25519KeyGen to register.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetX25519KeyGenCb(ctx, myX25519KeyGenCb);
+    \endcode
+
+    \sa wolfSSL_CTX_SetEccKeyGenCb
+*/
+void wolfSSL_CTX_SetX25519KeyGenCb(WOLFSSL_CTX* ctx, CallbackX25519KeyGen cb);
+
+/*!
+    \ingroup CertsKeys
+    \brief Registers a callback used to generate an X448 key pair.
+    The callback signature is
+    typedef int (*CallbackX448KeyGen)(WOLFSSL* ssl, struct curve448_key* key,
+    unsigned int keySz, void* ctx);
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb CallbackX448KeyGen to register.
+
+    _Example_
+    \code
+    wolfSSL_CTX_SetX448KeyGenCb(ctx, myX448KeyGenCb);
+    \endcode
+
+    \sa wolfSSL_CTX_SetX25519KeyGenCb
+*/
+void wolfSSL_CTX_SetX448KeyGenCb(WOLFSSL_CTX* ctx, CallbackX448KeyGen cb);
+
+/*!
+    \ingroup Setup
+    \brief Restricts a server context to only present client-side
+    cipher suites. Primarily used in test harnesses.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_UseClientSuites(ctx);
+    \endcode
+
+    \sa wolfSSL_UseClientSuites
+*/
+int wolfSSL_CTX_UseClientSuites(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Enables support for secure renegotiation (RFC 5746) on
+    sessions created from this context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_UseSecureRenegotiation(ctx);
+    \endcode
+
+    \sa wolfSSL_UseSecureRenegotiation
+    \sa wolfSSL_Rehandshake
+*/
+int wolfSSL_CTX_UseSecureRenegotiation(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Adds an additional certificate to the context's extra chain
+    without bumping the reference count of the X509 object. The context
+    takes ownership of the reference.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param x509 the WOLFSSL_X509 to add. Ownership is transferred.
+
+    _Example_
+    \code
+    wolfSSL_CTX_add0_chain_cert(ctx, x509);
+    \endcode
+
+    \sa wolfSSL_CTX_add1_chain_cert
+    \sa wolfSSL_CTX_add_extra_chain_cert
+*/
+int wolfSSL_CTX_add0_chain_cert(WOLFSSL_CTX* ctx, WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Adds an additional certificate to the context's extra chain,
+    incrementing the X509 reference count. The caller retains ownership
+    of its reference and must still free it.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param x509 the WOLFSSL_X509 to add.
+
+    _Example_
+    \code
+    wolfSSL_CTX_add1_chain_cert(ctx, x509);
+    \endcode
+
+    \sa wolfSSL_CTX_add0_chain_cert
+*/
+int wolfSSL_CTX_add1_chain_cert(WOLFSSL_CTX* ctx, WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Adds a certificate to the client CA list that will be sent
+    in a CertificateRequest message to the peer. The reference count
+    of the X509 is incremented.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param x509 CA certificate to add to the list.
+
+    _Example_
+    \code
+    wolfSSL_CTX_add1_to_CA_list(ctx, caX509);
+    \endcode
+
+    \sa wolfSSL_CTX_add_client_CA
+*/
+int wolfSSL_CTX_add1_to_CA_list(WOLFSSL_CTX *ctx, WOLFSSL_X509 *x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Adds a CA certificate to the list that is sent to clients
+    in a TLS CertificateRequest message. Names accumulated through
+    repeated calls form the client_CA_list.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param x509 CA certificate to add.
+
+    _Example_
+    \code
+    wolfSSL_CTX_add_client_CA(ctx, caX509);
+    \endcode
+
+    \sa wolfSSL_CTX_add1_to_CA_list
+*/
+int wolfSSL_CTX_add_client_CA(WOLFSSL_CTX* ctx, WOLFSSL_X509* x509);
+
+/*!
+    \ingroup Setup
+    \brief Generic callback-control entry point used by OpenSSL
+    compatibility code. Forwards to the appropriate internal handler
+    based on cmd. Most applications will not call this directly.
+
+    \return long Command-specific value.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cmd command identifier.
+    \param fp function pointer to install.
+
+    _Example_
+    \code
+    wolfSSL_CTX_callback_ctrl(ctx, cmd, (void(*)(void))cb);
+    \endcode
+
+    \sa wolfSSL_CTX_ctrl
+*/
+long wolfSSL_CTX_callback_ctrl(WOLFSSL_CTX* ctx, int cmd, void (*fp)(void));
+
+/*!
+    \ingroup CertsKeys
+    \brief Checks that the configured private key matches the loaded
+    public certificate.
+
+    \return WOLFSSL_SUCCESS On match.
+    \return WOLFSSL_FAILURE On mismatch or if cert/key are missing.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    if (wolfSSL_CTX_check_private_key(ctx) != WOLFSSL_SUCCESS) { ... }
+    \endcode
+
+    \sa wolfSSL_check_private_key
+*/
+int wolfSSL_CTX_check_private_key(const WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees and removes any certificates previously added with
+    wolfSSL_CTX_add_extra_chain_cert() or the add0/add1 variants.
+
+    \return 1 On success.
+    \return 0 On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_clear_extra_chain_certs(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_add_extra_chain_cert
+*/
+long wolfSSL_CTX_clear_extra_chain_certs(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Clears mode flags previously set with wolfSSL_CTX_set_mode().
+
+    \return long The mode value after clearing.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param mode bitmask of mode flags to clear.
+
+    _Example_
+    \code
+    wolfSSL_CTX_clear_mode(ctx, SSL_MODE_AUTO_RETRY);
+    \endcode
+
+    \sa wolfSSL_CTX_set_mode
+    \sa wolfSSL_CTX_get_mode
+*/
+long wolfSSL_CTX_clear_mode(WOLFSSL_CTX* ctx, long mode);
+
+/*!
+    \ingroup Setup
+    \brief Generic ctrl entry point providing the OpenSSL
+    SSL_CTX_ctrl() interface. The cmd value selects which operation
+    to perform; opt and pt provide command-specific parameters.
+
+    \return long Command-specific result.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cmd command identifier.
+    \param opt numeric option value.
+    \param pt pointer option value.
+
+    _Example_
+    \code
+    wolfSSL_CTX_ctrl(ctx, SSL_CTRL_OPTIONS, 0, NULL);
+    \endcode
+
+    \sa wolfSSL_CTX_callback_ctrl
+*/
+long wolfSSL_CTX_ctrl(WOLFSSL_CTX* ctx, int cmd, long opt, void* pt);
+
+/*!
+    \ingroup Setup
+    \brief Sets the maximum DTLS record size to the given value. Used
+    to limit fragment size for path MTU constrained networks.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL or mtu is invalid.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param mtu maximum transmission unit in bytes.
+
+    _Example_
+    \code
+    wolfSSL_CTX_dtls_set_mtu(ctx, 1400);
+    \endcode
+
+    \sa wolfSSL_dtls_set_mtu
+*/
+int wolfSSL_CTX_dtls_set_mtu(WOLFSSL_CTX* ctx, unsigned short mtu);
+
+/*!
+    \ingroup Setup
+    \brief Enables DTLS over SCTP mode on the context. When enabled,
+    wolfSSL relies on SCTP's reliability and ordering and avoids its
+    own retransmission timers.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_dtls_set_sctp(ctx);
+    \endcode
+
+    \sa wolfSSL_dtls_set_sctp
+*/
+int wolfSSL_CTX_dtls_set_sctp(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Removes expired sessions from the context's session cache.
+    Sessions whose start time is older than tm are evicted.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param tm cutoff time in seconds since the epoch.
+
+    _Example_
+    \code
+    wolfSSL_CTX_flush_sessions(ctx, time(NULL));
+    \endcode
+
+    \sa wolfSSL_flush_sessions
+*/
+void wolfSSL_CTX_flush_sessions(WOLFSSL_CTX* ctx, long tm);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the certificate that was configured on the context
+    with wolfSSL_CTX_use_certificate(). Reference count is not changed.
+
+    \return WOLFSSL_X509* On success.
+    \return NULL If no certificate is set.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    WOLFSSL_X509* cert = wolfSSL_CTX_get0_certificate(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_use_certificate
+*/
+WOLFSSL_X509* wolfSSL_CTX_get0_certificate(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a pointer to the X509 verify parameter structure
+    contained in the context. The structure can be modified to adjust
+    certificate verification parameters.
+
+    \return WOLFSSL_X509_VERIFY_PARAM* On success.
+    \return NULL If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    WOLFSSL_X509_VERIFY_PARAM* p = wolfSSL_CTX_get0_param(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set1_param
+*/
+WOLFSSL_X509_VERIFY_PARAM* wolfSSL_CTX_get0_param(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the private key configured on the context. Reference
+    count is not changed.
+
+    \return WOLFSSL_EVP_PKEY* On success.
+    \return NULL If no key is set.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    WOLFSSL_EVP_PKEY* pkey = wolfSSL_CTX_get0_privatekey(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_use_PrivateKey
+*/
+WOLFSSL_EVP_PKEY* wolfSSL_CTX_get0_privatekey(const WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Retrieves an application-defined pointer that was previously
+    stored on the context with wolfSSL_CTX_set_ex_data().
+
+    \return void* The stored pointer, or NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param idx index returned by wolfSSL_CTX_get_ex_new_index().
+
+    _Example_
+    \code
+    void* data = wolfSSL_CTX_get_ex_data(ctx, idx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_ex_data
+*/
+void* wolfSSL_CTX_get_ex_data(const WOLFSSL_CTX* ctx, int idx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the maximum amount of TLS 1.3 early data (0-RTT)
+    that the server will accept from a client per session.
+
+    \return int Maximum early data size in bytes.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    int sz = wolfSSL_CTX_get_max_early_data(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_max_early_data
+*/
+int wolfSSL_CTX_get_max_early_data(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the maximum TLS protocol version currently
+    configured on the context.
+
+    \return int Protocol version constant (e.g. TLS1_3_VERSION).
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    int v = wolfSSL_CTX_get_max_proto_version(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_max_proto_version
+*/
+int wolfSSL_CTX_get_max_proto_version(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the minimum TLS protocol version currently
+    configured on the context.
+
+    \return int Protocol version constant (e.g. TLS1_2_VERSION).
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    int v = wolfSSL_CTX_get_min_proto_version(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_min_proto_version
+*/
+int wolfSSL_CTX_get_min_proto_version(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the current bitmask of SSL_MODE_* flags configured
+    on the context.
+
+    \return long Currently set mode flags.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long m = wolfSSL_CTX_get_mode(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_mode
+    \sa wolfSSL_CTX_clear_mode
+*/
+long wolfSSL_CTX_get_mode(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the maximum number of TLS 1.3 session tickets the
+    server will issue per session.
+
+    \return size_t Maximum number of tickets.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    size_t n = wolfSSL_CTX_get_num_tickets(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_num_tickets
+*/
+size_t wolfSSL_CTX_get_num_tickets(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the current bitmask of SSL_OP_* option flags
+    configured on the context.
+
+    \return long Currently set option flags.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long opts = wolfSSL_CTX_get_options(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_options
+*/
+long wolfSSL_CTX_get_options(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the OpenSSL-compatible security level configured on
+    the context. Levels 0-5 select progressively stricter cryptographic
+    parameter requirements.
+
+    \return int Configured security level.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    int level = wolfSSL_CTX_get_security_level(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_security_level
+*/
+int wolfSSL_CTX_get_security_level(const WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the current session-cache mode bitmask. See
+    wolfSSL_CTX_set_session_cache_mode() for the possible flags.
+
+    \return long Current cache mode flags.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long mode = wolfSSL_CTX_get_session_cache_mode(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_session_cache_mode
+*/
+long wolfSSL_CTX_get_session_cache_mode(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the verify callback previously registered with
+    wolfSSL_CTX_set_verify(), or NULL if none was set.
+
+    \return VerifyCallback The registered callback, or NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    VerifyCallback cb = wolfSSL_CTX_get_verify_callback(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_verify
+*/
+VerifyCallback wolfSSL_CTX_get_verify_callback(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the verify mode bitmask currently configured on
+    the context (see wolfSSL_CTX_set_verify()).
+
+    \return int Current verify mode bitmask.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    int mode = wolfSSL_CTX_get_verify_mode(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_verify
+*/
+int wolfSSL_CTX_get_verify_mode(const WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup IO
+    \brief Sets the DTLS multicast member identifier on the context.
+    Each member of a multicast group must have a unique ID.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL or id is invalid.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param id member id (0-255).
+
+    _Example_
+    \code
+    wolfSSL_CTX_mcast_set_member_id(ctx, 1);
+    \endcode
+
+    \sa wolfSSL_mcast_set_member_id
+*/
+int wolfSSL_CTX_mcast_set_member_id(WOLFSSL_CTX* ctx, unsigned short id);
+
+/*!
+    \ingroup Setup
+    \brief Enables or disables mutual (client) authentication. When
+    set, the server requires the client to present a certificate and
+    the client requires the server to verify it.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param req 1 to require mutual auth, 0 to disable.
+
+    _Example_
+    \code
+    wolfSSL_CTX_mutual_auth(ctx, 1);
+    \endcode
+
+    \sa wolfSSL_mutual_auth
+*/
+int wolfSSL_CTX_mutual_auth(WOLFSSL_CTX* ctx, int req);
+
+/*!
+    \ingroup Setup
+    \brief Restricts the context to only the DHE-PSK key exchange
+    suite group, refusing plain PSK suites.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_only_dhe_psk(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_psk_server_callback
+*/
+int wolfSSL_CTX_only_dhe_psk(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of full TLS handshakes (accepts) that
+    completed against this context.
+
+    \return long Count of accept operations.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_accept(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_accept_good
+*/
+long wolfSSL_CTX_sess_accept(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of successful TLS handshakes that
+    completed on the server side.
+
+    \return long Count of successful accepts.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_accept_good(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_accept
+*/
+long wolfSSL_CTX_sess_accept_good(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of renegotiation operations performed
+    on the server side.
+
+    \return long Count of server renegotiations.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_accept_renegotiate(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_connect_renegotiate
+*/
+long wolfSSL_CTX_sess_accept_renegotiate(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of times the session cache had to evict
+    an entry because it was full.
+
+    \return long Count of cache-full events.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_cache_full(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_set_cache_size
+*/
+long wolfSSL_CTX_sess_cache_full(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of session cache hits served via the
+    external get-session callback (rather than the internal cache).
+
+    \return long Count of callback hits.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_cb_hits(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_hits
+*/
+long wolfSSL_CTX_sess_cb_hits(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of full TLS handshakes (connects) the
+    client side performed against this context.
+
+    \return long Count of connect operations.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_connect(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_connect_good
+*/
+long wolfSSL_CTX_sess_connect(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of successful TLS handshakes that
+    completed on the client side.
+
+    \return long Count of successful connects.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_connect_good(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_connect
+*/
+long wolfSSL_CTX_sess_connect_good(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of renegotiation operations performed
+    on the client side.
+
+    \return long Count of client renegotiations.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_connect_renegotiate(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_accept_renegotiate
+*/
+long wolfSSL_CTX_sess_connect_renegotiate(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the maximum number of entries the session cache
+    can hold.
+
+    \return long Configured cache size.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long sz = wolfSSL_CTX_sess_get_cache_size(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_set_cache_size
+*/
+long wolfSSL_CTX_sess_get_cache_size(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of session cache hits served from the
+    internal cache.
+
+    \return long Count of cache hits.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_hits(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_misses
+*/
+long wolfSSL_CTX_sess_hits(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of session cache misses encountered
+    when looking up resumption sessions.
+
+    \return long Count of cache misses.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_misses(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_hits
+*/
+long wolfSSL_CTX_sess_misses(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of sessions stored in the internal
+    session cache for this context.
+
+    \return long Number of sessions.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_number(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_get_cache_size
+*/
+long wolfSSL_CTX_sess_number(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Sets the maximum number of entries that the internal
+    session cache will hold for this context.
+
+    \return long The previous cache size.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param sz new maximum cache size.
+
+    _Example_
+    \code
+    wolfSSL_CTX_sess_set_cache_size(ctx, 1024);
+    \endcode
+
+    \sa wolfSSL_CTX_sess_get_cache_size
+*/
+long wolfSSL_CTX_sess_set_cache_size(WOLFSSL_CTX* ctx, long sz);
+
+/*!
+    \ingroup Setup
+    \brief Returns the number of sessions that were evicted from the
+    cache because they timed out.
+
+    \return long Count of timeouts.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    long n = wolfSSL_CTX_sess_timeouts(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_timeout
+*/
+long wolfSSL_CTX_sess_timeouts(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief Sets the list of supported elliptic curves for sessions
+    created from the context. names is a colon-separated list of
+    curve names (e.g. "P-256:P-384:X25519").
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error or unknown curve.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param names colon-separated curve list.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set1_curves_list(ctx, "P-256:X25519");
+    \endcode
+
+    \sa wolfSSL_set1_curves_list
+*/
+int wolfSSL_CTX_set1_curves_list(WOLFSSL_CTX* ctx, const char* names);
+
+/*!
+    \ingroup CertsKeys
+    \brief Copies the contents of the given X509 verify parameter
+    structure into the context's internal copy.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param vpm source WOLFSSL_X509_VERIFY_PARAM.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set1_param(ctx, vpm);
+    \endcode
+
+    \sa wolfSSL_CTX_get0_param
+*/
+int wolfSSL_CTX_set1_param(WOLFSSL_CTX* ctx, WOLFSSL_X509_VERIFY_PARAM *vpm);
+
+/*!
+    \ingroup Setup
+    \brief Sets the supported cipher list for the context from a
+    wire-format byte array. The list and listSz arguments contain
+    the encoded cipher suite identifiers.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param list buffer of cipher suite bytes.
+    \param listSz length of list in bytes.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_cipher_list_bytes(ctx, suites, sizeof(suites));
+    \endcode
+
+    \sa wolfSSL_CTX_set_cipher_list
+*/
+int wolfSSL_CTX_set_cipher_list_bytes(WOLFSSL_CTX* ctx, const byte* list, const int listSz);
+
+/*!
+    \ingroup IO
+    \brief Sets the default read-ahead flag on the context. When set,
+    sessions read as much as possible from the transport rather than
+    only the next record.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param m non-zero to enable read-ahead, 0 to disable.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_default_read_ahead(ctx, 1);
+    \endcode
+
+    \sa wolfSSL_CTX_set_read_ahead
+*/
+void wolfSSL_CTX_set_default_read_ahead(WOLFSSL_CTX* ctx, int m);
+
+/*!
+    \ingroup CertsKeys
+    \brief Loads the default CA certificates from the locations
+    configured at build time. Equivalent to OpenSSL's
+    SSL_CTX_set_default_verify_paths().
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_default_verify_paths(ctx);
+    \endcode
+
+    \sa wolfSSL_CTX_load_verify_locations
+*/
+int wolfSSL_CTX_set_default_verify_paths(WOLFSSL_CTX* ctx);
+
+/*!
+    \ingroup Setup
+    \brief OpenSSL compatibility no-op. wolfSSL always negotiates DH
+    parameters automatically when DHE suites are configured.
+
+    \return WOLFSSL_SUCCESS Always.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param onoff ignored.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_dh_auto(ctx, 1);
+    \endcode
+
+    \sa wolfSSL_CTX_SetTmpDH
+*/
+int wolfSSL_CTX_set_dh_auto(WOLFSSL_CTX* ctx, int onoff);
+
+/*!
+    \ingroup Setup
+    \brief OpenSSL compatibility no-op. wolfSSL always negotiates
+    ECDH curves automatically.
+
+    \return WOLFSSL_SUCCESS Always.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param onoff ignored.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_ecdh_auto(ctx, 1);
+    \endcode
+
+    \sa wolfSSL_CTX_set1_curves_list
+*/
+int wolfSSL_CTX_set_ecdh_auto(WOLFSSL_CTX* ctx, int onoff);
+
+/*!
+    \ingroup Setup
+    \brief Stores an application-defined pointer in the context at the
+    given index. The data can later be retrieved with
+    wolfSSL_CTX_get_ex_data().
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param idx index returned by wolfSSL_CTX_get_ex_new_index().
+    \param data pointer to store.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_ex_data(ctx, idx, myPtr);
+    \endcode
+
+    \sa wolfSSL_CTX_get_ex_data
+*/
+int wolfSSL_CTX_set_ex_data(WOLFSSL_CTX* ctx, int idx, void* data);
+
+/*!
+    \ingroup Setup
+    \brief Sets the maximum TLS protocol version that will be
+    negotiated for sessions created from this context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On unsupported version.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param version protocol version constant (e.g. TLS1_2_VERSION,
+    TLS1_3_VERSION). 0 selects the highest supported.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION);
+    \endcode
+
+    \sa wolfSSL_CTX_set_min_proto_version
+    \sa wolfSSL_CTX_get_max_proto_version
+*/
+int wolfSSL_CTX_set_max_proto_version(WOLFSSL_CTX* ctx, int version);
+
+/*!
+    \ingroup Setup
+    \brief Sets the minimum TLS protocol version that will be
+    negotiated for sessions created from this context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On unsupported version.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param version protocol version constant. 0 selects the lowest
+    supported.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+    \endcode
+
+    \sa wolfSSL_CTX_set_max_proto_version
+    \sa wolfSSL_CTX_get_min_proto_version
+*/
+int wolfSSL_CTX_set_min_proto_version(WOLFSSL_CTX* ctx, int version);
+
+/*!
+    \ingroup Setup
+    \brief Sets SSL_MODE_* mode flags on the context. The new mode is
+    the bitwise OR of the previous mode and the supplied value.
+
+    \return long The mode value after the change.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param mode bitmask of mode flags to set.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY);
+    \endcode
+
+    \sa wolfSSL_CTX_get_mode
+    \sa wolfSSL_CTX_clear_mode
+*/
+long wolfSSL_CTX_set_mode(WOLFSSL_CTX* ctx, long mode);
+
+/*!
+    \ingroup IO
+    \brief Registers a message callback that is invoked for each TLS
+    record sent or received. The callback signature is
+    typedef void (*SSL_Msg_Cb)(int write_p, int version, int content_type,
+    const void* buf, size_t len, WOLFSSL* ssl, void* arg);
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb message callback to install.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_msg_callback(ctx, myMsgCb);
+    \endcode
+
+    \sa wolfSSL_CTX_set_msg_callback_arg
+    \sa wolfSSL_set_msg_callback
+*/
+int wolfSSL_CTX_set_msg_callback(WOLFSSL_CTX *ctx, SSL_Msg_Cb cb);
+
+/*!
+    \ingroup IO
+    \brief Sets the user argument passed to the message callback
+    registered with wolfSSL_CTX_set_msg_callback().
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param arg user pointer passed to the callback.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_msg_callback_arg(ctx, myCtx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_msg_callback
+*/
+int wolfSSL_CTX_set_msg_callback_arg(WOLFSSL_CTX *ctx, void* arg);
+
+/*!
+    \ingroup Setup
+    \brief Sets the maximum number of TLS 1.3 session tickets that
+    the server will issue per session.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param mxTickets maximum number of tickets.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_num_tickets(ctx, 2);
+    \endcode
+
+    \sa wolfSSL_CTX_get_num_tickets
+*/
+int wolfSSL_CTX_set_num_tickets(WOLFSSL_CTX* ctx, size_t mxTickets);
+
+/*!
+    \ingroup Setup
+    \brief Enables TLS 1.3 post-handshake client authentication for
+    sessions created from this context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return BAD_FUNC_ARG If ctx is NULL.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param val non-zero to enable post-handshake auth, 0 to disable.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_post_handshake_auth(ctx, 1);
+    \endcode
+
+    \sa wolfSSL_set_post_handshake_auth
+*/
+int wolfSSL_CTX_set_post_handshake_auth(WOLFSSL_CTX* ctx, int val);
+
+/*!
+    \ingroup Setup
+    \brief Configures quiet shutdown mode. When enabled, wolfSSL
+    treats the connection as closed without exchanging close_notify.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param mode non-zero to enable quiet shutdown.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_quiet_shutdown(ctx, 1);
+    \endcode
+
+    \sa wolfSSL_set_quiet_shutdown
+*/
+void wolfSSL_CTX_set_quiet_shutdown(WOLFSSL_CTX* ctx, int mode);
+
+/*!
+    \ingroup Setup
+    \brief Sets the OpenSSL-compatible security level for the context.
+    Levels 0-5 progressively require stronger cryptographic parameters
+    (e.g. minimum key sizes).
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param level security level (0-5).
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_security_level(ctx, 2);
+    \endcode
+
+    \sa wolfSSL_CTX_get_security_level
+*/
+void wolfSSL_CTX_set_security_level(WOLFSSL_CTX* ctx, int level);
+
+/*!
+    \ingroup Setup
+    \brief Sets the user argument passed to the SNI servername
+    callback registered with wolfSSL_CTX_set_servername_callback().
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param arg user pointer.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_servername_arg(ctx, myCtx);
+    \endcode
+
+    \sa wolfSSL_CTX_set_servername_callback
+*/
+int wolfSSL_CTX_set_servername_arg(WOLFSSL_CTX* ctx, void* arg);
+
+/*!
+    \ingroup Setup
+    \brief Sets the SRP password used during the TLS-SRP handshake
+    for sessions created from this context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param password null-terminated SRP password.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_srp_password(ctx, "password");
+    \endcode
+
+    \sa wolfSSL_CTX_set_srp_username
+*/
+int wolfSSL_CTX_set_srp_password(WOLFSSL_CTX* ctx, char* password);
+
+/*!
+    \ingroup Setup
+    \brief Sets the SRP group strength (in bits) used during the
+    TLS-SRP handshake.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param strength SRP group strength in bits (e.g. 2048).
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_srp_strength(ctx, 2048);
+    \endcode
+
+    \sa wolfSSL_CTX_set_srp_username
+*/
+int wolfSSL_CTX_set_srp_strength(WOLFSSL_CTX *ctx, int strength);
+
+/*!
+    \ingroup Setup
+    \brief Sets the SRP username used during the TLS-SRP handshake
+    for sessions created from this context.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param username null-terminated SRP username.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_srp_username(ctx, "user");
+    \endcode
+
+    \sa wolfSSL_CTX_set_srp_password
+*/
+int wolfSSL_CTX_set_srp_username(WOLFSSL_CTX* ctx, char* username);
+
+/*!
+    \ingroup Setup
+    \brief Registers the session ticket encryption callback (OpenSSL
+    compatibility form). The callback is invoked when a ticket is
+    issued or received and is responsible for encrypting or decrypting
+    the ticket payload.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param cb ticketCompatCb callback to register.
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_tlsext_ticket_key_cb(ctx, myTicketCb);
+    \endcode
+
+    \sa wolfSSL_CTX_NoTicketTLSv12
+*/
+int wolfSSL_CTX_set_tlsext_ticket_key_cb(WOLFSSL_CTX* ctx, ticketCompatCb cb);
+
+/*!
+    \ingroup CertsKeys
+    \brief Sets the maximum depth of the certificate chain that will
+    be accepted during peer verification.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param depth maximum chain depth (excluding the leaf certificate).
+
+    _Example_
+    \code
+    wolfSSL_CTX_set_verify_depth(ctx, 4);
+    \endcode
+
+    \sa wolfSSL_CTX_get_verify_depth
+*/
+void wolfSSL_CTX_set_verify_depth(WOLFSSL_CTX *ctx, int depth);
+
+/*!
+    \ingroup CertsKeys
+    \brief Configures an RSA private key on the context from a
+    WOLFSSL_RSA structure.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param rsa RSA key to load.
+
+    _Example_
+    \code
+    wolfSSL_CTX_use_RSAPrivateKey(ctx, rsa);
+    \endcode
+
+    \sa wolfSSL_CTX_use_PrivateKey
+*/
+int wolfSSL_CTX_use_RSAPrivateKey(WOLFSSL_CTX* ctx, WOLFSSL_RSA* rsa);
+
+/*!
+    \ingroup CertsKeys
+    \brief Loads the given X509 certificate as the context's
+    certificate. The reference count of the X509 is increased.
+
+    \return WOLFSSL_SUCCESS On success.
+    \return WOLFSSL_FAILURE On error.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param x certificate to use.
+
+    _Example_
+    \code
+    wolfSSL_CTX_use_certificate(ctx, x509);
+    \endcode
+
+    \sa wolfSSL_CTX_use_certificate_file
+    \sa wolfSSL_CTX_use_certificate_buffer
+*/
+int wolfSSL_CTX_use_certificate(WOLFSSL_CTX* ctx, WOLFSSL_X509* x);
+
+/*!
+    \ingroup Setup
+    \brief OpenSSL compatibility callback registration for installing
+    a Diffie-Hellman parameter generation callback. The callback has
+    the signature
+    WOLFSSL_DH* (*dh)(WOLFSSL* ssl, int is_export, int keylength);
+    and should return DH parameters of the requested size. wolfSSL
+    invokes the callback when DH parameters are required.
+
+    \param ctx pointer to the SSL context, created with wolfSSL_CTX_new().
+    \param dh callback used to provide DH parameters.
+
+    _Example_
+    \code
+    WOLFSSL_CTX_set_tmp_dh_callback(ctx, myDhCb);
+    \endcode
+
+    \sa wolfSSL_CTX_SetTmpDH
+*/
+void WOLFSSL_CTX_set_tmp_dh_callback(WOLFSSL_CTX *ctx, WOLFSSL_DH *(*dh) (WOLFSSL *ssl, int is_export, int keylength));
