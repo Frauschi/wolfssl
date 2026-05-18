@@ -21177,3 +21177,2361 @@ int wolfSSL_CTX_use_certificate(WOLFSSL_CTX* ctx, WOLFSSL_X509* x);
     \sa wolfSSL_CTX_SetTmpDH
 */
 void WOLFSSL_CTX_set_tmp_dh_callback(WOLFSSL_CTX *ctx, WOLFSSL_DH *(*dh) (WOLFSSL *ssl, int is_export, int keylength));
+/*!
+    \ingroup CertsKeys
+    \brief OpenSSL compatibility wrapper that initializes a WOLFSSL_X509V3_CTX without an associated configuration database. Used together with wolfSSL_X509V3_set_ctx() when X509 extensions are added programmatically rather than read from a configuration file.
+
+    \return no value, this function does not return.
+
+    \param ctx pointer to the X509V3 context to be initialized.
+
+    _Example_
+    \code
+    // see wolfSSL_X509V3_set_ctx_nodb usage
+    \endcode
+*/
+void wolfSSL_X509V3_set_ctx_nodb(WOLFSSL_X509V3_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_ACERT (attribute certificate) structure previously allocated by wolfSSL_X509_ACERT_new() or wolfSSL_X509_ACERT_new_ex(). Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param x509 pointer to the WOLFSSL_X509_ACERT structure to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ACERT_free usage
+    \endcode
+
+    \sa wolfSSL_X509_ACERT_new
+    \sa wolfSSL_X509_ACERT_new_ex
+*/
+void wolfSSL_X509_ACERT_free(WOLFSSL_X509_ACERT* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the certificate-version field of a WOLFSSL_X509_ACERT attribute certificate (zero-based, i.e. v2 returns 1).
+
+    \return version value (>=0) on success.
+    \return WOLFSSL_FAILURE if x is NULL.
+
+    \param x pointer to the attribute certificate.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ACERT_get_version usage
+    \endcode
+
+    \sa wolfSSL_X509_ACERT_version
+*/
+long wolfSSL_X509_ACERT_get_version(const WOLFSSL_X509_ACERT *x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new WOLFSSL_X509_ACERT (attribute certificate) structure using the default heap.
+
+    \return pointer to a newly allocated WOLFSSL_X509_ACERT on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ACERT_new usage
+    \endcode
+
+    \sa wolfSSL_X509_ACERT_new_ex
+    \sa wolfSSL_X509_ACERT_free
+*/
+WOLFSSL_X509_ACERT * wolfSSL_X509_ACERT_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new WOLFSSL_X509_ACERT (attribute certificate) structure using the supplied heap hint.
+
+    \return pointer to a newly allocated WOLFSSL_X509_ACERT on success.
+    \return NULL on failure.
+
+    \param heap heap hint for memory allocation, or NULL for the default heap.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ACERT_new_ex usage
+    \endcode
+
+    \sa wolfSSL_X509_ACERT_new
+    \sa wolfSSL_X509_ACERT_free
+*/
+WOLFSSL_X509_ACERT * wolfSSL_X509_ACERT_new_ex(void * heap);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the version number of an attribute certificate (e.g. 1 for v1, 2 for v2).
+
+    \return version number on success.
+    \return 0 on failure.
+
+    \param x509 pointer to the attribute certificate.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ACERT_version usage
+    \endcode
+
+    \sa wolfSSL_X509_ACERT_get_version
+*/
+int  wolfSSL_X509_ACERT_version(WOLFSSL_X509_ACERT* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_ALGOR (AlgorithmIdentifier) structure previously allocated by wolfSSL_X509_ALGOR_new(). Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param alg pointer to the WOLFSSL_X509_ALGOR structure to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ALGOR_free usage
+    \endcode
+
+    \sa wolfSSL_X509_ALGOR_new
+*/
+void wolfSSL_X509_ALGOR_free(WOLFSSL_X509_ALGOR *alg);
+
+/*!
+    \ingroup CertsKeys
+    \brief OpenSSL-compatible accessor that retrieves the algorithm OID and optional parameter from a WOLFSSL_X509_ALGOR. Any of the output pointers may be NULL if that particular component is not required.
+
+    \return no value, this function does not return.
+
+    \param paobj if non-NULL, receives a pointer to the algorithm's ASN1_OBJECT.
+    \param pptype if non-NULL, receives the ASN.1 tag of the parameter (e.g. V_ASN1_NULL, V_ASN1_OBJECT).
+    \param ppval if non-NULL, receives a pointer to the algorithm parameter value.
+    \param algor pointer to the WOLFSSL_X509_ALGOR to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ALGOR_get0 usage
+    \endcode
+
+    \sa wolfSSL_X509_ALGOR_set0
+*/
+void wolfSSL_X509_ALGOR_get0(const WOLFSSL_ASN1_OBJECT **paobj, int *pptype, const void **ppval, const WOLFSSL_X509_ALGOR *algor);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new WOLFSSL_X509_ALGOR (AlgorithmIdentifier) structure.
+
+    \return pointer to a new WOLFSSL_X509_ALGOR on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ALGOR_new usage
+    \endcode
+
+    \sa wolfSSL_X509_ALGOR_free
+*/
+WOLFSSL_X509_ALGOR* wolfSSL_X509_ALGOR_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Sets the algorithm OID and parameter of a WOLFSSL_X509_ALGOR. Takes ownership of aobj and pval on success.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param algor the WOLFSSL_X509_ALGOR to populate.
+    \param aobj the algorithm OID; the structure takes ownership.
+    \param ptype ASN.1 tag describing pval (e.g. V_ASN1_NULL).
+    \param pval pointer to the algorithm parameter or NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ALGOR_set0 usage
+    \endcode
+
+    \sa wolfSSL_X509_ALGOR_get0
+*/
+int wolfSSL_X509_ALGOR_set0(WOLFSSL_X509_ALGOR *algor, WOLFSSL_ASN1_OBJECT *aobj, int ptype, void *pval);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_ATTRIBUTE structure previously allocated with wolfSSL_X509_ATTRIBUTE_new(). Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param attr pointer to the X509 attribute structure to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ATTRIBUTE_free usage
+    \endcode
+
+    \sa wolfSSL_X509_ATTRIBUTE_new
+*/
+void wolfSSL_X509_ATTRIBUTE_free(WOLFSSL_X509_ATTRIBUTE* attr);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new WOLFSSL_X509_ATTRIBUTE structure (used for PKCS#10 / X.509 attributes).
+
+    \return pointer to a new WOLFSSL_X509_ATTRIBUTE on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ATTRIBUTE_new usage
+    \endcode
+
+    \sa wolfSSL_X509_ATTRIBUTE_free
+*/
+WOLFSSL_X509_ATTRIBUTE* wolfSSL_X509_ATTRIBUTE_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of CA certificates currently loaded in a WOLFSSL_X509_STORE.
+
+    \return count of CA certificates in the store on success.
+    \return WOLFSSL_FAILURE if store is NULL or unavailable.
+
+    \param store pointer to the certificate store to query.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_CA_num usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_new
+    \sa wolfSSL_X509_STORE_add_cert
+*/
+int wolfSSL_X509_CA_num(WOLFSSL_X509_STORE *store);
+
+/*!
+    \ingroup CertsKeys
+    \brief Creates an independent deep copy of a WOLFSSL_X509_CRL structure. The returned CRL must be released with wolfSSL_X509_CRL_free().
+
+    \return pointer to a newly allocated CRL on success.
+    \return NULL on failure.
+
+    \param crl pointer to the CRL to duplicate.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_CRL_dup usage
+    \endcode
+
+    \sa wolfSSL_X509_CRL_new
+    \sa wolfSSL_X509_CRL_free
+*/
+WOLFSSL_X509_CRL* wolfSSL_X509_CRL_dup(const WOLFSSL_X509_CRL* crl);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_CRL structure and any storage owned by it. Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param crl pointer to the CRL to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_CRL_free usage
+    \endcode
+
+    \sa wolfSSL_X509_CRL_new
+    \sa wolfSSL_X509_CRL_dup
+*/
+void wolfSSL_X509_CRL_free(WOLFSSL_X509_CRL *crl);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the stack of revoked-certificate entries contained in the given CRL. Mirrors OpenSSL's X509_CRL_get_REVOKED().
+
+    \return pointer to a WOLFSSL_STACK of WOLFSSL_X509_REVOKED entries on success.
+    \return NULL on failure.
+
+    \param crl pointer to the CRL whose revoked entries should be returned.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_CRL_get_REVOKED usage
+    \endcode
+
+    \sa wolfSSL_X509_CRL_get_lastUpdate
+    \sa wolfSSL_X509_CRL_get_nextUpdate
+*/
+WOLFSSL_STACK* wolfSSL_X509_CRL_get_REVOKED(WOLFSSL_X509_CRL* crl);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the thisUpdate (lastUpdate) field of a CRL as a WOLFSSL_ASN1_TIME pointer.
+
+    \return pointer to the lastUpdate ASN1_TIME on success.
+    \return NULL on failure.
+
+    \param crl pointer to the CRL.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_CRL_get_lastUpdate usage
+    \endcode
+
+    \sa wolfSSL_X509_CRL_get_nextUpdate
+*/
+WOLFSSL_ASN1_TIME* wolfSSL_X509_CRL_get_lastUpdate(WOLFSSL_X509_CRL* crl);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the nextUpdate field of a CRL as a WOLFSSL_ASN1_TIME pointer.
+
+    \return pointer to the nextUpdate ASN1_TIME on success.
+    \return NULL on failure.
+
+    \param crl pointer to the CRL.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_CRL_get_nextUpdate usage
+    \endcode
+
+    \sa wolfSSL_X509_CRL_get_lastUpdate
+*/
+WOLFSSL_ASN1_TIME* wolfSSL_X509_CRL_get_nextUpdate(WOLFSSL_X509_CRL* crl);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the signature OID (algorithm identifier) used to sign the given CRL.
+
+    \return signature algorithm identifier on success.
+    \return WOLFSSL_FAILURE if crl is NULL.
+
+    \param crl pointer to the CRL.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_CRL_get_signature_type usage
+    \endcode
+
+    \sa wolfSSL_X509_CRL_verify
+*/
+int wolfSSL_X509_CRL_get_signature_type(WOLFSSL_X509_CRL* crl);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new WOLFSSL_X509_CRL structure.
+
+    \return pointer to a new WOLFSSL_X509_CRL on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_CRL_new usage
+    \endcode
+
+    \sa wolfSSL_X509_CRL_free
+    \sa wolfSSL_X509_CRL_dup
+*/
+WOLFSSL_X509_CRL* wolfSSL_X509_CRL_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Increments the reference count on a WOLFSSL_X509_CRL so that multiple owners can share the same CRL safely. Each successful call must be paired with a wolfSSL_X509_CRL_free().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if crl is NULL or the reference count could not be incremented.
+
+    \param crl pointer to the CRL whose reference count is incremented.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_CRL_up_ref usage
+    \endcode
+
+    \sa wolfSSL_X509_CRL_free
+*/
+int wolfSSL_X509_CRL_up_ref(WOLFSSL_X509_CRL* crl);
+
+/*!
+    \ingroup CertsKeys
+    \brief Verifies the signature on a CRL using the supplied public key (typically the issuer's).
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on signature mismatch or other error.
+
+    \param crl pointer to the CRL to verify.
+    \param pkey issuer public key.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_CRL_verify usage
+    \endcode
+
+    \sa wolfSSL_X509_verify
+*/
+int       wolfSSL_X509_CRL_verify(WOLFSSL_X509_CRL* crl, WOLFSSL_EVP_PKEY* pkey);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the version field of a CRL (1 for v1, 2 for v2).
+
+    \return CRL version on success.
+    \return 0 on failure.
+
+    \param crl pointer to the CRL.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_CRL_version usage
+    \endcode
+*/
+int wolfSSL_X509_CRL_version(WOLFSSL_X509_CRL *crl);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_EXTENSION structure previously allocated by wolfSSL_X509_EXTENSION_new(). Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param ext_to_free extension structure to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_EXTENSION_free usage
+    \endcode
+
+    \sa wolfSSL_X509_EXTENSION_new
+*/
+void wolfSSL_X509_EXTENSION_free(WOLFSSL_X509_EXTENSION* ext_to_free);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the critical flag of an X509 extension.
+
+    \return 1 if the extension is marked critical.
+    \return 0 if it is not.
+    \return Negative value on error.
+
+    \param ex extension to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_EXTENSION_get_critical usage
+    \endcode
+
+    \sa wolfSSL_X509_EXTENSION_set_critical
+*/
+int wolfSSL_X509_EXTENSION_get_critical(const WOLFSSL_X509_EXTENSION* ex);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the DER-encoded value (extnValue) of an X509 extension as a WOLFSSL_ASN1_STRING.
+
+    \return pointer to the extension value on success.
+    \return NULL on failure.
+
+    \param ext extension to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_EXTENSION_get_data usage
+    \endcode
+
+    \sa wolfSSL_X509_EXTENSION_get_object
+*/
+WOLFSSL_ASN1_STRING* wolfSSL_X509_EXTENSION_get_data(WOLFSSL_X509_EXTENSION* ext);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the OID (extnID) of an X509 extension as a WOLFSSL_ASN1_OBJECT.
+
+    \return pointer to the extension's OBJECT on success.
+    \return NULL on failure.
+
+    \param ext extension to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_EXTENSION_get_object usage
+    \endcode
+
+    \sa wolfSSL_X509_EXTENSION_get_data
+*/
+WOLFSSL_ASN1_OBJECT* wolfSSL_X509_EXTENSION_get_object(WOLFSSL_X509_EXTENSION* ext);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new WOLFSSL_X509_EXTENSION structure.
+
+    \return pointer to a new WOLFSSL_X509_EXTENSION on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_EXTENSION_new usage
+    \endcode
+
+    \sa wolfSSL_X509_EXTENSION_free
+*/
+WOLFSSL_X509_EXTENSION* wolfSSL_X509_EXTENSION_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Sets or clears the critical flag on an X509 extension.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if ex is NULL.
+
+    \param ex extension to modify.
+    \param crit non-zero to mark the extension critical, zero otherwise.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_EXTENSION_set_critical usage
+    \endcode
+
+    \sa wolfSSL_X509_EXTENSION_get_critical
+*/
+int wolfSSL_X509_EXTENSION_set_critical(WOLFSSL_X509_EXTENSION* ex, int crit);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_INFO structure (and any certificate/CRL/key contents it owns) previously allocated by wolfSSL_X509_INFO_new(). Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param info pointer to the WOLFSSL_X509_INFO to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_INFO_free usage
+    \endcode
+
+    \sa wolfSSL_X509_INFO_new
+*/
+void wolfSSL_X509_INFO_free(WOLFSSL_X509_INFO* info);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new WOLFSSL_X509_INFO structure, typically used when reading combined PEM bundles via PEM_X509_INFO_read_bio().
+
+    \return pointer to a new WOLFSSL_X509_INFO on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_INFO_new usage
+    \endcode
+
+    \sa wolfSSL_X509_INFO_free
+*/
+WOLFSSL_X509_INFO *wolfSSL_X509_INFO_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Adds a hashed-directory lookup entry to a WOLFSSL_X509_LOOKUP. Certificates in dir must follow the OpenSSL hashed-directory naming convention (subject_hash.NN, crl_hash.rNN).
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param lookup X509 lookup handle (obtained from wolfSSL_X509_STORE_add_lookup).
+    \param dir path to the directory of hashed certificates and CRLs.
+    \param type file type, e.g. X509_FILETYPE_PEM.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_LOOKUP_add_dir usage
+    \endcode
+
+    \sa wolfSSL_X509_LOOKUP_hash_dir
+    \sa wolfSSL_X509_LOOKUP_load_file
+*/
+int wolfSSL_X509_LOOKUP_add_dir(WOLFSSL_X509_LOOKUP* lookup,const char* dir,long type);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the built-in X509_LOOKUP method that loads certificates and CRLs from a single file. Used with wolfSSL_X509_STORE_add_lookup().
+
+    \return pointer to the file-lookup method (always non-NULL).
+
+    _Example_
+    \code
+    // see wolfSSL_X509_LOOKUP_file usage
+    \endcode
+
+    \sa wolfSSL_X509_LOOKUP_hash_dir
+    \sa wolfSSL_X509_LOOKUP_add_dir
+*/
+WOLFSSL_X509_LOOKUP_METHOD* wolfSSL_X509_LOOKUP_file(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the built-in X509_LOOKUP method that loads certificates and CRLs by subject-hash from a directory. Used with wolfSSL_X509_STORE_add_lookup().
+
+    \return pointer to the hashed-directory lookup method (always non-NULL).
+
+    _Example_
+    \code
+    // see wolfSSL_X509_LOOKUP_hash_dir usage
+    \endcode
+
+    \sa wolfSSL_X509_LOOKUP_file
+    \sa wolfSSL_X509_LOOKUP_add_dir
+*/
+WOLFSSL_X509_LOOKUP_METHOD* wolfSSL_X509_LOOKUP_hash_dir(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_NAME_ENTRY allocated by wolfSSL_X509_NAME_ENTRY_new() or wolfSSL_X509_NAME_ENTRY_create_by_*(). Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param ne name entry to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_NAME_ENTRY_free usage
+    \endcode
+
+    \sa wolfSSL_X509_NAME_ENTRY_new
+*/
+void wolfSSL_X509_NAME_ENTRY_free(WOLFSSL_X509_NAME_ENTRY* ne);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the ASN1_STRING value of an X509_NAME entry (e.g. the actual UTF8String/PrintableString bytes).
+
+    \return pointer to the entry's value on success.
+    \return NULL on failure.
+
+    \param in name entry to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_NAME_ENTRY_get_data usage
+    \endcode
+
+    \sa wolfSSL_X509_NAME_ENTRY_get_object
+*/
+WOLFSSL_ASN1_STRING* wolfSSL_X509_NAME_ENTRY_get_data(WOLFSSL_X509_NAME_ENTRY* in);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the ASN.1 OID identifying the field of an X509_NAME entry (e.g. CN, O).
+
+    \return pointer to the OID object on success.
+    \return NULL on failure.
+
+    \param ne name entry to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_NAME_ENTRY_get_object usage
+    \endcode
+
+    \sa wolfSSL_X509_NAME_ENTRY_get_data
+*/
+WOLFSSL_ASN1_OBJECT* wolfSSL_X509_NAME_ENTRY_get_object(WOLFSSL_X509_NAME_ENTRY *ne);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new empty WOLFSSL_X509_NAME_ENTRY.
+
+    \return pointer to a new WOLFSSL_X509_NAME_ENTRY on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_NAME_ENTRY_new usage
+    \endcode
+
+    \sa wolfSSL_X509_NAME_ENTRY_free
+*/
+WOLFSSL_X509_NAME_ENTRY* wolfSSL_X509_NAME_ENTRY_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the set/RDN index of a name entry (i.e. the multi-valued RDN grouping field).
+
+    \return set index on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param ne name entry to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_NAME_ENTRY_set usage
+    \endcode
+*/
+int wolfSSL_X509_NAME_ENTRY_set(const WOLFSSL_X509_NAME_ENTRY *ne);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of entries (RDNs) in a WOLFSSL_X509_NAME.
+
+    \return number of entries on success.
+    \return 0 if name is NULL.
+
+    \param name X509_NAME to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_NAME_entry_count usage
+    \endcode
+*/
+int wolfSSL_X509_NAME_entry_count(WOLFSSL_X509_NAME* name);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_NAME structure and all its entries. Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param name X509_NAME to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_NAME_free usage
+    \endcode
+
+    \sa wolfSSL_X509_NAME_new
+*/
+void wolfSSL_X509_NAME_free(WOLFSSL_X509_NAME* name);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the size in bytes of the DER-encoded form of a WOLFSSL_X509_NAME.
+
+    \return encoded size on success.
+    \return Negative or 0 on failure.
+
+    \param name X509_NAME to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_NAME_get_sz usage
+    \endcode
+
+    \sa wolfSSL_X509_NAME_oneline
+*/
+int wolfSSL_X509_NAME_get_sz(WOLFSSL_X509_NAME* name);
+
+/*!
+    \ingroup CertsKeys
+    \brief Computes the OpenSSL-compatible 32-bit hash of a WOLFSSL_X509_NAME (first four bytes of the SHA-1 of the DER encoding, in little-endian order). Used as a key for hashed CA directories.
+
+    \return 32-bit hash value on success.
+    \return 0 on failure.
+
+    \param name X509_NAME to hash.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_NAME_hash usage
+    \endcode
+
+    \sa wolfSSL_X509_subject_name_hash
+    \sa wolfSSL_X509_issuer_name_hash
+*/
+unsigned long wolfSSL_X509_NAME_hash(WOLFSSL_X509_NAME* name);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new empty WOLFSSL_X509_NAME.
+
+    \return pointer to a new WOLFSSL_X509_NAME on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_NAME_new usage
+    \endcode
+
+    \sa wolfSSL_X509_NAME_new_ex
+    \sa wolfSSL_X509_NAME_free
+*/
+WOLFSSL_X509_NAME* wolfSSL_X509_NAME_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new empty WOLFSSL_X509_NAME using the supplied heap hint.
+
+    \return pointer to a new WOLFSSL_X509_NAME on success.
+    \return NULL on failure.
+
+    \param heap heap hint for the allocation, or NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_NAME_new_ex usage
+    \endcode
+
+    \sa wolfSSL_X509_NAME_new
+    \sa wolfSSL_X509_NAME_free
+*/
+WOLFSSL_X509_NAME* wolfSSL_X509_NAME_new_ex(void *heap);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_OBJECT (a tagged union over a certificate or CRL) previously allocated by wolfSSL_X509_OBJECT_new(). Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param obj X509 object to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_OBJECT_free usage
+    \endcode
+
+    \sa wolfSSL_X509_OBJECT_new
+    \sa wolfSSL_X509_OBJECT_free_contents
+*/
+void wolfSSL_X509_OBJECT_free(WOLFSSL_X509_OBJECT *obj);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the contents held by a WOLFSSL_X509_OBJECT without freeing the object itself. Useful when the object is stack-allocated.
+
+    \return no value, this function does not return.
+
+    \param obj object whose contents should be released.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_OBJECT_free_contents usage
+    \endcode
+
+    \sa wolfSSL_X509_OBJECT_free
+*/
+void      wolfSSL_X509_OBJECT_free_contents(WOLFSSL_X509_OBJECT* obj);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the X509 certificate contained in a WOLFSSL_X509_OBJECT when its type is X509_LU_X509. Returns NULL otherwise.
+
+    \return pointer to the contained WOLFSSL_X509 on success.
+    \return NULL otherwise.
+
+    \param obj X509 object to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_OBJECT_get0_X509 usage
+    \endcode
+
+    \sa wolfSSL_X509_OBJECT_get0_X509_CRL
+*/
+WOLFSSL_X509 *wolfSSL_X509_OBJECT_get0_X509(const WOLFSSL_X509_OBJECT *obj);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the X509 CRL contained in a WOLFSSL_X509_OBJECT when its type is X509_LU_CRL. Returns NULL otherwise.
+
+    \return pointer to the contained WOLFSSL_X509_CRL on success.
+    \return NULL otherwise.
+
+    \param obj X509 object to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_OBJECT_get0_X509_CRL usage
+    \endcode
+
+    \sa wolfSSL_X509_OBJECT_get0_X509
+*/
+WOLFSSL_X509_CRL *wolfSSL_X509_OBJECT_get0_X509_CRL(WOLFSSL_X509_OBJECT *obj);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new empty WOLFSSL_X509_OBJECT.
+
+    \return pointer to a new WOLFSSL_X509_OBJECT on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_OBJECT_new usage
+    \endcode
+
+    \sa wolfSSL_X509_OBJECT_free
+*/
+WOLFSSL_X509_OBJECT* wolfSSL_X509_OBJECT_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_PUBKEY structure previously allocated by wolfSSL_X509_PUBKEY_new() or returned by wolfSSL_X509_get_X509_PUBKEY(). Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param x X509_PUBKEY to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_PUBKEY_free usage
+    \endcode
+
+    \sa wolfSSL_X509_PUBKEY_new
+*/
+void wolfSSL_X509_PUBKEY_free(WOLFSSL_X509_PUBKEY *x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Decodes a WOLFSSL_X509_PUBKEY into a freshly allocated WOLFSSL_EVP_PKEY. The returned key must be freed with wolfSSL_EVP_PKEY_free().
+
+    \return pointer to a new EVP_PKEY on success.
+    \return NULL on failure.
+
+    \param key X509_PUBKEY to decode.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_PUBKEY_get usage
+    \endcode
+
+    \sa wolfSSL_X509_PUBKEY_set
+*/
+WOLFSSL_EVP_PKEY* wolfSSL_X509_PUBKEY_get(WOLFSSL_X509_PUBKEY* key);
+
+/*!
+    \ingroup CertsKeys
+    \brief OpenSSL-compatible accessor that returns the algorithm OID, raw public key bytes and full X509_ALGOR of a SubjectPublicKeyInfo. Any of the output pointers may be NULL.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param ppkalg if non-NULL, receives the algorithm OID.
+    \param pk if non-NULL, receives a pointer to the raw public-key bytes.
+    \param ppklen if non-NULL, receives the length of the raw key bytes.
+    \param pa if non-NULL, receives the WOLFSSL_X509_ALGOR describing the key.
+    \param pub the WOLFSSL_X509_PUBKEY to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_PUBKEY_get0_param usage
+    \endcode
+
+    \sa wolfSSL_X509_PUBKEY_get
+*/
+int wolfSSL_X509_PUBKEY_get0_param(WOLFSSL_ASN1_OBJECT **ppkalg, const unsigned char **pk, int *ppklen, WOLFSSL_X509_ALGOR **pa, WOLFSSL_X509_PUBKEY *pub);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new empty WOLFSSL_X509_PUBKEY structure.
+
+    \return pointer to a new WOLFSSL_X509_PUBKEY on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_PUBKEY_new usage
+    \endcode
+
+    \sa wolfSSL_X509_PUBKEY_free
+*/
+WOLFSSL_X509_PUBKEY *wolfSSL_X509_PUBKEY_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Encodes a WOLFSSL_EVP_PKEY into a WOLFSSL_X509_PUBKEY (SubjectPublicKeyInfo), allocating a new structure at *x and freeing any previous value.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x address of the X509_PUBKEY pointer to populate.
+    \param key EVP_PKEY containing the public key.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_PUBKEY_set usage
+    \endcode
+
+    \sa wolfSSL_X509_PUBKEY_get
+*/
+int wolfSSL_X509_PUBKEY_set(WOLFSSL_X509_PUBKEY **x, WOLFSSL_EVP_PKEY *key);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a certificate-signing-request structure (a WOLFSSL_X509 used as a PKCS#10 CSR). Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param req CSR to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_REQ_free usage
+    \endcode
+
+    \sa wolfSSL_X509_REQ_new
+*/
+void wolfSSL_X509_REQ_free(WOLFSSL_X509* req);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of attributes attached to a PKCS#10 CSR.
+
+    \return attribute count on success.
+    \return 0 if req is NULL or has no attributes.
+
+    \param req CSR to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_REQ_get_attr_count usage
+    \endcode
+*/
+int wolfSSL_X509_REQ_get_attr_count(const WOLFSSL_X509 *req);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the stack of X509 extensions requested in a PKCS#10 CSR.
+
+    \return pointer to a stack of WOLFSSL_X509_EXTENSION on success.
+    \return NULL if no extensions are present.
+
+    \param x CSR to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_REQ_get_extensions usage
+    \endcode
+*/
+const WOLFSSL_STACK *wolfSSL_X509_REQ_get_extensions(const WOLFSSL_X509 *x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the version field of a PKCS#10 CSR.
+
+    \return version value on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param req CSR to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_REQ_get_version usage
+    \endcode
+
+    \sa wolfSSL_X509_REQ_set_version
+*/
+long wolfSSL_X509_REQ_get_version(const WOLFSSL_X509 *req);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new empty PKCS#10 CSR (returned as a WOLFSSL_X509 to match OpenSSL's X509_REQ alias).
+
+    \return pointer to a new CSR on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_REQ_new usage
+    \endcode
+
+    \sa wolfSSL_X509_REQ_free
+*/
+WOLFSSL_X509* wolfSSL_X509_REQ_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Writes a human-readable text rendering of a PKCS#10 CSR to the supplied BIO.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio output BIO.
+    \param x509 CSR to print.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_REQ_print usage
+    \endcode
+
+    \sa wolfSSL_X509_print
+*/
+int wolfSSL_X509_REQ_print(WOLFSSL_BIO* bio, WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Sets the version field of a PKCS#10 CSR.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x CSR to modify.
+    \param version new version value.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_REQ_set_version usage
+    \endcode
+
+    \sa wolfSSL_X509_REQ_get_version
+*/
+int wolfSSL_X509_REQ_set_version(WOLFSSL_X509 *x, long version);
+
+/*!
+    \ingroup CertsKeys
+    \brief Verifies the signature on a PKCS#10 CSR using the supplied public key (typically the public key embedded in the request itself, demonstrating proof of possession).
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if the signature does not verify.
+
+    \param x509 CSR to verify.
+    \param pkey public key for verification.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_REQ_verify usage
+    \endcode
+
+    \sa wolfSSL_X509_verify
+*/
+int wolfSSL_X509_REQ_verify(WOLFSSL_X509* x509, WOLFSSL_EVP_PKEY* pkey);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_REVOKED structure. Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param rev revoked entry to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_REVOKED_free usage
+    \endcode
+*/
+void wolfSSL_X509_REVOKED_free(WOLFSSL_X509_REVOKED* rev);
+
+/*!
+    \ingroup CertsKeys
+    \brief Resets a WOLFSSL_X509_STORE_CTX, releasing any per-verification state but leaving the structure itself usable. Mirrors OpenSSL's X509_STORE_CTX_cleanup().
+
+    \return no value, this function does not return.
+
+    \param ctx context to clean up.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_CTX_cleanup usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_CTX_free
+*/
+void wolfSSL_X509_STORE_CTX_cleanup(WOLFSSL_X509_STORE_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_STORE_CTX previously allocated with wolfSSL_X509_STORE_CTX_new(). Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param ctx context to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_CTX_free usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_CTX_new
+*/
+void wolfSSL_X509_STORE_CTX_free(WOLFSSL_X509_STORE_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the error code recorded on a store context, e.g. during certificate-chain verification.
+
+    \return error code (0 if no error).
+
+    \param ctx store context to query.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_CTX_get_error usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_CTX_get_error_depth
+    \sa wolfSSL_X509_verify_cert_error_string
+*/
+int   wolfSSL_X509_STORE_CTX_get_error(WOLFSSL_X509_STORE_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the chain depth at which the most recent verification error occurred. Depth 0 is the peer certificate.
+
+    \return non-negative depth on success.
+    \return Negative value on error.
+
+    \param ctx store context to query.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_CTX_get_error_depth usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_CTX_get_error
+*/
+int   wolfSSL_X509_STORE_CTX_get_error_depth(WOLFSSL_X509_STORE_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new WOLFSSL_X509_STORE_CTX used to drive certificate-chain verification.
+
+    \return pointer to a new WOLFSSL_X509_STORE_CTX on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_CTX_new usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_CTX_new_ex
+    \sa wolfSSL_X509_STORE_CTX_free
+*/
+WOLFSSL_X509_STORE_CTX* wolfSSL_X509_STORE_CTX_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new WOLFSSL_X509_STORE_CTX using the supplied heap hint.
+
+    \return pointer to a new WOLFSSL_X509_STORE_CTX on success.
+    \return NULL on failure.
+
+    \param heap heap hint, or NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_CTX_new_ex usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_CTX_new
+*/
+WOLFSSL_X509_STORE_CTX* wolfSSL_X509_STORE_CTX_new_ex(void* heap);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a stack of certificates held by the given store context, including the peer chain and any intermediates accumulated during verification. The returned stack must be freed by the caller with wolfSSL_sk_X509_pop_free().
+
+    \return pointer to a new stack of WOLFSSL_X509 on success.
+    \return NULL on failure.
+
+    \param s store context to query.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_GetCerts usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_CTX_get_chain
+*/
+WOLFSSL_STACK* wolfSSL_X509_STORE_GetCerts(WOLFSSL_X509_STORE_CTX* s);
+
+/*!
+    \ingroup CertsKeys
+    \brief Adds a CRL to a certificate store. Subsequent verifications using the store will check the certificate against this CRL.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param ctx certificate store to update.
+    \param x CRL to add.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_add_crl usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_add_cert
+*/
+int wolfSSL_X509_STORE_add_crl(WOLFSSL_X509_STORE *ctx, WOLFSSL_X509_CRL *x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_STORE allocated by wolfSSL_X509_STORE_new(). Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param store store to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_free usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_new
+*/
+void         wolfSSL_X509_STORE_free(WOLFSSL_X509_STORE* store);
+
+/*!
+    \ingroup CertsKeys
+    \brief Loads trust anchors into an X509 store from a file and/or a hashed directory. Either path may be NULL to skip that source. Mirrors OpenSSL's X509_STORE_load_locations().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param str store to populate.
+    \param file path to a PEM file of CA certificates, or NULL.
+    \param dir path to a hashed CA directory, or NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_load_locations usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_set_default_paths
+*/
+int wolfSSL_X509_STORE_load_locations(WOLFSSL_X509_STORE *str, const char *file, const char *dir);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new empty WOLFSSL_X509_STORE used to hold trusted CA certificates and CRLs.
+
+    \return pointer to a new WOLFSSL_X509_STORE on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_new usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_free
+*/
+WOLFSSL_X509_STORE*  wolfSSL_X509_STORE_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Loads the system's default CA file and CA directory into the supplied store. Equivalent to wolfSSL_X509_STORE_load_locations(str, default_file, default_dir).
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param str store to populate.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_set_default_paths usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_load_locations
+    \sa wolfSSL_X509_get_default_cert_file
+*/
+int wolfSSL_X509_STORE_set_default_paths(WOLFSSL_X509_STORE *str);
+
+/*!
+    \ingroup CertsKeys
+    \brief Increments the reference count on a WOLFSSL_X509_STORE so it can be shared safely. Each successful call must be paired with a wolfSSL_X509_STORE_free().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if store is NULL.
+
+    \param store store whose reference count is incremented.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_STORE_up_ref usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_free
+*/
+int          wolfSSL_X509_STORE_up_ref(WOLFSSL_X509_STORE* store);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a WOLFSSL_X509_VERIFY_PARAM structure. Passing NULL is a no-op.
+
+    \return no value, this function does not return.
+
+    \param param verify-param to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_VERIFY_PARAM_free usage
+    \endcode
+
+    \sa wolfSSL_X509_VERIFY_PARAM_new
+*/
+void wolfSSL_X509_VERIFY_PARAM_free(WOLFSSL_X509_VERIFY_PARAM *param);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the verification flags currently set on a WOLFSSL_X509_VERIFY_PARAM (e.g. X509_V_FLAG_CRL_CHECK).
+
+    \return flag bitmask on success.
+    \return 0 if param is NULL.
+
+    \param param verify-param to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_VERIFY_PARAM_get_flags usage
+    \endcode
+*/
+int wolfSSL_X509_VERIFY_PARAM_get_flags(WOLFSSL_X509_VERIFY_PARAM *param);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new WOLFSSL_X509_VERIFY_PARAM with default settings.
+
+    \return pointer to a new verify-param on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_VERIFY_PARAM_new usage
+    \endcode
+
+    \sa wolfSSL_X509_VERIFY_PARAM_free
+*/
+WOLFSSL_X509_VERIFY_PARAM* wolfSSL_X509_VERIFY_PARAM_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Adds a Subject Alternative Name to a WOLFSSL_X509. The string in name is a NUL-terminated value whose interpretation depends on type (e.g. ASN_DNS_TYPE, ASN_IP_TYPE, ASN_RFC822_TYPE).
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x509 certificate to modify.
+    \param name alt-name string (NUL-terminated).
+    \param type SAN type (one of the ASN_*_TYPE constants).
+
+    _Example_
+    \code
+    // see wolfSSL_X509_add_altname usage
+    \endcode
+
+    \sa wolfSSL_X509_add_altname_ex
+*/
+int wolfSSL_X509_add_altname(WOLFSSL_X509* x509, const char* name, int type);
+
+/*!
+    \ingroup CertsKeys
+    \brief Adds a Subject Alternative Name to a WOLFSSL_X509 with an explicit length, supporting binary SAN values (e.g. IP addresses).
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x509 certificate to modify.
+    \param name alt-name bytes.
+    \param nameSz length of name in bytes.
+    \param type SAN type (one of the ASN_*_TYPE constants).
+
+    _Example_
+    \code
+    // see wolfSSL_X509_add_altname_ex usage
+    \endcode
+
+    \sa wolfSSL_X509_add_altname
+*/
+int wolfSSL_X509_add_altname_ex(WOLFSSL_X509* x509, const char* name, word32 nameSz, int type);
+
+/*!
+    \ingroup CertsKeys
+    \brief Adds an X509 extension to a certificate at the given position. loc of -1 appends the extension.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x certificate to modify.
+    \param ex extension to add (copied).
+    \param loc insertion index, or -1 to append.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_add_ext usage
+    \endcode
+
+    \sa wolfSSL_X509_delete_ext
+    \sa wolfSSL_X509_get_ext
+*/
+int wolfSSL_X509_add_ext(WOLFSSL_X509 *x, WOLFSSL_X509_EXTENSION *ex, int loc);
+
+/*!
+    \ingroup CertsKeys
+    \brief Determines whether the given certificate is a CA. Checks Basic Constraints and, where relevant, Netscape Cert-Type and Key Usage. Mirrors OpenSSL's X509_check_ca().
+
+    \return 1 if x509 is a CA.
+    \return 0 if it is not.
+    \return Other values per OpenSSL semantics for older / Netscape-style CAs.
+
+    \param x509 certificate to test.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_check_ca usage
+    \endcode
+
+    \sa wolfSSL_X509_get_isCA
+*/
+int wolfSSL_X509_check_ca(WOLFSSL_X509 *x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Checks that the public key embedded in x509 matches the supplied private key.
+
+    \return WOLFSSL_SUCCESS if the keys match.
+    \return WOLFSSL_FAILURE otherwise.
+
+    \param x509 certificate whose public key is checked.
+    \param pkey private key to test.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_check_private_key usage
+    \endcode
+
+    \sa wolfSSL_CTX_check_private_key
+*/
+int wolfSSL_X509_check_private_key(WOLFSSL_X509* x509, WOLFSSL_EVP_PKEY* pkey);
+
+/*!
+    \ingroup CertsKeys
+    \brief Lexicographically compares two certificates by hashing their DER encodings. Returns 0 if equal.
+
+    \return 0 if the two certificates are byte-identical.
+    \return Non-zero value otherwise.
+
+    \param a first certificate.
+    \param b second certificate.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_cmp usage
+    \endcode
+*/
+int wolfSSL_X509_cmp(const WOLFSSL_X509* a, const WOLFSSL_X509* b);
+
+/*!
+    \ingroup CertsKeys
+    \brief Compares asnTime against the current system time.
+
+    \return -1 if asnTime is in the past.
+    \return 1 if asnTime is in the future.
+    \return 0 on error.
+
+    \param asnTime ASN1_TIME value to compare.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_cmp_current_time usage
+    \endcode
+*/
+int       wolfSSL_X509_cmp_current_time(const WOLFSSL_ASN1_TIME* asnTime);
+
+/*!
+    \ingroup CertsKeys
+    \brief Removes the X509 extension at the given index and returns it. Caller takes ownership and must free with wolfSSL_X509_EXTENSION_free().
+
+    \return pointer to the removed extension on success.
+    \return NULL on error or invalid index.
+
+    \param x509 certificate to modify.
+    \param loc index of the extension to remove.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_delete_ext usage
+    \endcode
+
+    \sa wolfSSL_X509_add_ext
+*/
+WOLFSSL_X509_EXTENSION *wolfSSL_X509_delete_ext(WOLFSSL_X509 *x509, int loc);
+
+/*!
+    \ingroup CertsKeys
+    \brief Creates an independent deep copy of a WOLFSSL_X509. The returned certificate must be freed with wolfSSL_X509_free().
+
+    \return pointer to a new certificate on success.
+    \return NULL on failure.
+
+    \param x certificate to duplicate.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_dup usage
+    \endcode
+
+    \sa wolfSSL_X509_new
+    \sa wolfSSL_X509_free
+*/
+WOLFSSL_X509* wolfSSL_X509_dup(WOLFSSL_X509* x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a stack of email strings returned by wolfSSL_X509_get1_email().
+
+    \return no value, this function does not return.
+
+    \param sk stack of email strings to free.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_email_free usage
+    \endcode
+*/
+void wolfSSL_X509_email_free(WOLF_STACK_OF(WOLFSSL_STRING) *sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns whether the extension identified by nid in x509 is marked critical.
+
+    \return 1 if the extension is critical.
+    \return 0 if not.
+    \return Negative value if the extension is not present.
+
+    \param x509 certificate to inspect.
+    \param nid NID of the extension.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ext_get_critical_by_NID usage
+    \endcode
+
+    \sa wolfSSL_X509_ext_isSet_by_NID
+*/
+int  wolfSSL_X509_ext_get_critical_by_NID(WOLFSSL_X509* x509, int nid);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns whether the extension identified by nid is present in x509.
+
+    \return 1 if the extension is present.
+    \return 0 otherwise.
+
+    \param x509 certificate to inspect.
+    \param nid NID of the extension.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_ext_isSet_by_NID usage
+    \endcode
+
+    \sa wolfSSL_X509_ext_get_critical_by_NID
+*/
+int  wolfSSL_X509_ext_isSet_by_NID(WOLFSSL_X509* x509, int nid);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the stack of X509 extensions held by x without transferring ownership.
+
+    \return pointer to a stack of WOLFSSL_X509_EXTENSION on success.
+    \return NULL if x has no extensions.
+
+    \param x certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get0_extensions usage
+    \endcode
+
+    \sa wolfSSL_X509_get_ext
+*/
+const WOLFSSL_STACK *wolfSSL_X509_get0_extensions(const WOLFSSL_X509 *x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the AlgorithmIdentifier from the to-be-signed portion of the certificate (i.e. the signatureAlgorithm field within tbsCertificate).
+
+    \return pointer to a const WOLFSSL_X509_ALGOR on success.
+    \return NULL on failure.
+
+    \param x certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get0_tbs_sigalg usage
+    \endcode
+*/
+const WOLFSSL_X509_ALGOR* wolfSSL_X509_get0_tbs_sigalg(const WOLFSSL_X509 *x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a pointer to the WOLFSSL_X509_PUBKEY (SubjectPublicKeyInfo) embedded in x509. The returned pointer is owned by the certificate and must not be freed by the caller.
+
+    \return pointer to the certificate's X509_PUBKEY on success.
+    \return NULL on failure.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_X509_PUBKEY usage
+    \endcode
+
+    \sa wolfSSL_X509_get_pubkey
+*/
+WOLFSSL_X509_PUBKEY *wolfSSL_X509_get_X509_PUBKEY(const WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Indicates whether the Authority Information Access extension contained more entries than wolfSSL stored internally (i.e. parsing was truncated).
+
+    \return non-zero if AIA was truncated.
+    \return 0 if the full AIA was retained.
+
+    \param x certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_aia_overflow usage
+    \endcode
+*/
+int wolfSSL_X509_get_aia_overflow(WOLFSSL_X509 *x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the compiled-in default trusted-CA directory path used by wolfSSL_X509_STORE_set_default_paths().
+
+    \return pointer to a NUL-terminated path string.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_default_cert_dir usage
+    \endcode
+
+    \sa wolfSSL_X509_get_default_cert_dir_env
+    \sa wolfSSL_X509_STORE_set_default_paths
+*/
+const char* wolfSSL_X509_get_default_cert_dir(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the name of the environment variable that, if set, overrides the compiled-in default trusted-CA directory (typically "SSL_CERT_DIR").
+
+    \return pointer to a NUL-terminated environment-variable name.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_default_cert_dir_env usage
+    \endcode
+
+    \sa wolfSSL_X509_get_default_cert_dir
+*/
+const char* wolfSSL_X509_get_default_cert_dir_env(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the compiled-in default trusted-CA file path used by wolfSSL_X509_STORE_set_default_paths().
+
+    \return pointer to a NUL-terminated path string.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_default_cert_file usage
+    \endcode
+
+    \sa wolfSSL_X509_get_default_cert_file_env
+    \sa wolfSSL_X509_STORE_set_default_paths
+*/
+const char* wolfSSL_X509_get_default_cert_file(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the name of the environment variable that, if set, overrides the compiled-in default trusted-CA file (typically "SSL_CERT_FILE").
+
+    \return pointer to a NUL-terminated environment-variable name.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_default_cert_file_env usage
+    \endcode
+
+    \sa wolfSSL_X509_get_default_cert_file
+*/
+const char* wolfSSL_X509_get_default_cert_file_env(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Retrieves application data previously stored on a WOLFSSL_X509 via wolfSSL_X509_set_ex_data() at slot idx.
+
+    \return the stored pointer on success.
+    \return NULL if no value is stored or on error.
+
+    \param x509 certificate to query.
+    \param idx ex_data slot index returned by wolfSSL_X509_get_ex_new_index().
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_ex_data usage
+    \endcode
+
+    \sa wolfSSL_X509_set_ex_data
+*/
+void *wolfSSL_X509_get_ex_data(WOLFSSL_X509 *x509, int idx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the X509 extension at index loc within x. The returned pointer is owned by x.
+
+    \return pointer to the extension on success.
+    \return NULL on invalid index or error.
+
+    \param x certificate to inspect.
+    \param loc zero-based extension index.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_ext usage
+    \endcode
+
+    \sa wolfSSL_X509_get_ext_count
+    \sa wolfSSL_X509_set_ext
+*/
+WOLFSSL_X509_EXTENSION* wolfSSL_X509_get_ext(const WOLFSSL_X509* x, int loc);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of X509 extensions present in the certificate.
+
+    \return extension count (>=0) on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param passedCert certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_ext_count usage
+    \endcode
+
+    \sa wolfSSL_X509_get_ext
+*/
+int wolfSSL_X509_get_ext_count(const WOLFSSL_X509* passedCert);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the Extended Key Usage bitmask (e.g. XKU_SSL_SERVER | XKU_SSL_CLIENT) parsed from the EKU extension.
+
+    \return EKU bitmask on success.
+    \return 0 if the certificate has no EKU.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_extended_key_usage usage
+    \endcode
+
+    \sa wolfSSL_X509_get_key_usage
+*/
+unsigned int wolfSSL_X509_get_extended_key_usage(WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the per-certificate extension-flag bitmask (e.g. EXFLAG_CA, EXFLAG_KUSAGE) computed from the parsed extensions.
+
+    \return bitmask of EXFLAG_* values.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_extension_flags usage
+    \endcode
+
+    \sa wolfSSL_X509_get_key_usage
+    \sa wolfSSL_X509_get_extended_key_usage
+*/
+unsigned int wolfSSL_X509_get_extension_flags(WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Indicates whether the certificate's BasicConstraints extension explicitly sets pathLenConstraint.
+
+    \return non-zero if pathLenConstraint is set.
+    \return 0 otherwise.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_isSet_pathLength usage
+    \endcode
+
+    \sa wolfSSL_X509_get_pathLength
+*/
+int  wolfSSL_X509_get_isSet_pathLength(WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the parsed Key Usage extension bitmask (legacy wolfSSL-style accessor; see also wolfSSL_X509_get_key_usage()).
+
+    \return Key Usage bitmask on success.
+    \return 0 if the extension is not present.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_keyUsage usage
+    \endcode
+
+    \sa wolfSSL_X509_get_key_usage
+*/
+unsigned int wolfSSL_X509_get_keyUsage(WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief OpenSSL-compatible alias returning the Key Usage extension bitmask (e.g. KEYUSE_DIGITAL_SIG | KEYUSE_KEY_ENCIPHER).
+
+    \return Key Usage bitmask on success.
+    \return 0 if the extension is not present.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_key_usage usage
+    \endcode
+
+    \sa wolfSSL_X509_get_keyUsage
+*/
+unsigned int wolfSSL_X509_get_key_usage(WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Formats a WOLFSSL_X509_NAME as a single line of text. If in is NULL a new buffer is allocated; otherwise up to sz bytes are written to in.
+
+    \return pointer to the formatted string on success.
+    \return NULL on error.
+
+    \param name X509_NAME to render.
+    \param in destination buffer or NULL to have one allocated.
+    \param sz size of in in bytes (ignored when in is NULL).
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_name_oneline usage
+    \endcode
+
+    \sa wolfSSL_X509_NAME_oneline
+*/
+char* wolfSSL_X509_get_name_oneline(WOLFSSL_X509_NAME* name, char* in, int sz);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the pathLenConstraint value from the BasicConstraints extension.
+
+    \return pathLen value on success.
+    \return 0 if the extension is not set.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_pathLength usage
+    \endcode
+
+    \sa wolfSSL_X509_get_isSet_pathLength
+*/
+unsigned int wolfSSL_X509_get_pathLength(WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the public key contained in the certificate as a newly allocated WOLFSSL_EVP_PKEY. The caller must free the returned key with wolfSSL_EVP_PKEY_free().
+
+    \return pointer to a new EVP_PKEY on success.
+    \return NULL on failure.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_pubkey usage
+    \endcode
+
+    \sa wolfSSL_X509_get_X509_PUBKEY
+*/
+WOLFSSL_EVP_PKEY* wolfSSL_X509_get_pubkey(WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns an integer identifying the algorithm of the certificate's public key (e.g. RSAk, ECDSAk).
+
+    \return public-key type on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_pubkey_type usage
+    \endcode
+
+    \sa wolfSSL_X509_get_pubkey
+*/
+int wolfSSL_X509_get_pubkey_type(WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the certificate's serial number as a newly allocated WOLFSSL_ASN1_INTEGER. The caller must free it with wolfSSL_ASN1_INTEGER_free().
+
+    \return pointer to a new ASN1_INTEGER on success.
+    \return NULL on failure.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_serialNumber usage
+    \endcode
+
+    \sa wolfSSL_X509_get_serial_number
+*/
+WOLFSSL_ASN1_INTEGER* wolfSSL_X509_get_serialNumber(WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the NID identifying the algorithm used to sign x (e.g. NID_sha256WithRSAEncryption).
+
+    \return NID on success.
+    \return 0 on error.
+
+    \param x certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_signature_nid usage
+    \endcode
+
+    \sa wolfSSL_X509_get_signature_type
+*/
+int wolfSSL_X509_get_signature_nid(const WOLFSSL_X509* x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a pointer to the raw DER encoding of the to-be-signed (tbsCertificate) portion of the certificate. The returned buffer is owned by x509.
+
+    \return pointer to the TBS bytes on success.
+    \return NULL on failure.
+
+    \param x509 certificate to inspect.
+    \param outSz out-parameter receiving the length of the TBS bytes.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_tbs usage
+    \endcode
+
+    \sa wolfSSL_X509_get_der
+*/
+const unsigned char* wolfSSL_X509_get_tbs(WOLFSSL_X509* x509, int* outSz);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the version field of a certificate as a zero-based number (i.e. v3 returns 2).
+
+    \return version value on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_get_version usage
+    \endcode
+
+    \sa wolfSSL_X509_version
+*/
+long wolfSSL_X509_get_version(const WOLFSSL_X509 *x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Computes the OpenSSL-compatible 32-bit hash of the certificate's issuer name.
+
+    \return 32-bit issuer-name hash on success.
+    \return 0 on failure.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_issuer_name_hash usage
+    \endcode
+
+    \sa wolfSSL_X509_subject_name_hash
+    \sa wolfSSL_X509_NAME_hash
+*/
+unsigned long  wolfSSL_X509_issuer_name_hash(const WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new empty WOLFSSL_X509 structure.
+
+    \return pointer to a new WOLFSSL_X509 on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_new usage
+    \endcode
+
+    \sa wolfSSL_X509_new_ex
+    \sa wolfSSL_X509_free
+*/
+WOLFSSL_X509* wolfSSL_X509_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates and initializes a new empty WOLFSSL_X509 structure using the supplied heap hint.
+
+    \return pointer to a new WOLFSSL_X509 on success.
+    \return NULL on failure.
+
+    \param heap heap hint, or NULL for the default heap.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_new_ex usage
+    \endcode
+
+    \sa wolfSSL_X509_new
+    \sa wolfSSL_X509_free
+*/
+WOLFSSL_X509* wolfSSL_X509_new_ex(void* heap);
+
+/*!
+    \ingroup CertsKeys
+    \brief Writes a human-readable text dump of a certificate to the supplied BIO. Mirrors OpenSSL's X509_print().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio destination BIO.
+    \param x509 certificate to print.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_print usage
+    \endcode
+
+    \sa wolfSSL_X509_print_fp
+    \sa wolfSSL_X509_REQ_print
+*/
+int wolfSSL_X509_print(WOLFSSL_BIO* bio, WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Writes a human-readable text dump of a certificate to the supplied file stream.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param fp destination file stream.
+    \param x509 certificate to print.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_print_fp usage
+    \endcode
+
+    \sa wolfSSL_X509_print
+*/
+int wolfSSL_X509_print_fp(XFILE fp, WOLFSSL_X509 *x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Internal-style accessor that prepares the X509_EXTENSION at index loc for modification, returning a pointer to it.
+
+    \return pointer to the extension on success.
+    \return NULL on error.
+
+    \param x certificate to operate on.
+    \param loc extension index.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_set_ext usage
+    \endcode
+
+    \sa wolfSSL_X509_get_ext
+    \sa wolfSSL_X509_add_ext
+*/
+WOLFSSL_X509_EXTENSION* wolfSSL_X509_set_ext(WOLFSSL_X509* x, int loc);
+
+/*!
+    \ingroup CertsKeys
+    \brief Sets the (legacy) Netscape Cert-Type extension on the certificate.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x509 certificate to modify.
+    \param nsCertType Netscape Cert-Type bitmask.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_set_ns_cert_type usage
+    \endcode
+*/
+int wolfSSL_X509_set_ns_cert_type(WOLFSSL_X509* x509, int nsCertType);
+
+/*!
+    \ingroup CertsKeys
+    \brief Sets the public key of a certificate from a WOLFSSL_EVP_PKEY. The key is copied into the certificate.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param cert certificate to modify.
+    \param pkey public key to install.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_set_pubkey usage
+    \endcode
+
+    \sa wolfSSL_X509_get_pubkey
+*/
+int wolfSSL_X509_set_pubkey(WOLFSSL_X509* cert, WOLFSSL_EVP_PKEY* pkey);
+
+/*!
+    \ingroup CertsKeys
+    \brief Computes and installs the Subject Key Identifier extension on a certificate from its public key (using the default hash).
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x509 certificate to modify.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_set_subject_key_id_ex usage
+    \endcode
+
+    \sa wolfSSL_X509_set_subject_key_id
+*/
+int wolfSSL_X509_set_subject_key_id_ex(WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Sets the version field on a certificate. v is zero-based (i.e. pass 2 for v3).
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x509 certificate to modify.
+    \param v new version value.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_set_version usage
+    \endcode
+
+    \sa wolfSSL_X509_get_version
+*/
+int wolfSSL_X509_set_version(WOLFSSL_X509* x509, long v);
+
+/*!
+    \ingroup CertsKeys
+    \brief Signs a certificate using the digest/key configured in ctx (set up via wolfSSL_EVP_DigestSignInit()). The serialized DER size on success.
+
+    \return size of the signed DER on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x509 certificate to sign.
+    \param ctx EVP_MD_CTX configured with signing key and digest.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_sign_ctx usage
+    \endcode
+
+    \sa wolfSSL_X509_sign
+*/
+int wolfSSL_X509_sign_ctx(WOLFSSL_X509 *x509, WOLFSSL_EVP_MD_CTX *ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Computes the OpenSSL-compatible 32-bit hash of the certificate's subject name.
+
+    \return 32-bit subject-name hash on success.
+    \return 0 on failure.
+
+    \param x509 certificate to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_subject_name_hash usage
+    \endcode
+
+    \sa wolfSSL_X509_issuer_name_hash
+    \sa wolfSSL_X509_NAME_hash
+*/
+unsigned long  wolfSSL_X509_subject_name_hash(const WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Increments the reference count on a WOLFSSL_X509 so it can be shared safely between multiple owners. Each successful call must be paired with a wolfSSL_X509_free().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if x509 is NULL or the reference count could not be incremented.
+
+    \param x509 certificate whose reference count is incremented.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_up_ref usage
+    \endcode
+
+    \sa wolfSSL_X509_free
+*/
+int wolfSSL_X509_up_ref(WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Verifies the signature of a certificate using the supplied public key (typically the issuer's).
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if the signature does not verify.
+
+    \param x509 certificate to verify.
+    \param pkey public key for verification.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_verify usage
+    \endcode
+
+    \sa wolfSSL_X509_verify_cert
+*/
+int wolfSSL_X509_verify(WOLFSSL_X509* x509, WOLFSSL_EVP_PKEY* pkey);
+
+/*!
+    \ingroup CertsKeys
+    \brief Builds and verifies a certificate chain using the trust anchors and CRLs configured on the supplied store context. Mirrors OpenSSL's X509_verify_cert().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if the chain cannot be built or verified; see wolfSSL_X509_STORE_CTX_get_error().
+
+    \param ctx store context, previously initialized with wolfSSL_X509_STORE_CTX_init().
+
+    _Example_
+    \code
+    // see wolfSSL_X509_verify_cert usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_CTX_get_error
+    \sa wolfSSL_X509_verify
+*/
+int         wolfSSL_X509_verify_cert(WOLFSSL_X509_STORE_CTX* ctx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a static human-readable description of a chain-verification error code returned by wolfSSL_X509_STORE_CTX_get_error().
+
+    \return pointer to a NUL-terminated description (never NULL).
+
+    \param err error code.
+
+    _Example_
+    \code
+    // see wolfSSL_X509_verify_cert_error_string usage
+    \endcode
+
+    \sa wolfSSL_X509_STORE_CTX_get_error
+*/
+const char* wolfSSL_X509_verify_cert_error_string(long err);
+
