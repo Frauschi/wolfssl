@@ -23535,3 +23535,1102 @@ int         wolfSSL_X509_verify_cert(WOLFSSL_X509_STORE_CTX* ctx);
 */
 const char* wolfSSL_X509_verify_cert_error_string(long err);
 
+/*!
+    \ingroup CertsKeys
+    \brief Allocates a new empty WOLFSSL_STACK node used internally by the OpenSSL-compatible sk_* helpers.
+
+    \return pointer to a newly allocated stack node on success.
+    \return NULL on allocation failure.
+
+    \param heap optional heap hint used for the underlying allocation; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_new_node usage
+    \endcode
+
+    \sa wolfSSL_sk_free_node
+    \sa wolfSSL_sk_push_node
+*/
+WOLFSSL_STACK* wolfSSL_sk_new_node(void* heap);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees a single WOLFSSL_STACK node previously allocated with wolfSSL_sk_new_node(). Does not free any data referenced by the node.
+
+    \return none.
+
+    \param in node to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_free_node usage
+    \endcode
+
+    \sa wolfSSL_sk_new_node
+*/
+void wolfSSL_sk_free_node(WOLFSSL_STACK* in);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the WOLFSSL_STACK node at the given index, walking from the head of the stack.
+
+    \return pointer to the node at index idx on success.
+    \return NULL if sk is NULL or idx is out of range.
+
+    \param sk stack to traverse.
+    \param idx zero-based index of the desired node.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_get_node usage
+    \endcode
+
+    \sa wolfSSL_sk_value
+*/
+WOLFSSL_STACK* wolfSSL_sk_get_node(WOLFSSL_STACK* sk, int idx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Pushes a pre-allocated WOLFSSL_STACK node onto the front of *stack, mirroring OpenSSL's internal sk_push_node helper.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if stack or in is NULL.
+
+    \param stack address of the stack head to update.
+    \param in node to push.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_push_node usage
+    \endcode
+
+    \sa wolfSSL_sk_push
+    \sa wolfSSL_sk_new_node
+*/
+int wolfSSL_sk_push_node(WOLFSSL_STACK** stack, WOLFSSL_STACK* in);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the entire WOLFSSL_STACK chain. The element data held by each node is not freed; use wolfSSL_sk_pop_free()-style helpers when ownership of the elements must be released.
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_free usage
+    \endcode
+
+    \sa wolfSSL_sk_pop_free
+    \sa wolfSSL_sk_X509_pop_free
+*/
+void wolfSSL_sk_free(WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a deep copy of the supplied WOLFSSL_STACK, duplicating each element using the type-specific copy routines. Mirrors OpenSSL's sk_dup().
+
+    \return newly allocated stack on success.
+    \return NULL on failure.
+
+    \param sk stack to duplicate.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_dup usage
+    \endcode
+
+    \sa wolfSSL_shallow_sk_dup
+*/
+WOLFSSL_STACK* wolfSSL_sk_dup(WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a shallow copy of the supplied stack. The new stack references the same elements as the original; ownership of those elements is not transferred.
+
+    \return newly allocated stack on success.
+    \return NULL on failure.
+
+    \param sk stack to duplicate.
+
+    _Example_
+    \code
+    // see wolfSSL_shallow_sk_dup usage
+    \endcode
+
+    \sa wolfSSL_sk_dup
+*/
+WOLFSSL_STACK* wolfSSL_shallow_sk_dup(WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Appends a generic data pointer to the stack. Mirrors OpenSSL's sk_push().
+
+    \return new stack size on success.
+    \return WOLFSSL_FAILURE if st is NULL or allocation fails.
+
+    \param st stack to append to.
+    \param data pointer stored in the new node (not copied).
+
+    _Example_
+    \code
+    // see wolfSSL_sk_push usage
+    \endcode
+
+    \sa wolfSSL_sk_insert
+    \sa wolfSSL_sk_pop
+*/
+int wolfSSL_sk_push(WOLFSSL_STACK *st, const void *data);
+
+/*!
+    \ingroup CertsKeys
+    \brief Inserts a data pointer at the given index, shifting later entries up by one. An idx of -1 appends to the end. Mirrors OpenSSL's sk_insert().
+
+    \return new stack size on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param sk stack to modify.
+    \param data pointer stored in the new node.
+    \param idx zero-based insertion index, or -1 to append.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_insert usage
+    \endcode
+
+    \sa wolfSSL_sk_push
+*/
+int wolfSSL_sk_insert(WOLFSSL_STACK *sk, const void *data, int idx);
+
+/*!
+    \ingroup CertsKeys
+    \brief Removes and returns the top element of the stack. Mirrors OpenSSL's sk_pop().
+
+    \return pointer to the popped element on success.
+    \return NULL if the stack is empty or NULL.
+
+    \param sk stack to pop from.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_pop usage
+    \endcode
+
+    \sa wolfSSL_sk_push
+*/
+void* wolfSSL_sk_pop(WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of elements currently held in the stack. Mirrors OpenSSL's sk_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_num usage
+    \endcode
+
+    \sa wolfSSL_sk_value
+*/
+int wolfSSL_sk_num(const WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the element stored at index i without removing it. Mirrors OpenSSL's sk_value().
+
+    \return pointer to the element on success.
+    \return NULL if sk is NULL or i is out of range.
+
+    \param sk stack to inspect.
+    \param i zero-based element index.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_value usage
+    \endcode
+
+    \sa wolfSSL_sk_num
+*/
+void* wolfSSL_sk_value(const WOLFSSL_STACK* sk, int i);
+
+/*!
+    \ingroup CertsKeys
+    \brief Removes and returns the top WOLFSSL_X509 of the stack. Mirrors OpenSSL's sk_X509_pop().
+
+    \return popped WOLFSSL_X509 on success.
+    \return NULL if the stack is empty or NULL.
+
+    \param sk stack to pop from.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_pop usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_push
+    \sa wolfSSL_sk_X509_free
+*/
+WOLFSSL_X509* wolfSSL_sk_X509_pop(WOLF_STACK_OF(WOLFSSL_X509)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_X509 element it contains using wolfSSL_X509_free(). Mirrors OpenSSL's sk_X509_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_free usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_pop_free
+*/
+void wolfSSL_sk_X509_free(WOLF_STACK_OF(WOLFSSL_X509)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates an empty WOLFSSL_STACK suitable for holding WOLFSSL_X509_CRL elements. Mirrors OpenSSL's sk_X509_CRL_new().
+
+    \return newly allocated stack on success.
+    \return NULL on allocation failure.
+
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_CRL_new usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_CRL_new_null
+    \sa wolfSSL_sk_X509_CRL_free
+*/
+WOLFSSL_STACK* wolfSSL_sk_X509_CRL_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates an empty WOLFSSL_STACK suitable for holding WOLFSSL_X509_CRL elements (mirrors OpenSSL's sk_X509_CRL_new_null()).
+
+    \return newly allocated stack on success.
+    \return NULL on allocation failure.
+
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_CRL_new_null usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_CRL_new
+*/
+WOLFSSL_STACK* wolfSSL_sk_X509_CRL_new_null(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_X509_CRL element it contains. Mirrors OpenSSL's sk_X509_CRL_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_CRL_free usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_CRL_new
+*/
+void wolfSSL_sk_X509_CRL_free(WOLF_STACK_OF(WOLFSSL_X509_CRL)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_X509_CRL elements held in the stack. Mirrors OpenSSL's sk_X509_CRL_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_CRL_num usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_CRL_value
+*/
+int wolfSSL_sk_X509_CRL_num(WOLF_STACK_OF(WOLFSSL_X509)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates an empty WOLFSSL_STACK suitable for holding WOLFSSL_GENERAL_NAME elements. Mirrors OpenSSL's sk_GENERAL_NAME_new().
+
+    \return newly allocated stack on success.
+    \return NULL on allocation failure.
+
+    \param cmpFunc optional comparison callback used for ordered insertion; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_GENERAL_NAME_new usage
+    \endcode
+
+    \sa wolfSSL_sk_GENERAL_NAME_push
+    \sa wolfSSL_sk_GENERAL_NAME_free
+*/
+WOLFSSL_STACK* wolfSSL_sk_GENERAL_NAME_new(void *cmpFunc);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_GENERAL_NAME elements held in the stack. Mirrors OpenSSL's sk_GENERAL_NAME_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_GENERAL_NAME_num usage
+    \endcode
+
+    \sa wolfSSL_sk_GENERAL_NAME_value
+*/
+int wolfSSL_sk_GENERAL_NAME_num(WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_GENERAL_NAME element it contains. Mirrors OpenSSL's sk_GENERAL_NAME_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_GENERAL_NAME_free usage
+    \endcode
+
+    \sa wolfSSL_sk_GENERAL_NAME_pop_free
+*/
+void wolfSSL_sk_GENERAL_NAME_free(WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_GENERAL_SUBTREE elements held in the stack. Mirrors OpenSSL's sk_GENERAL_SUBTREE_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_GENERAL_SUBTREE_num usage
+    \endcode
+
+    \sa wolfSSL_sk_GENERAL_SUBTREE_value
+*/
+int wolfSSL_sk_GENERAL_SUBTREE_num(const WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_DIST_POINT elements held in the stack. Mirrors OpenSSL's sk_DIST_POINT_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_DIST_POINT_num usage
+    \endcode
+
+    \sa wolfSSL_sk_DIST_POINT_value
+*/
+int wolfSSL_sk_DIST_POINT_num(WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_DIST_POINT element it contains. Mirrors OpenSSL's sk_DIST_POINT_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_DIST_POINT_free usage
+    \endcode
+
+    \sa wolfSSL_sk_DIST_POINT_pop_free
+*/
+void wolfSSL_sk_DIST_POINT_free(WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_ACCESS_DESCRIPTION elements held in the stack. Mirrors OpenSSL's sk_ACCESS_DESCRIPTION_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_ACCESS_DESCRIPTION_num usage
+    \endcode
+
+    \sa wolfSSL_sk_ACCESS_DESCRIPTION_value
+*/
+int wolfSSL_sk_ACCESS_DESCRIPTION_num(WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_ACCESS_DESCRIPTION element it contains. Mirrors OpenSSL's sk_ACCESS_DESCRIPTION_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_ACCESS_DESCRIPTION_free usage
+    \endcode
+
+    \sa wolfSSL_sk_ACCESS_DESCRIPTION_pop_free
+*/
+void wolfSSL_sk_ACCESS_DESCRIPTION_free(WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates an empty WOLFSSL_STACK suitable for holding WOLFSSL_ASN1_OBJECT elements. Mirrors OpenSSL's sk_ASN1_OBJECT_new_null().
+
+    \return newly allocated stack on success.
+    \return NULL on allocation failure.
+
+
+    _Example_
+    \code
+    // see wolfSSL_sk_new_asn1_obj usage
+    \endcode
+
+    \sa wolfSSL_sk_ASN1_OBJECT_push
+    \sa wolfSSL_sk_ASN1_OBJECT_free
+*/
+WOLFSSL_STACK* wolfSSL_sk_new_asn1_obj(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_ASN1_OBJECT element it contains. Mirrors OpenSSL's sk_ASN1_OBJECT_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_ASN1_OBJECT_free usage
+    \endcode
+
+    \sa wolfSSL_sk_ASN1_OBJECT_pop_free
+*/
+void wolfSSL_sk_ASN1_OBJECT_free(WOLF_STACK_OF(WOLFSSL_ASN1_OBJECT)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_X509_EXTENSION elements held in the stack. Mirrors OpenSSL's sk_X509_EXTENSION_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_EXTENSION_num usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_EXTENSION_value
+*/
+int wolfSSL_sk_X509_EXTENSION_num(WOLF_STACK_OF(WOLFSSL_X509_EXTENSION)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_X509_REVOKED entries in the stack. Mirrors OpenSSL's sk_X509_REVOKED_num().
+
+    \return number of entries (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_REVOKED_num usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_REVOKED_value
+*/
+int       wolfSSL_sk_X509_REVOKED_num(WOLFSSL_STACK* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_CIPHER reference. Mirrors OpenSSL's sk_CIPHER_free(). Cipher entries are typically owned by the SSL context so only the stack itself is released.
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_CIPHER_free usage
+    \endcode
+
+    \sa wolfSSL_sk_SSL_CIPHER_free
+*/
+void wolfSSL_sk_CIPHER_free(WOLF_STACK_OF(WOLFSSL_CIPHER)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates an empty WOLFSSL_STACK suitable for holding WOLFSSL_X509_EXTENSION elements. Mirrors OpenSSL's sk_X509_EXTENSION_new().
+
+    \return newly allocated stack on success.
+    \return NULL on allocation failure.
+
+
+    _Example_
+    \code
+    // see wolfSSL_sk_new_x509_ext usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_EXTENSION_push
+    \sa wolfSSL_sk_X509_EXTENSION_free
+*/
+WOLFSSL_STACK* wolfSSL_sk_new_x509_ext(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates an empty WOLFSSL_STACK suitable for holding WOLFSSL_X509 elements (sk_X509_new_null() compatible).
+
+    \return newly allocated stack on success.
+    \return NULL on allocation failure.
+
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_new_null usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_push
+    \sa wolfSSL_sk_X509_free
+*/
+WOLFSSL_STACK* wolfSSL_sk_X509_new_null(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_X509 elements held in the stack. Mirrors OpenSSL's sk_X509_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if s is NULL.
+
+    \param s stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_num usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_value
+*/
+int wolfSSL_sk_X509_num(const WOLF_STACK_OF(WOLFSSL_X509) *s);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates an empty WOLFSSL_STACK suitable for holding WOLFSSL_X509_OBJECT elements. Mirrors OpenSSL's sk_X509_OBJECT_new().
+
+    \return newly allocated stack on success.
+    \return NULL on allocation failure.
+
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_OBJECT_new usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_OBJECT_push
+    \sa wolfSSL_sk_X509_OBJECT_free
+*/
+WOLFSSL_STACK* wolfSSL_sk_X509_OBJECT_new(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_X509_OBJECT element it contains. Mirrors OpenSSL's sk_X509_OBJECT_free().
+
+    \return none.
+
+    \param s stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_OBJECT_free usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_OBJECT_pop_free
+*/
+void wolfSSL_sk_X509_OBJECT_free(WOLFSSL_STACK* s);
+
+/*!
+    \ingroup CertsKeys
+    \brief Pushes a WOLFSSL_X509_OBJECT onto the stack. Mirrors OpenSSL's sk_X509_OBJECT_push().
+
+    \return new stack size on success.
+    \return WOLFSSL_FAILURE if sk or obj is NULL.
+
+    \param sk stack to push onto.
+    \param obj object to append.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_OBJECT_push usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_OBJECT_pop_free
+*/
+int wolfSSL_sk_X509_OBJECT_push(WOLFSSL_STACK* sk, WOLFSSL_X509_OBJECT* obj);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates an empty WOLFSSL_STACK suitable for holding WOLFSSL_X509_INFO elements (sk_X509_INFO_new_null() compatible).
+
+    \return newly allocated stack on success.
+    \return NULL on allocation failure.
+
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_INFO_new_null usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_INFO_push
+    \sa wolfSSL_sk_X509_INFO_free
+*/
+WOLFSSL_STACK* wolfSSL_sk_X509_INFO_new_null(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_X509_INFO elements held in the stack. Mirrors OpenSSL's sk_X509_INFO_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_INFO_num usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_INFO_value
+*/
+int wolfSSL_sk_X509_INFO_num(const WOLF_STACK_OF(WOLFSSL_X509_INFO)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Removes and returns the top WOLFSSL_X509_INFO of the stack. Mirrors OpenSSL's sk_X509_INFO_pop().
+
+    \return popped WOLFSSL_X509_INFO on success.
+    \return NULL if the stack is empty or NULL.
+
+    \param sk stack to pop from.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_INFO_pop usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_INFO_push
+*/
+WOLFSSL_X509_INFO* wolfSSL_sk_X509_INFO_pop(WOLF_STACK_OF(WOLFSSL_X509_INFO)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_X509_INFO element it contains. Mirrors OpenSSL's sk_X509_INFO_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_INFO_free usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_INFO_pop_free
+*/
+void wolfSSL_sk_X509_INFO_free(WOLF_STACK_OF(WOLFSSL_X509_INFO)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the WOLFSSL_X509_NAME element at index i without removing it. Mirrors OpenSSL's sk_X509_NAME_value().
+
+    \return pointer to the element on success.
+    \return NULL if sk is NULL or i is out of range.
+
+    \param sk stack to inspect.
+    \param i zero-based element index.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_NAME_value usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_NAME_num
+*/
+WOLFSSL_X509_NAME* wolfSSL_sk_X509_NAME_value(const WOLF_STACK_OF(WOLFSSL_X509_NAME)* sk, int i);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_X509_NAME elements held in the stack. Mirrors OpenSSL's sk_X509_NAME_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_NAME_num usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_NAME_value
+*/
+int wolfSSL_sk_X509_NAME_num(const WOLF_STACK_OF(WOLFSSL_X509_NAME)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Removes and returns the top WOLFSSL_X509_NAME of the stack. Mirrors OpenSSL's sk_X509_NAME_pop().
+
+    \return popped WOLFSSL_X509_NAME on success.
+    \return NULL if the stack is empty or NULL.
+
+    \param sk stack to pop from.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_NAME_pop usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_NAME_push
+*/
+WOLFSSL_X509_NAME* wolfSSL_sk_X509_NAME_pop(WOLF_STACK_OF(WOLFSSL_X509_NAME)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_X509_NAME element it contains. Mirrors OpenSSL's sk_X509_NAME_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_NAME_free usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_NAME_pop_free
+*/
+void wolfSSL_sk_X509_NAME_free(WOLF_STACK_OF(WOLFSSL_X509_NAME) * sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_X509_NAME_ENTRY elements held in the stack. Mirrors OpenSSL's sk_X509_NAME_ENTRY_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_NAME_ENTRY_num usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_NAME_ENTRY_value
+*/
+int  wolfSSL_sk_X509_NAME_ENTRY_num(const WOLF_STACK_OF(WOLFSSL_X509_NAME_ENTRY)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_X509_NAME_ENTRY element it contains. Mirrors OpenSSL's sk_X509_NAME_ENTRY_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_NAME_ENTRY_free usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_NAME_ENTRY_new
+*/
+void wolfSSL_sk_X509_NAME_ENTRY_free(WOLF_STACK_OF(WOLFSSL_X509_NAME_ENTRY)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_X509_OBJECT elements held in the stack. Mirrors OpenSSL's sk_X509_OBJECT_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if s is NULL.
+
+    \param s stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_OBJECT_num usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_OBJECT_value
+*/
+int wolfSSL_sk_X509_OBJECT_num(const WOLF_STACK_OF(WOLFSSL_X509_OBJECT) *s);
+
+/*!
+    \ingroup CertsKeys
+    \brief Allocates an empty WOLFSSL_STACK suitable for holding WOLFSSL_CONF_VALUE elements. Mirrors OpenSSL's sk_CONF_VALUE_new().
+
+    \return newly allocated stack on success.
+    \return NULL on allocation failure.
+
+    \param compFunc optional comparison callback used for ordered insertion; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_CONF_VALUE_new usage
+    \endcode
+
+    \sa wolfSSL_sk_CONF_VALUE_push
+    \sa wolfSSL_sk_CONF_VALUE_free
+*/
+WOLFSSL_STACK *wolfSSL_sk_CONF_VALUE_new(WOLF_SK_COMPARE_CB(WOLFSSL_CONF_VALUE, compFunc));
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_CONF_VALUE element it contains. Mirrors OpenSSL's sk_CONF_VALUE_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_CONF_VALUE_free usage
+    \endcode
+
+    \sa wolfSSL_sk_CONF_VALUE_new
+*/
+void wolfSSL_sk_CONF_VALUE_free(struct WOLFSSL_STACK *sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_CONF_VALUE elements held in the stack. Mirrors OpenSSL's sk_CONF_VALUE_num().
+
+    \return number of elements (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_CONF_VALUE_num usage
+    \endcode
+
+    \sa wolfSSL_sk_CONF_VALUE_value
+*/
+int wolfSSL_sk_CONF_VALUE_num(const WOLFSSL_STACK *sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the WOLFSSL_X509 element at index i without removing it. Mirrors OpenSSL's sk_X509_value().
+
+    \return pointer to the element on success.
+    \return NULL if the stack is NULL or i is out of range.
+
+    \param sk stack to inspect.
+    \param i zero-based element index.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_value usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_num
+*/
+WOLFSSL_X509* wolfSSL_sk_X509_value(WOLF_STACK_OF(WOLFSSL_X509)* sk, int i);
+
+/*!
+    \ingroup CertsKeys
+    \brief Removes and returns the bottom WOLFSSL_X509 of the stack. Mirrors OpenSSL's sk_X509_shift().
+
+    \return shifted WOLFSSL_X509 on success.
+    \return NULL if the stack is empty or NULL.
+
+    \param sk stack to shift from.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_shift usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_pop
+*/
+WOLFSSL_X509* wolfSSL_sk_X509_shift(WOLF_STACK_OF(WOLFSSL_X509)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the WOLFSSL_X509_OBJECT element at index i without removing it. Mirrors OpenSSL's sk_X509_OBJECT_value().
+
+    \return pointer to the element on success.
+    \return NULL if the stack is NULL or i is out of range.
+
+    \param sk stack to inspect.
+    \param i zero-based element index.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_OBJECT_value usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_OBJECT_num
+*/
+void* wolfSSL_sk_X509_OBJECT_value(WOLF_STACK_OF(WOLFSSL_X509_OBJECT)* sk, int i);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_X509 element using the supplied freeing callback. Mirrors OpenSSL's sk_X509_pop_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+    \param f callback invoked for each element prior to releasing the node.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_X509_pop_free usage
+    \endcode
+
+    \sa wolfSSL_sk_X509_free
+*/
+void wolfSSL_sk_X509_pop_free(WOLF_STACK_OF(WOLFSSL_X509)* sk, void (*f) (WOLFSSL_X509*));
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees the stack and each WOLFSSL_STRING entry it holds. Mirrors OpenSSL's sk_OPENSSL_STRING_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_WOLFSSL_STRING_free usage
+    \endcode
+
+    \sa wolfSSL_sk_WOLFSSL_STRING_value
+*/
+void wolfSSL_sk_WOLFSSL_STRING_free(WOLF_STACK_OF(WOLFSSL_STRING)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of WOLFSSL_CIPHER entries in the SSL cipher stack. Mirrors OpenSSL's sk_SSL_CIPHER_num().
+
+    \return number of entries (>= 0).
+    \return WOLFSSL_FATAL_ERROR if p is NULL.
+
+    \param p stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_SSL_CIPHER_num usage
+    \endcode
+
+    \sa wolfSSL_sk_SSL_CIPHER_value
+*/
+int wolfSSL_sk_SSL_CIPHER_num(const WOLF_STACK_OF(WOLFSSL_CIPHER)* p);
+
+/*!
+    \ingroup CertsKeys
+    \brief Frees an SSL cipher stack created by wolfSSL_get_ciphers_compat() or similar APIs. Mirrors OpenSSL's sk_SSL_CIPHER_free().
+
+    \return none.
+
+    \param sk stack to free; may be NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_SSL_CIPHER_free usage
+    \endcode
+
+    \sa wolfSSL_sk_SSL_CIPHER_num
+*/
+void wolfSSL_sk_SSL_CIPHER_free(WOLF_STACK_OF(WOLFSSL_CIPHER)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Empties the SSL compression-methods stack. Mirrors OpenSSL's sk_SSL_COMP_zero(); wolfSSL does not implement TLS compression so this resets the stack to length zero.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if st is NULL.
+
+    \param st stack to clear.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_SSL_COMP_zero usage
+    \endcode
+
+    \sa wolfSSL_sk_SSL_COMP_num
+*/
+int wolfSSL_sk_SSL_COMP_zero(WOLFSSL_STACK* st);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the number of compression methods registered in the stack. wolfSSL does not implement TLS compression, so this typically returns 0. Mirrors OpenSSL's sk_SSL_COMP_num().
+
+    \return number of entries (>= 0).
+    \return WOLFSSL_FATAL_ERROR if sk is NULL.
+
+    \param sk stack to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_SSL_COMP_num usage
+    \endcode
+
+    \sa wolfSSL_sk_SSL_COMP_zero
+*/
+int wolfSSL_sk_SSL_COMP_num(WOLF_STACK_OF(WOLFSSL_COMP)* sk);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns the WOLFSSL_CIPHER stored at index i in the SSL cipher stack. Mirrors OpenSSL's sk_SSL_CIPHER_value().
+
+    \return pointer to the cipher on success.
+    \return NULL if sk is NULL or i is out of range.
+
+    \param sk stack to inspect.
+    \param i zero-based index.
+
+    _Example_
+    \code
+    // see wolfSSL_sk_SSL_CIPHER_value usage
+    \endcode
+
+    \sa wolfSSL_sk_SSL_CIPHER_num
+*/
+WOLFSSL_CIPHER* wolfSSL_sk_SSL_CIPHER_value(WOLFSSL_STACK* sk, int i);
+
