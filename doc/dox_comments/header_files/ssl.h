@@ -18506,3 +18506,756 @@ int wolfSSL_get_scr_check_enabled(const WOLFSSL* ssl);
     \sa wolfSSL_get_scr_check_enabled
 */
 int wolfSSL_set_scr_check_enabled(WOLFSSL* ssl, byte enabled);
+
+/*!
+    \ingroup ASN
+    \brief Allocates and initializes a new WOLFSSL_ASN1_OBJECT structure.
+    The returned object has its OID buffer pointer set to NULL and must
+    be freed with wolfSSL_ASN1_OBJECT_free().
+
+    \return pointer Pointer to a freshly allocated WOLFSSL_ASN1_OBJECT.
+    \return NULL on allocation failure.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_OBJECT* obj = wolfSSL_ASN1_OBJECT_new();
+    if (obj == NULL) {
+        // handle error
+    }
+    wolfSSL_ASN1_OBJECT_free(obj);
+    \endcode
+
+    \sa wolfSSL_ASN1_OBJECT_free
+    \sa wolfSSL_ASN1_OBJECT_dup
+*/
+WOLFSSL_ASN1_OBJECT* wolfSSL_ASN1_OBJECT_new(void);
+
+/*!
+    \ingroup ASN
+    \brief Creates a deep copy of the given WOLFSSL_ASN1_OBJECT,
+    duplicating the OID data buffer.
+
+    \return pointer Pointer to a newly allocated duplicate WOLFSSL_ASN1_OBJECT.
+    \return NULL on allocation failure or if obj is NULL.
+
+    \param obj WOLFSSL_ASN1_OBJECT to duplicate.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_OBJECT* dup = wolfSSL_ASN1_OBJECT_dup(orig);
+    if (dup == NULL) {
+        // handle error
+    }
+    wolfSSL_ASN1_OBJECT_free(dup);
+    \endcode
+
+    \sa wolfSSL_ASN1_OBJECT_new
+    \sa wolfSSL_ASN1_OBJECT_free
+*/
+WOLFSSL_ASN1_OBJECT* wolfSSL_ASN1_OBJECT_dup(WOLFSSL_ASN1_OBJECT* obj);
+
+/*!
+    \ingroup ASN
+    \brief Frees the WOLFSSL_ASN1_OBJECT and any owned dynamic data.
+    Has no effect when obj is NULL.
+
+    \return none No return value.
+
+    \param obj WOLFSSL_ASN1_OBJECT to free.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_OBJECT* obj = wolfSSL_ASN1_OBJECT_new();
+    // ... use obj ...
+    wolfSSL_ASN1_OBJECT_free(obj);
+    \endcode
+
+    \sa wolfSSL_ASN1_OBJECT_new
+    \sa wolfSSL_ASN1_OBJECT_dup
+*/
+void wolfSSL_ASN1_OBJECT_free(WOLFSSL_ASN1_OBJECT* obj);
+
+/*!
+    \ingroup ASN
+    \brief Converts the data in a WOLFSSL_ASN1_STRING to a UTF-8 encoded
+    string. Memory for the output buffer is allocated by the function and
+    must be released by the caller using OPENSSL_free().
+
+    \return length Length in bytes of the UTF-8 string written to *out on
+    success.
+    \return negative On error.
+
+    \param out Address of a pointer that will be set to the newly
+    allocated UTF-8 buffer.
+    \param in WOLFSSL_ASN1_STRING to convert.
+
+    _Example_
+    \code
+    unsigned char* utf8 = NULL;
+    int len = wolfSSL_ASN1_STRING_to_UTF8(&utf8, str);
+    if (len > 0) {
+        // use utf8
+        OPENSSL_free(utf8);
+    }
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_data
+    \sa wolfSSL_ASN1_STRING_length
+*/
+int wolfSSL_ASN1_STRING_to_UTF8(unsigned char **out, WOLFSSL_ASN1_STRING *in);
+
+/*!
+    \ingroup ASN
+    \brief Converts a UniversalString (4-byte-per-character) ASN.1 string
+    to a plain string in place when all characters lie in the ASCII range.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if s is NULL, not a UniversalString, or the
+    contents cannot be converted.
+
+    \param s WOLFSSL_ASN1_STRING of type V_ASN1_UNIVERSALSTRING to convert.
+
+    _Example_
+    \code
+    if (wolfSSL_ASN1_UNIVERSALSTRING_to_string(s) != WOLFSSL_SUCCESS) {
+        // handle error
+    }
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_to_UTF8
+*/
+int wolfSSL_ASN1_UNIVERSALSTRING_to_string(WOLFSSL_ASN1_STRING *s);
+
+/*!
+    \ingroup ASN
+    \brief Allocates and initializes a new empty WOLFSSL_ASN1_STRING.
+    The string must be freed with wolfSSL_ASN1_STRING_free().
+
+    \return pointer Newly allocated WOLFSSL_ASN1_STRING.
+    \return NULL on allocation failure.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_STRING* s = wolfSSL_ASN1_STRING_new();
+    if (s == NULL) {
+        // handle error
+    }
+    wolfSSL_ASN1_STRING_free(s);
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_free
+    \sa wolfSSL_ASN1_STRING_type_new
+*/
+WOLFSSL_ASN1_STRING* wolfSSL_ASN1_STRING_new(void);
+
+/*!
+    \ingroup ASN
+    \brief Creates a deep copy of an existing WOLFSSL_ASN1_STRING,
+    including its data buffer and type.
+
+    \return pointer Newly allocated duplicate WOLFSSL_ASN1_STRING.
+    \return NULL if asn1 is NULL or on allocation failure.
+
+    \param asn1 WOLFSSL_ASN1_STRING to duplicate.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_STRING* copy = wolfSSL_ASN1_STRING_dup(orig);
+    // ...
+    wolfSSL_ASN1_STRING_free(copy);
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_new
+    \sa wolfSSL_ASN1_STRING_free
+*/
+WOLFSSL_ASN1_STRING* wolfSSL_ASN1_STRING_dup(WOLFSSL_ASN1_STRING* asn1);
+
+/*!
+    \ingroup ASN
+    \brief Allocates a new WOLFSSL_ASN1_STRING and sets its ASN.1 string
+    type (for example V_ASN1_UTF8STRING, V_ASN1_IA5STRING).
+
+    \return pointer Newly allocated WOLFSSL_ASN1_STRING with the requested
+    type.
+    \return NULL on allocation failure.
+
+    \param type ASN.1 string type tag.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_STRING* s =
+        wolfSSL_ASN1_STRING_type_new(V_ASN1_UTF8STRING);
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_new
+    \sa wolfSSL_ASN1_STRING_type
+*/
+WOLFSSL_ASN1_STRING* wolfSSL_ASN1_STRING_type_new(int type);
+
+/*!
+    \ingroup ASN
+    \brief Returns the ASN.1 string type code stored in a
+    WOLFSSL_ASN1_STRING (e.g. V_ASN1_PRINTABLESTRING).
+
+    \return type Non-negative ASN.1 type tag on success.
+    \return negative On error or if asn1 is NULL.
+
+    \param asn1 WOLFSSL_ASN1_STRING to query.
+
+    _Example_
+    \code
+    int type = wolfSSL_ASN1_STRING_type(s);
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_type_new
+*/
+int wolfSSL_ASN1_STRING_type(const WOLFSSL_ASN1_STRING* asn1);
+
+/*!
+    \ingroup ASN
+    \brief Compares two WOLFSSL_ASN1_STRING structures by length first,
+    then by byte content. Mirrors OpenSSL's ASN1_STRING_cmp().
+
+    \return 0 If the two strings are equal.
+    \return non-zero If the strings differ; the sign indicates ordering.
+    \return -1 If either argument is NULL.
+
+    \param a First WOLFSSL_ASN1_STRING.
+    \param b Second WOLFSSL_ASN1_STRING.
+
+    _Example_
+    \code
+    if (wolfSSL_ASN1_STRING_cmp(a, b) == 0) {
+        // strings match
+    }
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_data
+    \sa wolfSSL_ASN1_STRING_length
+*/
+int wolfSSL_ASN1_STRING_cmp(const WOLFSSL_ASN1_STRING *a, const WOLFSSL_ASN1_STRING *b);
+
+/*!
+    \ingroup ASN
+    \brief Frees a WOLFSSL_ASN1_STRING previously allocated with
+    wolfSSL_ASN1_STRING_new() or related constructors. Has no effect
+    when asn1 is NULL.
+
+    \return none No return value.
+
+    \param asn1 WOLFSSL_ASN1_STRING to free.
+
+    _Example_
+    \code
+    wolfSSL_ASN1_STRING_free(s);
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_new
+*/
+void wolfSSL_ASN1_STRING_free(WOLFSSL_ASN1_STRING* asn1);
+
+/*!
+    \ingroup ASN
+    \brief Returns a pointer to the internal data buffer of a
+    WOLFSSL_ASN1_STRING. The data is not null-terminated; use
+    wolfSSL_ASN1_STRING_length() to obtain its size.
+
+    \return pointer Pointer to the string's internal data buffer.
+    \return NULL if asn is NULL.
+
+    \param asn WOLFSSL_ASN1_STRING to query.
+
+    _Example_
+    \code
+    unsigned char* data = wolfSSL_ASN1_STRING_data(s);
+    int len = wolfSSL_ASN1_STRING_length(s);
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_length
+    \sa wolfSSL_ASN1_STRING_to_UTF8
+*/
+unsigned char* wolfSSL_ASN1_STRING_data(WOLFSSL_ASN1_STRING* asn);
+
+/*!
+    \ingroup ASN
+    \brief Returns the length in bytes of the data stored in a
+    WOLFSSL_ASN1_STRING.
+
+    \return length Length of the string's data buffer in bytes.
+    \return 0 If asn is NULL.
+
+    \param asn WOLFSSL_ASN1_STRING to query.
+
+    _Example_
+    \code
+    int len = wolfSSL_ASN1_STRING_length(s);
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_data
+*/
+int wolfSSL_ASN1_STRING_length(const WOLFSSL_ASN1_STRING* asn);
+
+/*!
+    \ingroup ASN
+    \brief Prints the contents of an ASN.1 string to a BIO, replacing
+    non-printable bytes with '.'. Mirrors OpenSSL's ASN1_STRING_print().
+
+    \return length Number of characters written on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param out BIO to write to.
+    \param str WOLFSSL_ASN1_STRING to print.
+
+    _Example_
+    \code
+    wolfSSL_ASN1_STRING_print(bio, s);
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_print_ex
+*/
+int wolfSSL_ASN1_STRING_print(WOLFSSL_BIO *out, WOLFSSL_ASN1_STRING *str);
+
+/*!
+    \ingroup ASN
+    \brief Prints the contents of an ASN.1 string to a BIO using a set
+    of flags that control formatting, escaping, and whether the string
+    type is shown. Mirrors OpenSSL's ASN1_STRING_print_ex().
+
+    \return length Number of characters written on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param out BIO to write the output to.
+    \param str WOLFSSL_ASN1_STRING to print.
+    \param flags Bitwise OR of ASN1_STRFLGS_* values controlling output.
+
+    _Example_
+    \code
+    wolfSSL_ASN1_STRING_print_ex(bio, s, ASN1_STRFLGS_RFC2253);
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_print
+*/
+int wolfSSL_ASN1_STRING_print_ex(WOLFSSL_BIO *out, WOLFSSL_ASN1_STRING *str, unsigned long flags);
+
+/*!
+    \ingroup ASN
+    \brief Allocates and initializes a new WOLFSSL_ASN1_INTEGER set to 0.
+    Must be released with wolfSSL_ASN1_INTEGER_free().
+
+    \return pointer Newly allocated WOLFSSL_ASN1_INTEGER.
+    \return NULL on allocation failure.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_INTEGER* i = wolfSSL_ASN1_INTEGER_new();
+    wolfSSL_ASN1_INTEGER_free(i);
+    \endcode
+
+    \sa wolfSSL_ASN1_INTEGER_free
+    \sa wolfSSL_ASN1_INTEGER_set
+*/
+WOLFSSL_ASN1_INTEGER* wolfSSL_ASN1_INTEGER_new(void);
+
+/*!
+    \ingroup ASN
+    \brief Frees a WOLFSSL_ASN1_INTEGER and any data it owns. Has no
+    effect when in is NULL.
+
+    \return none No return value.
+
+    \param in WOLFSSL_ASN1_INTEGER to free.
+
+    _Example_
+    \code
+    wolfSSL_ASN1_INTEGER_free(i);
+    \endcode
+
+    \sa wolfSSL_ASN1_INTEGER_new
+*/
+void wolfSSL_ASN1_INTEGER_free(WOLFSSL_ASN1_INTEGER* in);
+
+/*!
+    \ingroup ASN
+    \brief Sets the value of a WOLFSSL_ASN1_INTEGER to the signed long v,
+    encoding the value into the structure's internal DER buffer.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE if a is NULL or on encoding error.
+
+    \param a WOLFSSL_ASN1_INTEGER to update.
+    \param v Signed long value to store.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_INTEGER* i = wolfSSL_ASN1_INTEGER_new();
+    wolfSSL_ASN1_INTEGER_set(i, 12345);
+    \endcode
+
+    \sa wolfSSL_ASN1_INTEGER_get
+    \sa wolfSSL_ASN1_INTEGER_new
+*/
+int wolfSSL_ASN1_INTEGER_set(WOLFSSL_ASN1_INTEGER *a, long v);
+
+/*!
+    \ingroup ASN
+    \brief Returns the value stored in a WOLFSSL_ASN1_INTEGER as a signed
+    long. Mirrors OpenSSL's ASN1_INTEGER_get().
+
+    \return value The decoded signed long value on success.
+    \return 0 If a is NULL (matches OpenSSL behaviour for the NULL case).
+    \return -1 If the value cannot be represented as a long.
+
+    \param a WOLFSSL_ASN1_INTEGER to read.
+
+    _Example_
+    \code
+    long v = wolfSSL_ASN1_INTEGER_get(i);
+    \endcode
+
+    \sa wolfSSL_ASN1_INTEGER_set
+    \sa wolfSSL_ASN1_INTEGER_to_BN
+*/
+long wolfSSL_ASN1_INTEGER_get(const WOLFSSL_ASN1_INTEGER* a);
+
+/*!
+    \ingroup ASN
+    \brief Returns the length in bytes of the encoded integer data held
+    in a WOLFSSL_ASN1_INTEGER.
+
+    \return length Number of bytes of integer data.
+    \return 0 If ai is NULL.
+
+    \param ai WOLFSSL_ASN1_INTEGER to query.
+
+    _Example_
+    \code
+    int len = wolfSSL_ASN1_INTEGER_get_length(i);
+    \endcode
+
+    \sa wolfSSL_ASN1_INTEGER_get
+    \sa wolfSSL_ASN1_INTEGER_get0_data
+*/
+int wolfSSL_ASN1_INTEGER_get_length(const WOLFSSL_ASN1_INTEGER* ai);
+
+/*!
+    \ingroup ASN
+    \brief Allocates and initializes a new empty WOLFSSL_ASN1_TIME
+    structure. Must be released with wolfSSL_ASN1_TIME_free().
+
+    \return pointer Newly allocated WOLFSSL_ASN1_TIME.
+    \return NULL on allocation failure.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_TIME* t = wolfSSL_ASN1_TIME_new();
+    wolfSSL_ASN1_TIME_free(t);
+    \endcode
+
+    \sa wolfSSL_ASN1_TIME_free
+    \sa wolfSSL_ASN1_TIME_set
+*/
+WOLFSSL_ASN1_TIME* wolfSSL_ASN1_TIME_new(void);
+
+/*!
+    \ingroup ASN
+    \brief Frees a WOLFSSL_ASN1_TIME structure. Has no effect when t is
+    NULL.
+
+    \return none No return value.
+
+    \param t WOLFSSL_ASN1_TIME to free.
+
+    _Example_
+    \code
+    wolfSSL_ASN1_TIME_free(t);
+    \endcode
+
+    \sa wolfSSL_ASN1_TIME_new
+*/
+void wolfSSL_ASN1_TIME_free(WOLFSSL_ASN1_TIME* t);
+
+/*!
+    \ingroup ASN
+    \brief Sets a WOLFSSL_ASN1_TIME to the time value t (in seconds since
+    the Unix epoch). If s is NULL a new structure is allocated. The
+    resulting object encodes either UTCTime or GeneralizedTime depending
+    on the year.
+
+    \return pointer Pointer to the populated WOLFSSL_ASN1_TIME (s if
+    non-NULL, otherwise a newly allocated one).
+    \return NULL on error.
+
+    \param s Existing WOLFSSL_ASN1_TIME to update, or NULL to allocate.
+    \param t time_t value to encode.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_TIME* t = wolfSSL_ASN1_TIME_set(NULL, time(NULL));
+    \endcode
+
+    \sa wolfSSL_ASN1_TIME_new
+    \sa wolfSSL_ASN1_TIME_set_string
+    \sa wolfSSL_ASN1_UTCTIME_set
+*/
+WOLFSSL_ASN1_TIME *wolfSSL_ASN1_TIME_set(WOLFSSL_ASN1_TIME *s, time_t t);
+
+/*!
+    \ingroup ASN
+    \brief Parses an ASCII time string in either UTCTime ("YYMMDDHHMMSSZ")
+    or GeneralizedTime ("YYYYMMDDHHMMSSZ") form and stores it in s.
+    If s is NULL the function only validates the string format.
+
+    \return WOLFSSL_SUCCESS If the string is a valid ASN.1 time.
+    \return WOLFSSL_FAILURE If the string is malformed.
+
+    \param s WOLFSSL_ASN1_TIME to populate, or NULL to validate only.
+    \param str NUL-terminated time string.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_TIME* t = wolfSSL_ASN1_TIME_new();
+    wolfSSL_ASN1_TIME_set_string(t, "230101000000Z");
+    \endcode
+
+    \sa wolfSSL_ASN1_TIME_set
+    \sa wolfSSL_ASN1_TIME_check
+*/
+int wolfSSL_ASN1_TIME_set_string(WOLFSSL_ASN1_TIME *s, const char *str);
+
+/*!
+    \ingroup ASN
+    \brief Validates that the WOLFSSL_ASN1_TIME structure contains a
+    well-formed UTCTime or GeneralizedTime value.
+
+    \return WOLFSSL_SUCCESS If the value is a valid ASN.1 time.
+    \return WOLFSSL_FAILURE If the value is invalid or a is NULL.
+
+    \param a WOLFSSL_ASN1_TIME to validate.
+
+    _Example_
+    \code
+    if (wolfSSL_ASN1_TIME_check(t) != WOLFSSL_SUCCESS) {
+        // not a valid time
+    }
+    \endcode
+
+    \sa wolfSSL_ASN1_TIME_set
+    \sa wolfSSL_ASN1_TIME_set_string
+*/
+int wolfSSL_ASN1_TIME_check(const WOLFSSL_ASN1_TIME* a);
+
+/*!
+    \ingroup ASN
+    \brief Prints a human-readable representation of a WOLFSSL_ASN1_TIME
+    value to the given BIO (e.g. "Mar 13 00:00:00 2024 GMT").
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio BIO to write the formatted time to.
+    \param asnTime WOLFSSL_ASN1_TIME to print.
+
+    _Example_
+    \code
+    wolfSSL_ASN1_TIME_print(bio, t);
+    \endcode
+
+    \sa wolfSSL_ASN1_TIME_to_string
+    \sa wolfSSL_ASN1_TIME_to_tm
+*/
+int wolfSSL_ASN1_TIME_print(WOLFSSL_BIO* bio, const WOLFSSL_ASN1_TIME* asnTime);
+
+/*!
+    \ingroup ASN
+    \brief Converts a WOLFSSL_ASN1_TIME value into a broken-down struct
+    tm in UTC. If tm is NULL the call only validates asnTime.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error or invalid asnTime.
+
+    \param asnTime WOLFSSL_ASN1_TIME to convert.
+    \param tm Destination struct tm, or NULL to validate only.
+
+    _Example_
+    \code
+    struct tm out;
+    wolfSSL_ASN1_TIME_to_tm(t, &out);
+    \endcode
+
+    \sa wolfSSL_ASN1_TIME_print
+    \sa wolfSSL_ASN1_TIME_set
+*/
+int wolfSSL_ASN1_TIME_to_tm(const WOLFSSL_ASN1_TIME* asnTime, struct tm* tm);
+
+/*!
+    \ingroup ASN
+    \brief Returns the length in bytes of the encoded data portion of a
+    WOLFSSL_ASN1_TIME structure.
+
+    \return length Number of bytes of time data.
+    \return 0 If t is NULL.
+
+    \param t WOLFSSL_ASN1_TIME to query.
+
+    _Example_
+    \code
+    int len = wolfSSL_ASN1_TIME_get_length(t);
+    \endcode
+
+    \sa wolfSSL_ASN1_TIME_get_data
+*/
+int wolfSSL_ASN1_TIME_get_length(const WOLFSSL_ASN1_TIME *t);
+
+/*!
+    \ingroup ASN
+    \brief Returns a pointer to the internal encoded data buffer of a
+    WOLFSSL_ASN1_TIME structure.
+
+    \return pointer Pointer to the encoded time data.
+    \return NULL If t is NULL.
+
+    \param t WOLFSSL_ASN1_TIME to query.
+
+    _Example_
+    \code
+    unsigned char* data = wolfSSL_ASN1_TIME_get_data(t);
+    int len = wolfSSL_ASN1_TIME_get_length(t);
+    \endcode
+
+    \sa wolfSSL_ASN1_TIME_get_length
+*/
+unsigned char* wolfSSL_ASN1_TIME_get_data(const WOLFSSL_ASN1_TIME *t);
+
+/*!
+    \ingroup ASN
+    \brief Sets a WOLFSSL_ASN1_TIME to the time value t encoded as
+    UTCTime. If s is NULL a new structure is allocated. Mirrors
+    OpenSSL's ASN1_UTCTIME_set().
+
+    \return pointer Pointer to the populated WOLFSSL_ASN1_TIME.
+    \return NULL on error.
+
+    \param s Existing WOLFSSL_ASN1_TIME to update, or NULL to allocate.
+    \param t time_t value to encode.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_TIME* t = wolfSSL_ASN1_UTCTIME_set(NULL, time(NULL));
+    \endcode
+
+    \sa wolfSSL_ASN1_TIME_set
+    \sa wolfSSL_ASN1_TIME_free
+*/
+WOLFSSL_ASN1_TIME* wolfSSL_ASN1_UTCTIME_set(WOLFSSL_ASN1_TIME *s, time_t t);
+
+/*!
+    \ingroup ASN
+    \brief Frees a WOLFSSL_ASN1_GENERALIZEDTIME structure. Has no effect
+    when the argument is NULL.
+
+    \return none No return value.
+
+    \param asn1Time WOLFSSL_ASN1_GENERALIZEDTIME to free.
+
+    _Example_
+    \code
+    wolfSSL_ASN1_GENERALIZEDTIME_free(gt);
+    \endcode
+
+    \sa wolfSSL_ASN1_TIME_free
+*/
+void wolfSSL_ASN1_GENERALIZEDTIME_free(WOLFSSL_ASN1_GENERALIZEDTIME*);
+
+/*!
+    \ingroup ASN
+    \brief Allocates and initializes a new WOLFSSL_ASN1_BIT_STRING.
+    Must be released with wolfSSL_ASN1_BIT_STRING_free().
+
+    \return pointer Newly allocated WOLFSSL_ASN1_BIT_STRING.
+    \return NULL on allocation failure.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_BIT_STRING* bs = wolfSSL_ASN1_BIT_STRING_new();
+    wolfSSL_ASN1_BIT_STRING_free(bs);
+    \endcode
+
+    \sa wolfSSL_ASN1_BIT_STRING_free
+    \sa wolfSSL_ASN1_BIT_STRING_set_bit
+*/
+WOLFSSL_ASN1_BIT_STRING* wolfSSL_ASN1_BIT_STRING_new(void);
+
+/*!
+    \ingroup ASN
+    \brief Frees a WOLFSSL_ASN1_BIT_STRING and its data. Has no effect
+    when str is NULL.
+
+    \return none No return value.
+
+    \param str WOLFSSL_ASN1_BIT_STRING to free.
+
+    _Example_
+    \code
+    wolfSSL_ASN1_BIT_STRING_free(bs);
+    \endcode
+
+    \sa wolfSSL_ASN1_BIT_STRING_new
+*/
+void wolfSSL_ASN1_BIT_STRING_free(WOLFSSL_ASN1_BIT_STRING* str);
+
+/*!
+    \ingroup ASN
+    \brief Allocates and initializes a new WOLFSSL_ASN1_TYPE wrapper.
+    The structure represents an ASN.1 ANY value and must be released
+    with wolfSSL_ASN1_TYPE_free().
+
+    \return pointer Newly allocated WOLFSSL_ASN1_TYPE.
+    \return NULL on allocation failure.
+
+    _Example_
+    \code
+    WOLFSSL_ASN1_TYPE* at = wolfSSL_ASN1_TYPE_new();
+    wolfSSL_ASN1_TYPE_free(at);
+    \endcode
+
+    \sa wolfSSL_ASN1_TYPE_free
+*/
+WOLFSSL_ASN1_TYPE* wolfSSL_ASN1_TYPE_new(void);
+
+/*!
+    \ingroup ASN
+    \brief Frees a WOLFSSL_ASN1_TYPE wrapper, releasing the inner value
+    appropriate to its type. Has no effect when at is NULL.
+
+    \return none No return value.
+
+    \param at WOLFSSL_ASN1_TYPE to free.
+
+    _Example_
+    \code
+    wolfSSL_ASN1_TYPE_free(at);
+    \endcode
+
+    \sa wolfSSL_ASN1_TYPE_new
+*/
+void wolfSSL_ASN1_TYPE_free(WOLFSSL_ASN1_TYPE* at);
+
+/*!
+    \ingroup ASN
+    \brief Returns the short textual name of an ASN.1 universal tag
+    (e.g. "UTF8STRING", "INTEGER", "BIT STRING"). Returns NULL for
+    unknown tag values.
+
+    \return pointer Constant string naming the tag.
+    \return NULL If the tag value is not recognised.
+
+    \param tag ASN.1 universal tag number.
+
+    _Example_
+    \code
+    const char* name = wolfSSL_ASN1_tag2str(V_ASN1_UTF8STRING);
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_type
+*/
+const char *wolfSSL_ASN1_tag2str(int tag);

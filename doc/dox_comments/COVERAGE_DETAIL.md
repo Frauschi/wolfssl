@@ -3,7 +3,7 @@
 Lists the WOLFSSL_API function names declared in each source header
 but not found in the corresponding doc file.
 
-## `wolfssl/ssl.h` (729 missing)
+## `wolfssl/ssl.h` (693 missing)
 
 - WOLFSSL_CTX_set_tmp_dh_callback
 - wolfDTLS_client_method_ex
@@ -24,42 +24,6 @@ but not found in the corresponding doc file.
 - wolfDTLSv1_server_method_ex
 - wolfSSL_ACCESS_DESCRIPTION_free
 - wolfSSL_ALPN_FreePeerProtocol
-- wolfSSL_ASN1_BIT_STRING_free
-- wolfSSL_ASN1_BIT_STRING_new
-- wolfSSL_ASN1_GENERALIZEDTIME_free
-- wolfSSL_ASN1_INTEGER_free
-- wolfSSL_ASN1_INTEGER_get
-- wolfSSL_ASN1_INTEGER_get_length
-- wolfSSL_ASN1_INTEGER_new
-- wolfSSL_ASN1_INTEGER_set
-- wolfSSL_ASN1_OBJECT_dup
-- wolfSSL_ASN1_OBJECT_free
-- wolfSSL_ASN1_OBJECT_new
-- wolfSSL_ASN1_STRING_cmp
-- wolfSSL_ASN1_STRING_data
-- wolfSSL_ASN1_STRING_dup
-- wolfSSL_ASN1_STRING_free
-- wolfSSL_ASN1_STRING_length
-- wolfSSL_ASN1_STRING_new
-- wolfSSL_ASN1_STRING_print
-- wolfSSL_ASN1_STRING_print_ex
-- wolfSSL_ASN1_STRING_to_UTF8
-- wolfSSL_ASN1_STRING_type
-- wolfSSL_ASN1_STRING_type_new
-- wolfSSL_ASN1_TIME_check
-- wolfSSL_ASN1_TIME_free
-- wolfSSL_ASN1_TIME_get_data
-- wolfSSL_ASN1_TIME_get_length
-- wolfSSL_ASN1_TIME_new
-- wolfSSL_ASN1_TIME_print
-- wolfSSL_ASN1_TIME_set
-- wolfSSL_ASN1_TIME_set_string
-- wolfSSL_ASN1_TIME_to_tm
-- wolfSSL_ASN1_TYPE_free
-- wolfSSL_ASN1_TYPE_new
-- wolfSSL_ASN1_UNIVERSALSTRING_to_string
-- wolfSSL_ASN1_UTCTIME_set
-- wolfSSL_ASN1_tag2str
 - wolfSSL_AllowEncryptThenMac
 - wolfSSL_AsyncEncrypt
 - wolfSSL_AsyncEncryptReady
