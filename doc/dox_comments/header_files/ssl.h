@@ -24634,3 +24634,2171 @@ int wolfSSL_sk_SSL_COMP_num(WOLF_STACK_OF(WOLFSSL_COMP)* sk);
 */
 WOLFSSL_CIPHER* wolfSSL_sk_SSL_CIPHER_value(WOLFSSL_STACK* sk, int i);
 
+
+/*!
+    \ingroup openSSL
+    \brief Writes a human-readable description of the cipher into buffer in (up to len bytes). Mirrors OpenSSL's SSL_CIPHER_description().
+
+    \return pointer to in on success.
+    \return NULL on failure or invalid arguments.
+
+    \param cipher WOLFSSL_CIPHER to describe.
+    \param in destination buffer.
+    \param len size of in.
+
+    _Example_
+    \code
+    // see wolfSSL_CIPHER_description usage
+    \endcode
+
+    \sa wolfSSL_CIPHER_get_name
+*/
+char* wolfSSL_CIPHER_description(const WOLFSSL_CIPHER* cipher, char* in, int len);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the NID of the authentication algorithm used by the cipher. Mirrors OpenSSL's SSL_CIPHER_get_auth_nid().
+
+    \return NID identifying the authentication algorithm.
+    \return NID_undef on error or unknown cipher.
+
+    \param cipher WOLFSSL_CIPHER to query.
+
+    _Example_
+    \code
+    // see wolfSSL_CIPHER_get_auth_nid usage
+    \endcode
+
+    \sa wolfSSL_CIPHER_get_cipher_nid
+    \sa wolfSSL_CIPHER_get_digest_nid
+*/
+int wolfSSL_CIPHER_get_auth_nid(const WOLFSSL_CIPHER* cipher);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the number of secret bits used by the cipher. If alg_bits is non-NULL, the underlying algorithm bit size is also stored there. Mirrors OpenSSL's SSL_CIPHER_get_bits().
+
+    \return number of secret bits on success.
+    \return 0 on error.
+
+    \param c WOLFSSL_CIPHER to query.
+    \param alg_bits optional output for algorithm bits.
+
+    _Example_
+    \code
+    // see wolfSSL_CIPHER_get_bits usage
+    \endcode
+
+    \sa wolfSSL_CIPHER_get_name
+*/
+int wolfSSL_CIPHER_get_bits(const WOLFSSL_CIPHER *c, int *alg_bits);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the NID of the symmetric cipher used by the WOLFSSL_CIPHER. Mirrors OpenSSL's SSL_CIPHER_get_cipher_nid().
+
+    \return NID for the cipher algorithm.
+    \return NID_undef on error or unknown cipher.
+
+    \param cipher WOLFSSL_CIPHER to query.
+
+    _Example_
+    \code
+    // see wolfSSL_CIPHER_get_cipher_nid usage
+    \endcode
+
+    \sa wolfSSL_CIPHER_get_auth_nid
+    \sa wolfSSL_CIPHER_get_digest_nid
+*/
+int wolfSSL_CIPHER_get_cipher_nid(const WOLFSSL_CIPHER* cipher);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the NID of the digest (MAC) algorithm used by the cipher. Mirrors OpenSSL's SSL_CIPHER_get_digest_nid().
+
+    \return NID for the digest algorithm.
+    \return NID_undef on error or unknown cipher.
+
+    \param cipher WOLFSSL_CIPHER to query.
+
+    _Example_
+    \code
+    // see wolfSSL_CIPHER_get_digest_nid usage
+    \endcode
+
+    \sa wolfSSL_CIPHER_get_auth_nid
+    \sa wolfSSL_CIPHER_get_cipher_nid
+*/
+int wolfSSL_CIPHER_get_digest_nid(const WOLFSSL_CIPHER* cipher);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the numerical identifier of the cipher suite. Mirrors OpenSSL's SSL_CIPHER_get_id().
+
+    \return cipher identifier.
+
+    \param cipher WOLFSSL_CIPHER to query.
+
+    _Example_
+    \code
+    // see wolfSSL_CIPHER_get_id usage
+    \endcode
+
+    \sa wolfSSL_CIPHER_get_name
+*/
+word32 wolfSSL_CIPHER_get_id(const WOLFSSL_CIPHER* cipher);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the NID of the key-exchange algorithm used by the cipher. Mirrors OpenSSL's SSL_CIPHER_get_kx_nid().
+
+    \return NID identifying the key-exchange algorithm.
+    \return NID_undef on error or unknown cipher.
+
+    \param cipher WOLFSSL_CIPHER to query.
+
+    _Example_
+    \code
+    // see wolfSSL_CIPHER_get_kx_nid usage
+    \endcode
+
+    \sa wolfSSL_CIPHER_get_auth_nid
+*/
+int wolfSSL_CIPHER_get_kx_nid(const WOLFSSL_CIPHER* cipher);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the protocol version string (e.g. "TLSv1.2") the cipher was negotiated for. Mirrors OpenSSL's SSL_CIPHER_get_version().
+
+    \return null-terminated version string on success.
+    \return NULL on failure.
+
+    \param cipher WOLFSSL_CIPHER to query.
+
+    _Example_
+    \code
+    // see wolfSSL_CIPHER_get_version usage
+    \endcode
+
+    \sa wolfSSL_CIPHER_get_name
+*/
+const char* wolfSSL_CIPHER_get_version(const WOLFSSL_CIPHER* cipher);
+
+/*!
+    \ingroup openSSL
+    \brief Reports whether the cipher uses an AEAD (Authenticated Encryption with Associated Data) algorithm. Mirrors OpenSSL's SSL_CIPHER_is_aead().
+
+    \return 1 if the cipher is AEAD.
+    \return 0 otherwise.
+
+    \param cipher WOLFSSL_CIPHER to query.
+
+    _Example_
+    \code
+    // see wolfSSL_CIPHER_is_aead usage
+    \endcode
+
+    \sa wolfSSL_CIPHER_get_name
+*/
+int wolfSSL_CIPHER_is_aead(const WOLFSSL_CIPHER* cipher);
+
+/*!
+    \ingroup openSSL
+    \brief Stub for adding a compression method. wolfSSL does not implement TLS-level compression; this is provided for OpenSSL compatibility only.
+
+    \return 0 always.
+
+    \param method unused.
+    \param data unused.
+
+    _Example_
+    \code
+    // see wolfSSL_COMP_add_compression_method usage
+    \endcode
+
+    \sa wolfSSL_COMP_get_name
+*/
+int wolfSSL_COMP_add_compression_method(int method, void* data);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the name of the compression method. Always returns a placeholder string since wolfSSL does not perform TLS compression. Mirrors OpenSSL's SSL_COMP_get_name().
+
+    \return compression name string.
+    \return NULL if comp is NULL.
+
+    \param comp compression method pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_COMP_get_name usage
+    \endcode
+
+    \sa wolfSSL_COMP_add_compression_method
+*/
+const char *wolfSSL_COMP_get_name(const WOLFSSL_COMP_METHOD *comp);
+
+/*!
+    \ingroup openSSL
+    \brief Returns a pointer used to reference RLE compression. wolfSSL does not implement TLS compression; provided for OpenSSL API compatibility.
+
+    \return NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_COMP_rle usage
+    \endcode
+
+    \sa wolfSSL_COMP_zlib
+*/
+WOLFSSL_COMP_METHOD* wolfSSL_COMP_rle(void);
+
+/*!
+    \ingroup openSSL
+    \brief Returns a pointer used to reference zlib compression. wolfSSL does not implement TLS compression; provided for OpenSSL API compatibility.
+
+    \return NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_COMP_zlib usage
+    \endcode
+
+    \sa wolfSSL_COMP_rle
+*/
+WOLFSSL_COMP_METHOD* wolfSSL_COMP_zlib(void);
+
+/*!
+    \ingroup openSSL
+    \brief Finalizes processing of any pending configuration commands held in the WOLFSSL_CONF_CTX. Mirrors OpenSSL's SSL_CONF_CTX_finish().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param cctx configuration context.
+
+    _Example_
+    \code
+    // see wolfSSL_CONF_CTX_finish usage
+    \endcode
+
+    \sa wolfSSL_CONF_CTX_new
+    \sa wolfSSL_CONF_CTX_free
+*/
+int wolfSSL_CONF_CTX_finish(WOLFSSL_CONF_CTX* cctx);
+
+/*!
+    \ingroup openSSL
+    \brief Releases a WOLFSSL_CONF_CTX allocated with wolfSSL_CONF_CTX_new(). Mirrors OpenSSL's SSL_CONF_CTX_free().
+
+    \return none No returns.
+
+    \param cctx configuration context to free.
+
+    _Example_
+    \code
+    // see wolfSSL_CONF_CTX_free usage
+    \endcode
+
+    \sa wolfSSL_CONF_CTX_new
+*/
+void wolfSSL_CONF_CTX_free(WOLFSSL_CONF_CTX* cctx);
+
+/*!
+    \ingroup openSSL
+    \brief Allocates and returns a new WOLFSSL_CONF_CTX used to process configuration commands. Mirrors OpenSSL's SSL_CONF_CTX_new().
+
+    \return pointer to a new WOLFSSL_CONF_CTX on success.
+    \return NULL on allocation failure.
+
+    _Example_
+    \code
+    // see wolfSSL_CONF_CTX_new usage
+    \endcode
+
+    \sa wolfSSL_CONF_CTX_free
+    \sa wolfSSL_CONF_CTX_set_flags
+*/
+WOLFSSL_CONF_CTX* wolfSSL_CONF_CTX_new(void);
+
+/*!
+    \ingroup openSSL
+    \brief Sets command-processing flags (e.g. file vs. command-line, server/client) on the configuration context. Mirrors OpenSSL's SSL_CONF_CTX_set_flags().
+
+    \return the resulting set of flags after applying the bitmask.
+
+    \param cctx configuration context.
+    \param flags bitmask of WOLFSSL_CONF_FLAG_* values.
+
+    _Example_
+    \code
+    // see wolfSSL_CONF_CTX_set_flags usage
+    \endcode
+
+    \sa wolfSSL_CONF_CTX_new
+*/
+unsigned int wolfSSL_CONF_CTX_set_flags(WOLFSSL_CONF_CTX* cctx, unsigned int flags);
+
+/*!
+    \ingroup openSSL
+    \brief Associates a WOLFSSL_CTX with the configuration context so that subsequent wolfSSL_CONF_cmd() calls modify it. Mirrors OpenSSL's SSL_CONF_CTX_set_ssl_ctx().
+
+    \return WOLFSSL_SUCCESS on success.
+
+    \param cctx configuration context.
+    \param ctx WOLFSSL_CTX to associate.
+
+    _Example_
+    \code
+    // see wolfSSL_CONF_CTX_set_ssl_ctx usage
+    \endcode
+
+    \sa wolfSSL_CONF_cmd
+*/
+void wolfSSL_CONF_CTX_set_ssl_ctx(WOLFSSL_CONF_CTX* cctx, WOLFSSL_CTX *ctx);
+
+/*!
+    \ingroup openSSL
+    \brief Processes a single configuration command/value pair against the associated WOLFSSL_CTX. Mirrors OpenSSL's SSL_CONF_cmd().
+
+    \return recognized command type code on success.
+    \return WOLFSSL_FAILURE if the command is unknown.
+    \return -2 if the command requires a value that was not provided.
+
+    \param cctx configuration context.
+    \param cmd command string.
+    \param value command argument or NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_CONF_cmd usage
+    \endcode
+
+    \sa wolfSSL_CONF_cmd_value_type
+*/
+int wolfSSL_CONF_cmd(WOLFSSL_CONF_CTX* cctx, const char* cmd, const char* value);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the type of value expected by a configuration command. Mirrors OpenSSL's SSL_CONF_cmd_value_type().
+
+    \return one of the SSL_CONF_TYPE_* constants.
+
+    \param cctx configuration context.
+    \param cmd command name.
+
+    _Example_
+    \code
+    // see wolfSSL_CONF_cmd_value_type usage
+    \endcode
+
+    \sa wolfSSL_CONF_cmd
+*/
+int wolfSSL_CONF_cmd_value_type(WOLFSSL_CONF_CTX *cctx, const char *cmd);
+
+/*!
+    \ingroup openSSL
+    \brief Returns a newly allocated string containing the path to the default OpenSSL configuration file. Mirrors OpenSSL's CONF_get1_default_config_file().
+
+    \return heap-allocated string the caller must free.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_CONF_get1_default_config_file usage
+    \endcode
+
+    \sa wolfSSL_OPENSSL_config
+*/
+char* wolfSSL_CONF_get1_default_config_file(void);
+
+/*!
+    \ingroup openSSL
+    \brief Unloads dynamically-loaded configuration modules. Provided for OpenSSL compatibility; in wolfSSL it is a no-op.
+
+    \return 1 always.
+
+    \param all unused.
+
+    _Example_
+    \code
+    // see wolfSSL_CONF_modules_unload usage
+    \endcode
+
+    \sa wolfSSL_OPENSSL_config
+*/
+void wolfSSL_CONF_modules_unload(int all);
+
+/*!
+    \ingroup openSSL
+    \brief Cleans up all per-object extra-data slots registered via CRYPTO_get_ex_new_index(). Mirrors OpenSSL's CRYPTO_cleanup_all_ex_data(); a no-op in wolfSSL.
+
+    \return none No returns.
+
+    _Example_
+    \code
+    // see wolfSSL_CRYPTO_cleanup_all_ex_data usage
+    \endcode
+
+    \sa wolfSSL_CRYPTO_get_ex_new_index
+*/
+void wolfSSL_CRYPTO_cleanup_all_ex_data(void);
+
+/*!
+    \ingroup openSSL
+    \brief Wrapper around free() that matches the OpenSSL CRYPTO_free() signature. The file and line arguments are ignored.
+
+    \return none No returns.
+
+    \param str pointer previously returned by wolfSSL_CRYPTO_malloc.
+    \param file unused.
+    \param line unused.
+
+    _Example_
+    \code
+    // see wolfSSL_CRYPTO_free usage
+    \endcode
+
+    \sa wolfSSL_CRYPTO_malloc
+*/
+void wolfSSL_CRYPTO_free(void *str, const char *file, int line);
+
+/*!
+    \ingroup openSSL
+    \brief Wrapper around malloc() that matches the OpenSSL CRYPTO_malloc() signature. The file and line arguments are ignored.
+
+    \return pointer to the allocated buffer on success.
+    \return NULL on failure.
+
+    \param num number of bytes to allocate.
+    \param file unused.
+    \param line unused.
+
+    _Example_
+    \code
+    // see wolfSSL_CRYPTO_malloc usage
+    \endcode
+
+    \sa wolfSSL_CRYPTO_free
+*/
+void *wolfSSL_CRYPTO_malloc(size_t num, const char *file, int line);
+
+/*!
+    \ingroup openSSL
+    \brief Performs a constant-time comparison of two buffers, returning zero only if they are equal. Mirrors OpenSSL's CRYPTO_memcmp().
+
+    \return 0 if the buffers are equal.
+    \return non-zero if they differ.
+
+    \param a first buffer.
+    \param b second buffer.
+    \param size number of bytes to compare.
+
+    _Example_
+    \code
+    // see wolfSSL_CRYPTO_memcmp usage
+    \endcode
+
+    \sa wolfSSL_CRYPTO_malloc
+*/
+int wolfSSL_CRYPTO_memcmp(const void *a, const void *b, size_t size);
+
+/*!
+    \ingroup CertsKeys
+    \brief Loads RFC 5114 1024-bit MODP Diffie-Hellman prime into the supplied WOLFSSL_BIGNUM. Mirrors OpenSSL's BN_get_rfc2409_prime_1024().
+
+    \return bn on success.
+    \return NULL on failure.
+
+    \param bn destination BIGNUM; allocated if NULL.
+
+    _Example_
+    \code
+    // see wolfSSL_DH_1024_prime usage
+    \endcode
+
+    \sa wolfSSL_DH_2048_prime
+    \sa wolfSSL_DH_3072_prime
+*/
+WOLFSSL_BIGNUM* wolfSSL_DH_1024_prime(WOLFSSL_BIGNUM* bn);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a newly allocated WOLFSSL_BIGNUM containing the 1536-bit MODP Diffie-Hellman prime from RFC 3526.
+
+    \return allocated BIGNUM on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_DH_1536_prime usage
+    \endcode
+
+    \sa wolfSSL_DH_2048_prime
+*/
+WOLFSSL_BIGNUM* wolfSSL_DH_1536_prime(WOLFSSL_BIGNUM* bn);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a newly allocated WOLFSSL_BIGNUM containing the 2048-bit MODP Diffie-Hellman prime from RFC 3526.
+
+    \return allocated BIGNUM on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_DH_2048_prime usage
+    \endcode
+
+    \sa wolfSSL_DH_3072_prime
+*/
+WOLFSSL_BIGNUM* wolfSSL_DH_2048_prime(WOLFSSL_BIGNUM* bn);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a newly allocated WOLFSSL_BIGNUM containing the 3072-bit MODP Diffie-Hellman prime from RFC 3526.
+
+    \return allocated BIGNUM on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_DH_3072_prime usage
+    \endcode
+
+    \sa wolfSSL_DH_4096_prime
+*/
+WOLFSSL_BIGNUM* wolfSSL_DH_3072_prime(WOLFSSL_BIGNUM* bn);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a newly allocated WOLFSSL_BIGNUM containing the 4096-bit MODP Diffie-Hellman prime from RFC 3526.
+
+    \return allocated BIGNUM on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_DH_4096_prime usage
+    \endcode
+
+    \sa wolfSSL_DH_6144_prime
+*/
+WOLFSSL_BIGNUM* wolfSSL_DH_4096_prime(WOLFSSL_BIGNUM* bn);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a newly allocated WOLFSSL_BIGNUM containing the 6144-bit MODP Diffie-Hellman prime from RFC 3526.
+
+    \return allocated BIGNUM on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_DH_6144_prime usage
+    \endcode
+
+    \sa wolfSSL_DH_8192_prime
+*/
+WOLFSSL_BIGNUM* wolfSSL_DH_6144_prime(WOLFSSL_BIGNUM* bn);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a newly allocated WOLFSSL_BIGNUM containing the 768-bit MODP Diffie-Hellman prime. Provided for legacy/test use; the 768-bit group is no longer considered secure.
+
+    \return allocated BIGNUM on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_DH_768_prime usage
+    \endcode
+
+    \sa wolfSSL_DH_2048_prime
+*/
+WOLFSSL_BIGNUM* wolfSSL_DH_768_prime(WOLFSSL_BIGNUM* bn);
+
+/*!
+    \ingroup CertsKeys
+    \brief Returns a newly allocated WOLFSSL_BIGNUM containing the 8192-bit MODP Diffie-Hellman prime from RFC 3526.
+
+    \return allocated BIGNUM on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_DH_8192_prime usage
+    \endcode
+
+    \sa wolfSSL_DH_4096_prime
+*/
+WOLFSSL_BIGNUM* wolfSSL_DH_8192_prime(WOLFSSL_BIGNUM* bn);
+
+/*!
+    \ingroup Debug
+    \brief Extracts the library component from a packed wolfSSL/OpenSSL error code. Mirrors OpenSSL's ERR_GET_LIB().
+
+    \return library identifier portion of the error code.
+
+    \param err packed error code.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_GET_LIB usage
+    \endcode
+
+    \sa wolfSSL_ERR_GET_REASON
+*/
+int wolfSSL_ERR_GET_LIB(unsigned long err);
+
+/*!
+    \ingroup Debug
+    \brief Extracts the reason code from a packed wolfSSL/OpenSSL error code. Mirrors OpenSSL's ERR_GET_REASON().
+
+    \return reason portion of the error code.
+
+    \param err packed error code.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_GET_REASON usage
+    \endcode
+
+    \sa wolfSSL_ERR_GET_LIB
+*/
+int wolfSSL_ERR_GET_REASON(unsigned long err);
+
+/*!
+    \ingroup Debug
+    \brief Clears all errors currently queued for the calling thread. Mirrors OpenSSL's ERR_clear_error().
+
+    \return none No returns.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_clear_error usage
+    \endcode
+
+    \sa wolfSSL_ERR_get_error
+*/
+void wolfSSL_ERR_clear_error(void);
+
+/*!
+    \ingroup Debug
+    \brief Writes a human-readable dump of every error currently on the thread error queue to fp. Mirrors OpenSSL's ERR_print_errors_fp().
+
+    \return none No returns.
+
+    \param fp destination file.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_dump_errors_fp usage
+    \endcode
+
+    \sa wolfSSL_ERR_print_errors_fp
+    \sa wolfSSL_ERR_print_errors
+*/
+void wolfSSL_ERR_dump_errors_fp(XFILE fp);
+
+/*!
+    \ingroup Debug
+    \brief Frees any error string tables loaded by wolfSSL_ERR_load_*_strings(). Mirrors OpenSSL's ERR_free_strings(); a no-op in wolfSSL.
+
+    \return none No returns.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_free_strings usage
+    \endcode
+
+    \sa wolfSSL_ERR_load_ERR_strings
+*/
+void wolfSSL_ERR_free_strings(void);
+
+/*!
+    \ingroup Debug
+    \brief Returns the function name component of an error code as a string. Mirrors OpenSSL's ERR_func_error_string(); always returns an empty string in wolfSSL.
+
+    \return empty string.
+
+    \param err packed error code.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_func_error_string usage
+    \endcode
+
+    \sa wolfSSL_ERR_lib_error_string
+    \sa wolfSSL_ERR_reason_error_string
+*/
+const char* wolfSSL_ERR_func_error_string(unsigned long e);
+
+/*!
+    \ingroup Debug
+    \brief Removes and returns the next error from the thread error queue, or 0 if the queue is empty. Mirrors OpenSSL's ERR_get_error().
+
+    \return error code value, or 0 when the queue is empty.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_get_error usage
+    \endcode
+
+    \sa wolfSSL_ERR_peek_error
+    \sa wolfSSL_ERR_clear_error
+*/
+unsigned long wolfSSL_ERR_get_error(void);
+
+/*!
+    \ingroup Debug
+    \brief Removes the next error from the thread error queue and additionally returns the file and line where it was recorded. Mirrors OpenSSL's ERR_get_error_line().
+
+    \return error code value, or 0 when the queue is empty.
+
+    \param file optional output for source file name.
+    \param line optional output for line number.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_get_error_line usage
+    \endcode
+
+    \sa wolfSSL_ERR_get_error
+    \sa wolfSSL_ERR_peek_last_error_line
+*/
+unsigned long wolfSSL_ERR_get_error_line(const char** file, int* line);
+
+/*!
+    \ingroup Debug
+    \brief Returns the library name component of an error code as a string. Mirrors OpenSSL's ERR_lib_error_string().
+
+    \return library name string, or empty string.
+
+    \param err packed error code.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_lib_error_string usage
+    \endcode
+
+    \sa wolfSSL_ERR_func_error_string
+    \sa wolfSSL_ERR_reason_error_string
+*/
+const char* wolfSSL_ERR_lib_error_string(unsigned long e);
+
+/*!
+    \ingroup Debug
+    \brief Loads the BIO subsystem error strings. Mirrors OpenSSL's ERR_load_BIO_strings(); a no-op in wolfSSL.
+
+    \return 0 always.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_load_BIO_strings usage
+    \endcode
+
+    \sa wolfSSL_ERR_load_ERR_strings
+*/
+void wolfSSL_ERR_load_BIO_strings(void);
+
+/*!
+    \ingroup Debug
+    \brief Loads the ERR subsystem error strings. Mirrors OpenSSL's ERR_load_ERR_strings(); a no-op in wolfSSL.
+
+    \return none No returns.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_load_ERR_strings usage
+    \endcode
+
+    \sa wolfSSL_ERR_load_crypto_strings
+*/
+int wolfSSL_ERR_load_ERR_strings(void);
+
+/*!
+    \ingroup Debug
+    \brief Loads the SSL subsystem error strings. Mirrors OpenSSL's ERR_load_SSL_strings(); a no-op in wolfSSL.
+
+    \return none No returns.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_load_SSL_strings usage
+    \endcode
+
+    \sa wolfSSL_ERR_load_ERR_strings
+*/
+void wolfSSL_ERR_load_SSL_strings(void);
+
+/*!
+    \ingroup Debug
+    \brief Loads the libcrypto error strings. Mirrors OpenSSL's ERR_load_crypto_strings(); a no-op in wolfSSL.
+
+    \return none No returns.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_load_crypto_strings usage
+    \endcode
+
+    \sa wolfSSL_ERR_load_ERR_strings
+*/
+void wolfSSL_ERR_load_crypto_strings(void);
+
+/*!
+    \ingroup Debug
+    \brief Returns the next error on the thread error queue without removing it. Mirrors OpenSSL's ERR_peek_error().
+
+    \return error code value, or 0 when the queue is empty.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_peek_error usage
+    \endcode
+
+    \sa wolfSSL_ERR_get_error
+*/
+unsigned long wolfSSL_ERR_peek_error(void);
+
+/*!
+    \ingroup Debug
+    \brief Returns the most recent error on the queue (without removing it) and reports the file and line where it was recorded. Mirrors OpenSSL's ERR_peek_last_error_line().
+
+    \return error code value, or 0 when the queue is empty.
+
+    \param file optional output for source file name.
+    \param line optional output for line number.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_peek_last_error_line usage
+    \endcode
+
+    \sa wolfSSL_ERR_peek_last_error
+    \sa wolfSSL_ERR_get_error_line
+*/
+unsigned long wolfSSL_ERR_peek_last_error_line(const char **file, int *line);
+
+/*!
+    \ingroup Debug
+    \brief Writes a human-readable dump of every error currently on the thread error queue to the supplied BIO. Mirrors OpenSSL's ERR_print_errors().
+
+    \return none No returns.
+
+    \param bio destination BIO.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_print_errors usage
+    \endcode
+
+    \sa wolfSSL_ERR_print_errors_fp
+    \sa wolfSSL_ERR_print_errors_cb
+*/
+void wolfSSL_ERR_print_errors(WOLFSSL_BIO *bio);
+
+/*!
+    \ingroup Debug
+    \brief Returns a human-readable string describing the reason portion of err. Mirrors OpenSSL's ERR_reason_error_string().
+
+    \return static string describing the error.
+    \return NULL or empty string if unknown.
+
+    \param err packed error code.
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_reason_error_string usage
+    \endcode
+
+    \sa wolfSSL_ERR_error_string
+    \sa wolfSSL_ERR_lib_error_string
+*/
+const char* wolfSSL_ERR_reason_error_string(unsigned long e);
+
+/*!
+    \ingroup Debug
+    \brief Removes per-thread error state for the given thread id. Mirrors OpenSSL's ERR_remove_state(); wolfSSL clears the current thread's error queue regardless of the id.
+
+    \return none No returns.
+
+    \param id thread identifier (unused).
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_remove_state usage
+    \endcode
+
+    \sa wolfSSL_ERR_remove_thread_state
+*/
+void wolfSSL_ERR_remove_state(unsigned long id);
+
+/*!
+    \ingroup Debug
+    \brief Removes per-thread error state for the supplied thread. Mirrors OpenSSL's ERR_remove_thread_state(); wolfSSL clears the current thread's error queue.
+
+    \return none No returns.
+
+    \param id thread state pointer (unused).
+
+    _Example_
+    \code
+    // see wolfSSL_ERR_remove_thread_state usage
+    \endcode
+
+    \sa wolfSSL_ERR_remove_state
+*/
+void wolfSSL_ERR_remove_thread_state(void* pid);
+
+/*!
+    \ingroup openSSL
+    \brief Releases any resources allocated by wolfSSL_OBJ_create(). Mirrors OpenSSL's OBJ_cleanup().
+
+    \return none No returns.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_cleanup usage
+    \endcode
+
+    \sa wolfSSL_OBJ_create
+*/
+void wolfSSL_OBJ_cleanup(void);
+
+/*!
+    \ingroup openSSL
+    \brief Registers a new object identifier (OID) at runtime under the given short and long names and returns its NID. Mirrors OpenSSL's OBJ_create().
+
+    \return the new NID on success.
+    \return NID_undef on failure.
+
+    \param oid OID string in dotted decimal form.
+    \param sn short name.
+    \param ln long name.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_create usage
+    \endcode
+
+    \sa wolfSSL_OBJ_cleanup
+    \sa wolfSSL_OBJ_txt2nid
+*/
+int wolfSSL_OBJ_create(const char *oid, const char *sn, const char *ln);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the type of a WOLFSSL_GENERAL_NAME field. Mirrors OpenSSL's GENERAL_NAME type accessor.
+
+    \return the GEN_* type value.
+
+    \param o WOLFSSL_ASN1_OBJECT or general-name pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_get_type usage
+    \endcode
+
+    \sa wolfSSL_OBJ_obj2nid
+*/
+int wolfSSL_OBJ_get_type(const WOLFSSL_ASN1_OBJECT *o);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the length of the DER-encoded OID held in obj. Mirrors OpenSSL's OBJ_length().
+
+    \return size in bytes of the encoded OID.
+    \return 0 if obj is NULL.
+
+    \param o WOLFSSL_ASN1_OBJECT to query.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_length usage
+    \endcode
+
+    \sa wolfSSL_OBJ_get0_data
+*/
+size_t wolfSSL_OBJ_length(const WOLFSSL_ASN1_OBJECT* o);
+
+/*!
+    \ingroup openSSL
+    \brief Maps a long name string to its NID. Mirrors OpenSSL's OBJ_ln2nid().
+
+    \return matching NID on success.
+    \return NID_undef if not found.
+
+    \param ln long name to look up.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_ln2nid usage
+    \endcode
+
+    \sa wolfSSL_OBJ_sn2nid
+    \sa wolfSSL_OBJ_nid2ln
+*/
+int wolfSSL_OBJ_ln2nid(const char *ln);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the long name string associated with a NID. Mirrors OpenSSL's OBJ_nid2ln().
+
+    \return long name on success.
+    \return NULL if no match.
+
+    \param n NID to look up.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_nid2ln usage
+    \endcode
+
+    \sa wolfSSL_OBJ_nid2sn
+    \sa wolfSSL_OBJ_ln2nid
+*/
+const char* wolfSSL_OBJ_nid2ln(int n);
+
+/*!
+    \ingroup openSSL
+    \brief Returns a WOLFSSL_ASN1_OBJECT representing the given NID. Mirrors OpenSSL's OBJ_nid2obj().
+
+    \return pointer to a WOLFSSL_ASN1_OBJECT on success.
+    \return NULL on failure.
+
+    \param n NID identifier.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_nid2obj usage
+    \endcode
+
+    \sa wolfSSL_OBJ_obj2nid
+*/
+WOLFSSL_ASN1_OBJECT* wolfSSL_OBJ_nid2obj(int n);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the short name string associated with a NID. Mirrors OpenSSL's OBJ_nid2sn().
+
+    \return short name on success.
+    \return NULL if no match.
+
+    \param n NID to look up.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_nid2sn usage
+    \endcode
+
+    \sa wolfSSL_OBJ_nid2ln
+    \sa wolfSSL_OBJ_sn2nid
+*/
+const char* wolfSSL_OBJ_nid2sn(int n);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the NID corresponding to a WOLFSSL_ASN1_OBJECT. Mirrors OpenSSL's OBJ_obj2nid().
+
+    \return NID on success.
+    \return NID_undef if unknown.
+
+    \param o object to look up.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_obj2nid usage
+    \endcode
+
+    \sa wolfSSL_OBJ_nid2obj
+*/
+int wolfSSL_OBJ_obj2nid(const WOLFSSL_ASN1_OBJECT *o);
+
+/*!
+    \ingroup openSSL
+    \brief Maps a short name string to its NID. Mirrors OpenSSL's OBJ_sn2nid().
+
+    \return matching NID on success.
+    \return NID_undef if not found.
+
+    \param sn short name to look up.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_sn2nid usage
+    \endcode
+
+    \sa wolfSSL_OBJ_ln2nid
+*/
+int wolfSSL_OBJ_sn2nid(const char *sn);
+
+/*!
+    \ingroup openSSL
+    \brief Maps a textual representation (short name, long name, or dotted OID) to a NID. Mirrors OpenSSL's OBJ_txt2nid().
+
+    \return matching NID on success.
+    \return NID_undef if not found.
+
+    \param s textual identifier.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_txt2nid usage
+    \endcode
+
+    \sa wolfSSL_OBJ_txt2obj
+*/
+int wolfSSL_OBJ_txt2nid(const char *sn);
+
+/*!
+    \ingroup openSSL
+    \brief Maps a textual representation to a WOLFSSL_ASN1_OBJECT. When no_name is non-zero only dotted OID form is accepted. Mirrors OpenSSL's OBJ_txt2obj().
+
+    \return pointer to a WOLFSSL_ASN1_OBJECT on success.
+    \return NULL on failure.
+
+    \param s textual identifier.
+    \param no_name if non-zero, only accept dotted OID.
+
+    _Example_
+    \code
+    // see wolfSSL_OBJ_txt2obj usage
+    \endcode
+
+    \sa wolfSSL_OBJ_txt2nid
+*/
+WOLFSSL_ASN1_OBJECT* wolfSSL_OBJ_txt2obj(const char* s, int no_name);
+
+/*!
+    \ingroup openSSL
+    \brief Releases a WOLFSSL_INIT_SETTINGS object allocated by wolfSSL_OPENSSL_INIT_new().
+
+    \return none No returns.
+
+    \param init settings object to free.
+
+    _Example_
+    \code
+    // see wolfSSL_OPENSSL_INIT_free usage
+    \endcode
+
+    \sa wolfSSL_OPENSSL_INIT_new
+*/
+void wolfSSL_OPENSSL_INIT_free(WOLFSSL_INIT_SETTINGS* init);
+
+/*!
+    \ingroup openSSL
+    \brief Allocates a new WOLFSSL_INIT_SETTINGS object used to control library initialization. Mirrors OpenSSL's OPENSSL_INIT_new().
+
+    \return pointer to a new settings object on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_OPENSSL_INIT_new usage
+    \endcode
+
+    \sa wolfSSL_OPENSSL_INIT_free
+*/
+WOLFSSL_INIT_SETTINGS* wolfSSL_OPENSSL_INIT_new(void);
+
+/*!
+    \ingroup openSSL
+    \brief Securely zeroes len bytes of memory at ptr in a way that should not be optimized away. Mirrors OpenSSL's OPENSSL_cleanse().
+
+    \return none No returns.
+
+    \param ptr buffer to clear.
+    \param len size of buffer in bytes.
+
+    _Example_
+    \code
+    // see wolfSSL_OPENSSL_cleanse usage
+    \endcode
+
+    \sa wolfSSL_CRYPTO_free
+*/
+void wolfSSL_OPENSSL_cleanse(void *ptr, size_t len);
+
+/*!
+    \ingroup openSSL
+    \brief Loads the OpenSSL-style application configuration. Mirrors OpenSSL's OPENSSL_config(); a no-op in wolfSSL.
+
+    \return none No returns.
+
+    \param config_name configuration section name (unused).
+
+    _Example_
+    \code
+    // see wolfSSL_OPENSSL_config usage
+    \endcode
+
+    \sa wolfSSL_CONF_modules_unload
+*/
+void wolfSSL_OPENSSL_config(char *config_name);
+
+/*!
+    \ingroup CertsKeys
+    \brief Default PEM password callback that copies the user-supplied passphrase (passed via the void* userdata) into name. Mirrors OpenSSL's PEM_def_callback().
+
+    \return number of bytes written to name on success.
+    \return 0 on failure.
+
+    \param name output buffer for the password.
+    \param num size of name.
+    \param w unused.
+    \param key user data pointer holding the passphrase string.
+
+    _Example_
+    \code
+    // see wolfSSL_PEM_def_callback usage
+    \endcode
+
+    \sa wolfSSL_CTX_set_default_passwd_cb
+*/
+int wolfSSL_PEM_def_callback(char* name, int num, int w, void* key);
+
+/*!
+    \ingroup CertsKeys
+    \brief Writes the PEM encoding of x to the BIO bp. Mirrors OpenSSL's PEM_write_bio_X509().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bp destination BIO.
+    \param x certificate to write.
+
+    _Example_
+    \code
+    // see wolfSSL_PEM_write_bio_X509 usage
+    \endcode
+
+    \sa wolfSSL_PEM_write_bio_X509_AUX
+    \sa wolfSSL_PEM_read_bio_X509
+*/
+int wolfSSL_PEM_write_bio_X509(WOLFSSL_BIO *bp, WOLFSSL_X509 *x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Writes the PEM encoding of x to the BIO bp, including auxiliary trust information when present. Mirrors OpenSSL's PEM_write_bio_X509_AUX().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bp destination BIO.
+    \param x certificate to write.
+
+    _Example_
+    \code
+    // see wolfSSL_PEM_write_bio_X509_AUX usage
+    \endcode
+
+    \sa wolfSSL_PEM_write_bio_X509
+    \sa wolfSSL_PEM_read_bio_X509_AUX
+*/
+int wolfSSL_PEM_write_bio_X509_AUX(WOLFSSL_BIO *bp,WOLFSSL_X509 *x);
+
+/*!
+    \ingroup CertsKeys
+    \brief Writes the PEM encoding of a certificate signing request to the BIO bp. Mirrors OpenSSL's PEM_write_bio_X509_REQ().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bp destination BIO.
+    \param x CSR to write.
+
+    _Example_
+    \code
+    // see wolfSSL_PEM_write_bio_X509_REQ usage
+    \endcode
+
+    \sa wolfSSL_PEM_write_bio_X509
+*/
+int wolfSSL_PEM_write_bio_X509_REQ(WOLFSSL_BIO *bp,WOLFSSL_X509 *x);
+
+/*!
+    \ingroup openSSL
+    \brief Releases any state held by the OpenSSL-compatibility PRNG. Mirrors OpenSSL's RAND_cleanup().
+
+    \return WOLFSSL_SUCCESS on success.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_Cleanup usage
+    \endcode
+
+    \sa wolfSSL_RAND_seed
+*/
+void wolfSSL_RAND_Cleanup(void);
+
+/*!
+    \ingroup openSSL
+    \brief Adds entropy from buf into the OpenSSL-compatibility PRNG. Mirrors OpenSSL's RAND_add().
+
+    \return none No returns.
+
+    \param buf entropy buffer.
+    \param num length of buf.
+    \param entropy estimated entropy in bytes.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_add usage
+    \endcode
+
+    \sa wolfSSL_RAND_seed
+    \sa wolfSSL_RAND_poll
+*/
+void wolfSSL_RAND_add(const void* add, int len, double entropy);
+
+/*!
+    \ingroup openSSL
+    \brief Fills buf with num cryptographically strong random bytes. Mirrors OpenSSL's RAND_bytes().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param buf destination buffer.
+    \param num number of random bytes to generate.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_bytes usage
+    \endcode
+
+    \sa wolfSSL_RAND_pseudo_bytes
+*/
+int wolfSSL_RAND_bytes(unsigned char* buf, int num);
+
+/*!
+    \ingroup openSSL
+    \brief Reads entropy from an Entropy Gathering Daemon (EGD) socket. Mirrors OpenSSL's RAND_egd().
+
+    \return number of bytes read on success.
+    \return -1 on error.
+
+    \param nm path of EGD socket.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_egd usage
+    \endcode
+
+    \sa wolfSSL_RAND_poll
+*/
+int wolfSSL_RAND_egd(const char* nm);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the default RAND seed file path, copying it into buf. Mirrors OpenSSL's RAND_file_name().
+
+    \return buf on success.
+    \return NULL on error.
+
+    \param fname output buffer.
+    \param len size of buf.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_file_name usage
+    \endcode
+
+    \sa wolfSSL_RAND_load_file
+    \sa wolfSSL_RAND_write_file
+*/
+const char* wolfSSL_RAND_file_name(char* fname, unsigned long len);
+
+/*!
+    \ingroup openSSL
+    \brief Reads entropy from the named file and seeds the PRNG with it. Mirrors OpenSSL's RAND_load_file().
+
+    \return number of bytes read on success.
+    \return -1 on error.
+
+    \param fname file path.
+    \param len maximum bytes to read; -1 for all.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_load_file usage
+    \endcode
+
+    \sa wolfSSL_RAND_write_file
+*/
+int wolfSSL_RAND_load_file(const char* fname, long len);
+
+/*!
+    \ingroup openSSL
+    \brief Triggers a poll of the system entropy source to reseed the PRNG. Mirrors OpenSSL's RAND_poll().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_poll usage
+    \endcode
+
+    \sa wolfSSL_RAND_add
+*/
+int wolfSSL_RAND_poll(void);
+
+/*!
+    \ingroup openSSL
+    \brief Fills buf with num pseudo-random bytes; provided for OpenSSL compatibility. wolfSSL routes this through the same cryptographically strong PRNG as wolfSSL_RAND_bytes().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param buf destination buffer.
+    \param num number of bytes to generate.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_pseudo_bytes usage
+    \endcode
+
+    \sa wolfSSL_RAND_bytes
+*/
+int wolfSSL_RAND_pseudo_bytes(unsigned char* buf, int num);
+
+/*!
+    \ingroup openSSL
+    \brief Seeds the PRNG using screen contents (Windows-specific in OpenSSL). Mirrors OpenSSL's RAND_screen(); a no-op in wolfSSL.
+
+    \return none No returns.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_screen usage
+    \endcode
+
+    \sa wolfSSL_RAND_poll
+*/
+void wolfSSL_RAND_screen(void);
+
+/*!
+    \ingroup openSSL
+    \brief Seeds the PRNG with the contents of buf. Mirrors OpenSSL's RAND_seed().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param buf entropy buffer.
+    \param num length of buf.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_seed usage
+    \endcode
+
+    \sa wolfSSL_RAND_add
+*/
+int wolfSSL_RAND_seed(const void* seed, int len);
+
+/*!
+    \ingroup openSSL
+    \brief Installs a user-supplied set of PRNG operations (WOLFSSL_RAND_METHOD). Mirrors OpenSSL's RAND_set_rand_method().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param methods pointer to method structure.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_set_rand_method usage
+    \endcode
+
+    \sa wolfSSL_RAND_bytes
+*/
+int wolfSSL_RAND_set_rand_method(const WOLFSSL_RAND_METHOD *methods);
+
+/*!
+    \ingroup openSSL
+    \brief Reports whether the PRNG has been seeded with sufficient entropy. Mirrors OpenSSL's RAND_status().
+
+    \return 1 if the PRNG is ready.
+    \return 0 otherwise.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_status usage
+    \endcode
+
+    \sa wolfSSL_RAND_poll
+*/
+int wolfSSL_RAND_status(void);
+
+/*!
+    \ingroup openSSL
+    \brief Writes the current PRNG state out to a seed file. Mirrors OpenSSL's RAND_write_file().
+
+    \return number of bytes written on success.
+    \return -1 on error.
+
+    \param fname destination file path.
+
+    _Example_
+    \code
+    // see wolfSSL_RAND_write_file usage
+    \endcode
+
+    \sa wolfSSL_RAND_load_file
+*/
+int wolfSSL_RAND_write_file(const char* fname);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the name of the cipher associated with the given session. Mirrors OpenSSL's SSL_SESSION_CIPHER_get_name().
+
+    \return cipher name string on success.
+    \return NULL on failure.
+
+    \param session session to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_CIPHER_get_name usage
+    \endcode
+
+    \sa wolfSSL_CIPHER_get_name
+    \sa wolfSSL_SESSION_get_cipher
+*/
+const char* wolfSSL_SESSION_CIPHER_get_name(const WOLFSSL_SESSION* session);
+
+/*!
+    \ingroup openSSL
+    \brief Returns a deep copy of session that the caller must free with wolfSSL_SESSION_free(). Mirrors OpenSSL's SSL_SESSION_dup().
+
+    \return new session on success.
+    \return NULL on failure.
+
+    \param session source session.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_dup usage
+    \endcode
+
+    \sa wolfSSL_SESSION_free
+    \sa wolfSSL_SESSION_up_ref
+*/
+WOLFSSL_SESSION* wolfSSL_SESSION_dup(WOLFSSL_SESSION* session);
+
+/*!
+    \ingroup openSSL
+    \brief Decrements the reference count on session and frees it once the count reaches zero. Mirrors OpenSSL's SSL_SESSION_free().
+
+    \return none No returns.
+
+    \param session session to free.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_free usage
+    \endcode
+
+    \sa wolfSSL_SESSION_new
+    \sa wolfSSL_SESSION_up_ref
+*/
+void wolfSSL_SESSION_free(WOLFSSL_SESSION* session);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the peer certificate stored on the session without taking a reference. Mirrors OpenSSL's SSL_SESSION_get0_peer().
+
+    \return peer certificate on success.
+    \return NULL if none.
+
+    \param session session to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_get0_peer usage
+    \endcode
+
+    \sa wolfSSL_get_peer_certificate
+*/
+WOLFSSL_X509* wolfSSL_SESSION_get0_peer(WOLFSSL_SESSION* session);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the application data stored on the session at index idx. Mirrors OpenSSL's SSL_SESSION_get_ex_data().
+
+    \return stored pointer on success.
+    \return NULL if not set.
+
+    \param session session to inspect.
+    \param idx ex-data slot index.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_get_ex_data usage
+    \endcode
+
+    \sa wolfSSL_SESSION_set_ex_data
+*/
+void* wolfSSL_SESSION_get_ex_data(const WOLFSSL_SESSION* session, int idx);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the time at which the session was established, in seconds since the epoch. Mirrors OpenSSL's SSL_SESSION_get_time().
+
+    \return session start time.
+    \return 0 if session is NULL.
+
+    \param session session to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_get_time usage
+    \endcode
+
+    \sa wolfSSL_SESSION_set_time
+    \sa wolfSSL_SESSION_get_timeout
+*/
+long wolfSSL_SESSION_get_time(const WOLFSSL_SESSION* session);
+
+/*!
+    \ingroup openSSL
+    \brief Returns the configured lifetime of the session in seconds. Mirrors OpenSSL's SSL_SESSION_get_timeout().
+
+    \return timeout in seconds.
+    \return 0 if session is NULL.
+
+    \param session session to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_get_timeout usage
+    \endcode
+
+    \sa wolfSSL_SESSION_get_time
+*/
+long wolfSSL_SESSION_get_timeout(const WOLFSSL_SESSION* session);
+
+/*!
+    \ingroup openSSL
+    \brief Reports whether the session contains a session ticket. Mirrors OpenSSL's SSL_SESSION_has_ticket().
+
+    \return 1 if a ticket is present.
+    \return 0 otherwise.
+
+    \param session session to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_has_ticket usage
+    \endcode
+
+    \sa wolfSSL_SESSION_is_resumable
+*/
+int wolfSSL_SESSION_has_ticket(const WOLFSSL_SESSION* session);
+
+/*!
+    \ingroup openSSL
+    \brief Reports whether session is in a state usable for resumption. Mirrors OpenSSL's SSL_SESSION_is_resumable().
+
+    \return 1 if resumable.
+    \return 0 otherwise.
+
+    \param session session to inspect.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_is_resumable usage
+    \endcode
+
+    \sa wolfSSL_SESSION_has_ticket
+*/
+int wolfSSL_SESSION_is_resumable(const WOLFSSL_SESSION *s);
+
+/*!
+    \ingroup openSSL
+    \brief Allocates a new, empty WOLFSSL_SESSION using the library default heap. Mirrors OpenSSL's SSL_SESSION_new().
+
+    \return pointer to a new session on success.
+    \return NULL on failure.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_new usage
+    \endcode
+
+    \sa wolfSSL_SESSION_new_ex
+    \sa wolfSSL_SESSION_free
+*/
+WOLFSSL_SESSION* wolfSSL_SESSION_new(void);
+
+/*!
+    \ingroup openSSL
+    \brief Allocates a new, empty WOLFSSL_SESSION using the supplied heap hint.
+
+    \return pointer to a new session on success.
+    \return NULL on failure.
+
+    \param heap heap hint passed to the allocator.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_new_ex usage
+    \endcode
+
+    \sa wolfSSL_SESSION_new
+    \sa wolfSSL_SESSION_free
+*/
+WOLFSSL_SESSION* wolfSSL_SESSION_new_ex(void* heap);
+
+/*!
+    \ingroup openSSL
+    \brief Writes a human-readable description of session to the given BIO. Mirrors OpenSSL's SSL_SESSION_print().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bp destination BIO.
+    \param session session to print.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_print usage
+    \endcode
+
+    \sa wolfSSL_SESSION_get_time
+*/
+int wolfSSL_SESSION_print(WOLFSSL_BIO* bp, const WOLFSSL_SESSION* session);
+
+/*!
+    \ingroup openSSL
+    \brief Stores application data on the session at index idx. Mirrors OpenSSL's SSL_SESSION_set_ex_data().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param session session to modify.
+    \param idx ex-data slot index.
+    \param data pointer to store.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_set_ex_data usage
+    \endcode
+
+    \sa wolfSSL_SESSION_get_ex_data
+*/
+int wolfSSL_SESSION_set_ex_data(WOLFSSL_SESSION* session, int idx, void* data);
+
+/*!
+    \ingroup openSSL
+    \brief Sets the session creation time. Mirrors OpenSSL's SSL_SESSION_set_time().
+
+    \return the value set on success.
+    \return 0 if session is NULL.
+
+    \param session session to modify.
+    \param t creation time in seconds since the epoch.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_set_time usage
+    \endcode
+
+    \sa wolfSSL_SESSION_get_time
+*/
+long wolfSSL_SESSION_set_time(WOLFSSL_SESSION *ses, long t);
+
+/*!
+    \ingroup openSSL
+    \brief Increments the reference count on session so that ownership can be shared. Mirrors OpenSSL's SSL_SESSION_up_ref().
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param session session to reference.
+
+    _Example_
+    \code
+    // see wolfSSL_SESSION_up_ref usage
+    \endcode
+
+    \sa wolfSSL_SESSION_free
+    \sa wolfSSL_SESSION_dup
+*/
+int wolfSSL_SESSION_up_ref(WOLFSSL_SESSION* session);
+
+/*!
+    \ingroup Setup
+    \brief Disables any system or user crypto policy currently in effect for this process.
+
+    \return none No returns.
+
+    _Example_
+    \code
+    // see wolfSSL_crypto_policy_disable usage
+    \endcode
+
+    \sa wolfSSL_crypto_policy_enable
+    \sa wolfSSL_crypto_policy_is_enabled
+*/
+void wolfSSL_crypto_policy_disable(void);
+
+/*!
+    \ingroup Setup
+    \brief Loads and activates the crypto policy described by the named policy file.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return a negative wolfSSL error code on failure.
+
+    \param policy path to a crypto policy file.
+
+    _Example_
+    \code
+    // see wolfSSL_crypto_policy_enable usage
+    \endcode
+
+    \sa wolfSSL_crypto_policy_enable_buffer
+    \sa wolfSSL_crypto_policy_disable
+*/
+int wolfSSL_crypto_policy_enable(const char * policy);
+
+/*!
+    \ingroup Setup
+    \brief Loads and activates a crypto policy whose contents are supplied directly in memory.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return a negative wolfSSL error code on failure.
+
+    \param buf policy contents.
+    \param len length of buf.
+
+    _Example_
+    \code
+    // see wolfSSL_crypto_policy_enable_buffer usage
+    \endcode
+
+    \sa wolfSSL_crypto_policy_enable
+*/
+int wolfSSL_crypto_policy_enable_buffer(const char * buf);
+
+/*!
+    \ingroup Setup
+    \brief Returns the colon-separated cipher list dictated by the active crypto policy.
+
+    \return static string of cipher names.
+    \return NULL if no policy is active.
+
+    _Example_
+    \code
+    // see wolfSSL_crypto_policy_get_ciphers usage
+    \endcode
+
+    \sa wolfSSL_crypto_policy_enable
+*/
+const char * wolfSSL_crypto_policy_get_ciphers(void);
+
+/*!
+    \ingroup Setup
+    \brief Returns the security level associated with the active crypto policy.
+
+    \return security level (>= 0) on success.
+    \return a negative value if no policy is active.
+
+    _Example_
+    \code
+    // see wolfSSL_crypto_policy_get_level usage
+    \endcode
+
+    \sa wolfSSL_crypto_policy_enable
+*/
+int wolfSSL_crypto_policy_get_level(void);
+
+/*!
+    \ingroup Setup
+    \brief Reports whether a crypto policy is currently active.
+
+    \return 1 if a policy is active.
+    \return 0 otherwise.
+
+    _Example_
+    \code
+    // see wolfSSL_crypto_policy_is_enabled usage
+    \endcode
+
+    \sa wolfSSL_crypto_policy_enable
+    \sa wolfSSL_crypto_policy_disable
+*/
+int wolfSSL_crypto_policy_is_enabled(void);
+
+/*!
+    \ingroup CertsKeys
+    \brief Decodes a DER-encoded ASN.1 DisplayText string from *in into a WOLFSSL_ASN1_STRING. Mirrors OpenSSL's d2i_DISPLAYTEXT().
+
+    \return pointer to the resulting WOLFSSL_ASN1_STRING on success.
+    \return NULL on failure.
+
+    \param asn optional pre-allocated destination.
+    \param in pointer to DER buffer pointer; advanced on success.
+    \param len length of the DER buffer.
+
+    _Example_
+    \code
+    // see wolfSSL_d2i_DISPLAYTEXT usage
+    \endcode
+
+    \sa wolfSSL_ASN1_STRING_new
+*/
+WOLFSSL_ASN1_STRING* wolfSSL_d2i_DISPLAYTEXT(WOLFSSL_ASN1_STRING **asn, const unsigned char **in, long len);
+
+/*!
+    \ingroup CertsKeys
+    \brief Reads a DER-encoded private key from bio and returns a WOLFSSL_EVP_PKEY for it. Mirrors OpenSSL's d2i_PrivateKey_bio().
+
+    \return allocated WOLFSSL_EVP_PKEY on success.
+    \return NULL on failure.
+
+    \param bio source BIO.
+    \param out optional output pointer that will receive the key.
+
+    _Example_
+    \code
+    // see wolfSSL_d2i_PrivateKey_bio usage
+    \endcode
+
+    \sa wolfSSL_PEM_read_bio_PrivateKey
+*/
+WOLFSSL_EVP_PKEY* wolfSSL_d2i_PrivateKey_bio(WOLFSSL_BIO* bio, WOLFSSL_EVP_PKEY** pkey);
+
+/*!
+    \ingroup CertsKeys
+    \brief Reads a DER-encoded RSA private key from bio and returns a WOLFSSL_RSA. Mirrors OpenSSL's d2i_RSAPrivateKey_bio().
+
+    \return allocated WOLFSSL_RSA on success.
+    \return NULL on failure.
+
+    \param bio source BIO.
+    \param out optional output pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_d2i_RSAPrivateKey_bio usage
+    \endcode
+
+    \sa wolfSSL_d2i_PrivateKey_bio
+*/
+WOLFSSL_RSA* wolfSSL_d2i_RSAPrivateKey_bio(WOLFSSL_BIO* bio, WOLFSSL_RSA** out);
+
+/*!
+    \ingroup CertsKeys
+    \brief Reads a DER-encoded X.509 CRL from file fp. Mirrors OpenSSL's d2i_X509_CRL_fp().
+
+    \return allocated WOLFSSL_X509_CRL on success.
+    \return NULL on failure.
+
+    \param fp input file.
+    \param crl optional output pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_d2i_X509_CRL_fp usage
+    \endcode
+
+    \sa wolfSSL_PEM_read_X509_CRL
+*/
+WOLFSSL_X509_CRL *wolfSSL_d2i_X509_CRL_fp(XFILE file, WOLFSSL_X509_CRL **crl);
+
+/*!
+    \ingroup CertsKeys
+    \brief Reads a DER-encoded certificate signing request from file fp. Mirrors OpenSSL's d2i_X509_REQ_fp().
+
+    \return allocated WOLFSSL_X509 representing the CSR on success.
+    \return NULL on failure.
+
+    \param fp input file.
+    \param req optional output pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_d2i_X509_REQ_fp usage
+    \endcode
+
+    \sa wolfSSL_PEM_read_bio_X509_REQ
+*/
+WOLFSSL_X509* wolfSSL_d2i_X509_REQ_fp(XFILE fp, WOLFSSL_X509 **req);
+
+/*!
+    \ingroup CertsKeys
+    \brief Serializes a WOLFSSL_ASN1_OBJECT to DER. If *pp is non-NULL the encoding is written there and *pp is advanced; otherwise a buffer is allocated. Mirrors OpenSSL's i2d_ASN1_OBJECT().
+
+    \return number of bytes written on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param a object to encode.
+    \param pp optional destination pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_i2d_ASN1_OBJECT usage
+    \endcode
+
+    \sa wolfSSL_OBJ_obj2nid
+*/
+int wolfSSL_i2d_ASN1_OBJECT(WOLFSSL_ASN1_OBJECT *a, unsigned char **pp);
+
+/*!
+    \ingroup CertsKeys
+    \brief Serializes the public portion of an EVP_PKEY into a SubjectPublicKeyInfo DER blob. Mirrors OpenSSL's i2d_PUBKEY().
+
+    \return number of bytes written on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param key key to encode.
+    \param der optional destination pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_i2d_PUBKEY usage
+    \endcode
+
+    \sa wolfSSL_PEM_write_bio_PUBKEY
+*/
+int wolfSSL_i2d_PUBKEY(const WOLFSSL_EVP_PKEY *key, unsigned char **der);
+
+/*!
+    \ingroup CertsKeys
+    \brief Serializes an RSA private key into a DER buffer. Mirrors OpenSSL's i2d_RSAPrivateKey().
+
+    \return length of the DER encoding on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param rsa key to encode.
+    \param pp optional destination pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_i2d_RSAPrivateKey usage
+    \endcode
+
+    \sa wolfSSL_i2d_RSAPublicKey
+*/
+int wolfSSL_i2d_RSAPrivateKey(WOLFSSL_RSA *r, unsigned char **pp);
+
+/*!
+    \ingroup CertsKeys
+    \brief Serializes the public portion of an RSA key into a DER buffer. Mirrors OpenSSL's i2d_RSAPublicKey().
+
+    \return length of the DER encoding on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param rsa key to encode.
+    \param pp optional destination pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_i2d_RSAPublicKey usage
+    \endcode
+
+    \sa wolfSSL_i2d_RSAPrivateKey
+*/
+int wolfSSL_i2d_RSAPublicKey(WOLFSSL_RSA *r, unsigned char **pp);
+
+/*!
+    \ingroup openSSL
+    \brief Serializes a WOLFSSL_SESSION to DER for storage or transport. If pp is non-NULL the encoding is written there and *pp advanced. Mirrors OpenSSL's i2d_SSL_SESSION().
+
+    \return length of the DER encoding on success.
+    \return 0 on error.
+
+    \param sess session to encode.
+    \param pp optional destination pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_i2d_SSL_SESSION usage
+    \endcode
+
+    \sa wolfSSL_d2i_SSL_SESSION
+*/
+int wolfSSL_i2d_SSL_SESSION(WOLFSSL_SESSION* sess,unsigned char** p);
+
+/*!
+    \ingroup CertsKeys
+    \brief Serializes an X.509 certificate to DER. If out is non-NULL the encoding is written there and *out advanced; otherwise a heap buffer is allocated. Mirrors OpenSSL's i2d_X509().
+
+    \return length of the DER encoding on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param x509 certificate to encode.
+    \param out optional destination pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_i2d_X509 usage
+    \endcode
+
+    \sa wolfSSL_d2i_X509
+    \sa wolfSSL_PEM_write_bio_X509
+*/
+int wolfSSL_i2d_X509(WOLFSSL_X509* x509, unsigned char** out);
+
+/*!
+    \ingroup CertsKeys
+    \brief Serializes a certificate signing request to DER. Mirrors OpenSSL's i2d_X509_REQ().
+
+    \return length of the DER encoding on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param req CSR to encode.
+    \param out optional destination pointer.
+
+    _Example_
+    \code
+    // see wolfSSL_i2d_X509_REQ usage
+    \endcode
+
+    \sa wolfSSL_i2d_X509
+    \sa wolfSSL_PEM_write_bio_X509_REQ
+*/
+int wolfSSL_i2d_X509_REQ(WOLFSSL_X509* req, unsigned char** out);
+
+/*!
+    \ingroup CertsKeys
+    \brief Writes the DER encoding of a certificate signing request to the supplied BIO.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio destination BIO.
+    \param req CSR to encode.
+
+    _Example_
+    \code
+    // see wolfSSL_i2d_X509_REQ_bio usage
+    \endcode
+
+    \sa wolfSSL_i2d_X509_REQ
+*/
+int wolfSSL_i2d_X509_REQ_bio(WOLFSSL_BIO* bio, WOLFSSL_X509* x509);
+
+/*!
+    \ingroup CertsKeys
+    \brief Writes the DER encoding of an X.509 certificate to the supplied BIO.
+
+    \return WOLFSSL_SUCCESS on success.
+    \return WOLFSSL_FAILURE on error.
+
+    \param bio destination BIO.
+    \param x509 certificate to encode.
+
+    _Example_
+    \code
+    // see wolfSSL_i2d_X509_bio usage
+    \endcode
+
+    \sa wolfSSL_i2d_X509
+    \sa wolfSSL_d2i_X509_bio
+*/
+int wolfSSL_i2d_X509_bio(WOLFSSL_BIO* bio, WOLFSSL_X509* x509);

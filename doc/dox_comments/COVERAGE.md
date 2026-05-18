@@ -19,7 +19,7 @@ from the table because they expose only internal plumbing:
 |---|---|---|---|---|
 | `wolfssl/ocsp.h` | 21 | 21 | 0 | `doc/dox_comments/header_files/ocsp.h` |
 | `wolfssl/quic.h` | 11 | 11 | 0 | `doc/dox_comments/header_files/quic.h` |
-| `wolfssl/ssl.h` | 1147 | 745 | 402 | `doc/dox_comments/header_files/ssl.h` |
+| `wolfssl/ssl.h` | 1147 | 866 | 281 | `doc/dox_comments/header_files/ssl.h` |
 | `wolfssl/wolfcrypt/aes.h` | 17 | 17 | 0 | `doc/dox_comments/header_files/aes.h` |
 | `wolfssl/wolfcrypt/arc4.h` | 3 | 3 | 0 | `doc/dox_comments/header_files/arc4.h` |
 | `wolfssl/wolfcrypt/ascon.h` | 12 | 12 | 0 | `doc/dox_comments/header_files/ascon.h` |
@@ -80,8 +80,8 @@ from the table because they expose only internal plumbing:
 ## Totals
 
 - Total WOLFSSL_API functions: 1799
-- Documented: 1397
-- Missing: 402
+- Documented: 1518
+- Missing: 281
 
 ## Tier 1 — Headers with no doc file
 
@@ -89,6 +89,6 @@ _None._
 
 ## Tier 2 — Doc file exists but functions missing
 
-- wolfssl/ssl.h — 402 missing
+- wolfssl/ssl.h — 281 missing
 
 See `COVERAGE_DETAIL.md` for the per-file list of missing function names.
