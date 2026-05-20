@@ -10,6 +10,7 @@
     \defgroup Crypto Callbacks - CryptoCb
     \defgroup Curve25519 Algorithms - Curve25519
     \defgroup Curve448 Algorithms - Curve448
+    \defgroup Dilithium Algorithms - Dilithium / ML-DSA (FIPS 204)
     \defgroup DSA Algorithms - DSA
     \defgroup Diffie-Hellman Algorithms - Diffie-Hellman
     \defgroup ECC Algorithms - ECC
@@ -195,9 +196,11 @@
     Derive the SSV, (wc_DeriveSakkeSSV()) on the recipient from the encapsulated SSV.
 
     \defgroup HMAC Algorithms - HMAC
+    \defgroup LMS Algorithms - LMS / HSS Hash-Based Signatures (NIST SP 800-208, RFC 8554)
     \defgroup MD2 Algorithms - MD2
     \defgroup MD4 Algorithms - MD4
     \defgroup MD5 Algorithms - MD5
+    \defgroup ML_KEM Algorithms - ML-KEM (FIPS 203)
     \defgroup PKCS7 Algorithms - PKCS7
     \defgroup PKCS11 Algorithms - PKCS11
     \defgroup Password Algorithms - Password Based
@@ -210,6 +213,7 @@
     \defgroup SipHash Algorithm - SipHash
     \defgroup SrtpKdf Algorithm - SRTP KDF
     \defgroup SRP Algorithms - SRP
+    \defgroup XMSS Algorithms - XMSS / XMSS^MT Hash-Based Signatures (NIST SP 800-208, RFC 8391)
 
     \defgroup ASN ASN.1
     \defgroup Base_Encoding Base Encoding
