@@ -208,6 +208,7 @@
     \defgroup Password Algorithms - Password Based
     \defgroup Poly1305 Algorithms - Poly1305
     \defgroup PUF Algorithms - PUF
+    \defgroup RC2 Algorithms - RC2
     \defgroup RIPEMD Algorithms - RIPEMD
     \defgroup RSA Algorithms - RSA
     \defgroup SHA Algorithms - SHA 128/224/256/384/512
