@@ -182,3 +182,32 @@ int wc_CamelliaCbcEncrypt(wc_Camellia* cam,
 */
 int wc_CamelliaCbcDecrypt(wc_Camellia* cam,
                                           byte* out, const byte* in, word32 sz);
+
+/*!
+    \ingroup Camellia
+
+    \brief This function securely clears a wc_Camellia structure by zeroizing
+    its contents with ForceZero. It should be called when a Camellia context
+    is no longer needed to avoid leaving key material in memory. Passing a
+    NULL pointer is safe and is a no-op.
+
+    \return none No returns.
+
+    \param cam pointer to the wc_Camellia structure to clear and release
+
+    _Example_
+    \code
+    wc_Camellia cam;
+    byte key[] = { // initialize with key };
+    byte iv[]  = { // initialize with iv };
+
+    if (wc_CamelliaSetKey(&cam, key, sizeof(key), iv) == 0) {
+        // use cam ...
+    }
+    wc_CamelliaFree(&cam);
+    \endcode
+
+    \sa wc_CamelliaSetKey
+    \sa wc_CamelliaSetIV
+*/
+void wc_CamelliaFree(wc_Camellia* cam);
