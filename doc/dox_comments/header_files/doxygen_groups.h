@@ -203,6 +203,7 @@
     \defgroup ML_KEM Algorithms - ML-KEM (FIPS 203)
     \defgroup PKCS7 Algorithms - PKCS7
     \defgroup PKCS11 Algorithms - PKCS11
+    \defgroup PKCS12 Algorithms - PKCS12
     \defgroup Password Algorithms - Password Based
     \defgroup Poly1305 Algorithms - Poly1305
     \defgroup PUF Algorithms - PUF
