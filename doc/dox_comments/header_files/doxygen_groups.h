@@ -2,6 +2,7 @@
     \defgroup 3DES Algorithms - 3DES
     \defgroup AES Algorithms - AES
     \defgroup ARC4 Algorithms - ARC4
+    \defgroup Async Hardware-Accelerated Async Crypto
     \defgroup BLAKE2 Algorithms - BLAKE2
     \defgroup Camellia Algorithms - Camellia
     \defgroup ChaCha Algorithms - ChaCha
@@ -251,4 +252,6 @@
     \defgroup Setup wolfSSL Context and Session Set Up
     \defgroup IO wolfSSL Connection, Session, and I/O
     \defgroup Debug wolfSSL Error Handling and Reporting
+    \defgroup wolfEntropy wolfSSL Entropy Source
+    \defgroup wolfEvent wolfSSL Event API
 */
