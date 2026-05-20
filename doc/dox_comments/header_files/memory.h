@@ -636,3 +636,58 @@ void wc_UnloadStaticMemory(WOLFSSL_HEAP_HINT* heap);
 int wolfSSL_StaticBufferSz_ex(unsigned int listSz,
             const word32 *sizeList, const word32 *distList,
             byte* buffer, word32 sz, int flag);
+
+/*!
+    \ingroup Memory
+
+    \brief Exported version of the internal ForceZero helper. Securely
+    overwrites the first len bytes pointed to by mem with zero in a way
+    that the compiler cannot optimize away, making it suitable for
+    clearing keys, secrets, or other sensitive material before
+    releasing or reusing the memory. This is the public entry point
+    callers should use; it is implemented in terms of ForceZero.
+
+    \return none No return value.
+
+    \param mem pointer to the memory region to zeroize. May be NULL only
+    if len is 0.
+    \param len number of bytes to overwrite with zero.
+
+    _Example_
+    \code
+    byte key[32];
+    // ... use key ...
+    wc_ForceZero(key, sizeof(key));
+    \endcode
+
+    \sa wolfSSL_Free
+*/
+void wc_ForceZero(void *mem, size_t len);
+
+/*!
+    \ingroup Memory
+
+    \brief Sets the seed value that controls the deterministic memory
+    allocation failure injector used by the wolfSSL test suite when
+    built with WOLFSSL_FORCE_MALLOC_FAIL_TEST. The value passed in
+    becomes the number of successful allocations that occur before
+    the next forced failure. The seed is only honored the first time
+    this function is called; subsequent calls are ignored. This API
+    is intended for fuzzing, fault-injection testing, and regression
+    coverage of out-of-memory code paths.
+
+    \return none No return value.
+
+    \param memFailCount initial count of allocations to allow before
+    forcing a malloc failure.
+
+    _Example_
+    \code
+    // Force the 10th allocation to fail
+    wolfSSL_SetMemFailCount(10);
+    \endcode
+
+    \sa wolfSSL_SetAllocators
+    \sa wolfSSL_Malloc
+*/
+void wolfSSL_SetMemFailCount(int memFailCount);
