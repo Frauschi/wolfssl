@@ -1247,3 +1247,57 @@ int wc_Shake256_GetHash(wc_Shake* shake, byte* hash);
     \sa wc_Shake256_GetHash
 */
 int wc_Shake256_Copy(wc_Shake* src, wc_Sha3* dst);
+
+/*!
+    \ingroup SHA
+
+    \brief Sets hash flags on a SHA-3 context. The flags bitmask is
+    stored on the supplied wc_Sha3 structure and used by subsequent
+    update/finalize operations (for example, to mark the context as
+    a copy or to enable algorithm-specific behavior). Only available
+    when the library is built with WOLFSSL_HASH_FLAGS.
+
+    \return 0 Returned on success.
+
+    \param sha3 pointer to the wc_Sha3 structure to update. If NULL,
+    the call is a no-op and 0 is returned.
+    \param flags flags bitmask to assign to the context.
+
+    _Example_
+    \code
+    wc_Sha3 sha3;
+    wc_InitSha3_256(&sha3, NULL, INVALID_DEVID);
+    wc_Sha3_SetFlags(&sha3, WC_HASH_FLAG_WILLCOPY);
+    \endcode
+
+    \sa wc_Sha3_GetFlags
+    \sa wc_InitSha3_256
+*/
+int wc_Sha3_SetFlags(wc_Sha3* sha3, word32 flags);
+
+/*!
+    \ingroup SHA
+
+    \brief Retrieves the hash flags that were previously set on a
+    SHA-3 context with wc_Sha3_SetFlags. The current flag bitmask is
+    written to the location pointed to by flags. Only available when
+    the library is built with WOLFSSL_HASH_FLAGS.
+
+    \return 0 Returned on success.
+
+    \param sha3 pointer to the wc_Sha3 structure to query. If NULL,
+    the call is a no-op and 0 is returned.
+    \param flags pointer that receives the current flags bitmask.
+
+    _Example_
+    \code
+    wc_Sha3 sha3;
+    word32 flags = 0;
+    wc_InitSha3_256(&sha3, NULL, INVALID_DEVID);
+    wc_Sha3_GetFlags(&sha3, &flags);
+    \endcode
+
+    \sa wc_Sha3_SetFlags
+    \sa wc_InitSha3_256
+*/
+int wc_Sha3_GetFlags(wc_Sha3* sha3, word32* flags);

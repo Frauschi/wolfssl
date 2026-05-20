@@ -263,3 +263,28 @@ void wc_ShaSizeSet(wc_Sha* sha, word32 len);
     \sa wc_InitSha
 */
 int wc_ShaSetFlags(wc_Sha* sha, word32 flags);
+
+/*!
+    \ingroup SHA
+    \brief Retrieves the hash flags that were previously set on a SHA-1
+    context with wc_ShaSetFlags. The current flag bitmask is written to
+    the location pointed to by flags. Only available when the library
+    is built with WOLFSSL_HASH_FLAGS.
+
+    \return 0 on success
+    \return negative on error
+
+    \param sha SHA structure
+    \param flags Pointer that receives the current flags
+
+    _Example_
+    \code
+    wc_Sha sha;
+    word32 flags = 0;
+    int ret = wc_ShaGetFlags(&sha, &flags);
+    \endcode
+
+    \sa wc_ShaSetFlags
+    \sa wc_InitSha
+*/
+int wc_ShaGetFlags(wc_Sha* sha, word32* flags);
