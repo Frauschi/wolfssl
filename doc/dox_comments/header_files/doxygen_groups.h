@@ -196,6 +196,7 @@
     Derive the SSV, (wc_DeriveSakkeSSV()) on the recipient from the encapsulated SSV.
 
     \defgroup HMAC Algorithms - HMAC
+    \defgroup HPKE Algorithms - HPKE
     \defgroup LMS Algorithms - LMS / HSS Hash-Based Signatures (NIST SP 800-208, RFC 8554)
     \defgroup MD2 Algorithms - MD2
     \defgroup MD4 Algorithms - MD4
