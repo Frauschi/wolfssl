@@ -689,6 +689,120 @@ int wolfIO_Select(SOCKET_T sockfd, int to_sec);
 
 /*!
     \ingroup IO
+    \brief Sets the blocking mode on a socket file descriptor. When
+    non_blocking is non-zero the socket is configured for non-blocking I/O;
+    otherwise the socket is set to blocking mode.
+
+    \return 0 on success
+    \return negative on error
+
+    \param sockfd Socket file descriptor to modify
+    \param non_blocking Non-zero to enable non-blocking mode, 0 for blocking
+
+    _Example_
+    \code
+    SOCKET_T sockfd;
+    int ret = wolfIO_SetBlockingMode(sockfd, 1);
+    if (ret != 0) {
+        // failed to set non-blocking mode
+    }
+    \endcode
+
+    \sa wolfIO_TcpConnect
+    \sa wolfIO_SetTimeout
+*/
+int wolfIO_SetBlockingMode(SOCKET_T sockfd, int non_blocking);
+
+/*!
+    \ingroup IO
+    \brief Sets the default I/O timeout, in seconds, used by the built-in
+    wolfIO routines (such as wolfIO_TcpConnect) when waiting for socket
+    operations to complete. A value of 0 disables the timeout.
+
+    \return none No returns.
+
+    \param to_sec Timeout value, in seconds
+
+    _Example_
+    \code
+    wolfIO_SetTimeout(10);
+    \endcode
+
+    \sa wolfIO_SetBlockingMode
+    \sa wolfIO_TcpConnect
+*/
+void wolfIO_SetTimeout(int to_sec);
+
+/*!
+    \ingroup IO
+    \brief Allocates and initializes a new WOLFSSL_BIO_ADDR structure used
+    by datagram BIOs to track peer address information. The newly allocated
+    address has its address family initialized to AF_UNSPEC.
+
+    \return pointer Pointer to a newly allocated WOLFSSL_BIO_ADDR on success
+    \return NULL Returned if memory allocation failed
+
+    _Example_
+    \code
+    WOLFSSL_BIO_ADDR* addr = wolfSSL_BIO_ADDR_new();
+    if (addr == NULL) {
+        // allocation failure
+    }
+    ...
+    wolfSSL_BIO_ADDR_free(addr);
+    \endcode
+
+    \sa wolfSSL_BIO_ADDR_free
+    \sa wolfSSL_BIO_ADDR_clear
+*/
+WOLFSSL_BIO_ADDR *wolfSSL_BIO_ADDR_new(void);
+
+/*!
+    \ingroup IO
+    \brief Frees a WOLFSSL_BIO_ADDR structure previously allocated with
+    wolfSSL_BIO_ADDR_new(). Passing NULL is safe and results in no action.
+
+    \return none No returns.
+
+    \param addr Pointer to the WOLFSSL_BIO_ADDR structure to free.
+    May be NULL.
+
+    _Example_
+    \code
+    WOLFSSL_BIO_ADDR* addr = wolfSSL_BIO_ADDR_new();
+    ...
+    wolfSSL_BIO_ADDR_free(addr);
+    \endcode
+
+    \sa wolfSSL_BIO_ADDR_new
+    \sa wolfSSL_BIO_ADDR_clear
+*/
+void wolfSSL_BIO_ADDR_free(WOLFSSL_BIO_ADDR *addr);
+
+/*!
+    \ingroup IO
+    \brief Zeroes the contents of a WOLFSSL_BIO_ADDR structure in place and
+    resets its address family to AF_UNSPEC. The structure itself is not
+    freed; passing NULL is safe and results in no action.
+
+    \return none No returns.
+
+    \param addr Pointer to the WOLFSSL_BIO_ADDR structure to clear.
+    May be NULL.
+
+    _Example_
+    \code
+    WOLFSSL_BIO_ADDR addr;
+    wolfSSL_BIO_ADDR_clear(&addr);
+    \endcode
+
+    \sa wolfSSL_BIO_ADDR_new
+    \sa wolfSSL_BIO_ADDR_free
+*/
+void wolfSSL_BIO_ADDR_clear(WOLFSSL_BIO_ADDR *addr);
+
+/*!
+    \ingroup IO
     \brief Connects to TCP server with timeout.
 
     \return 0 on success

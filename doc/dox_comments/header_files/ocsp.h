@@ -386,3 +386,357 @@ int wc_OcspResponder_WriteResponse(OcspResponder* responder,
 int wc_OcspResponder_WriteErrorResponse(
     enum Ocsp_Response_Status status,
     byte* response, word32* responseSz);
+
+/*!
+    \ingroup OCSP
+
+    \brief Frees a WOLFSSL_OCSP_BASICRESP object.
+
+    OpenSSL-compatibility wrapper that releases an OCSP basic response
+    previously obtained from a function such as
+    wolfSSL_OCSP_response_get1_basic(). Internally calls
+    wolfSSL_OCSP_RESPONSE_free().
+
+    \return void
+
+    \param basicResponse  Pointer to the basic response to free. May be
+                          NULL, in which case this is a no-op.
+
+    _Example_
+    \code
+    WOLFSSL_OCSP_BASICRESP* bs = wolfSSL_OCSP_response_get1_basic(resp);
+    // ... use bs ...
+    wolfSSL_OCSP_BASICRESP_free(bs);
+    \endcode
+
+    \sa wolfSSL_OCSP_response_get1_basic
+    \sa wolfSSL_OCSP_RESPONSE_free
+*/
+void wolfSSL_OCSP_BASICRESP_free(WOLFSSL_OCSP_BASICRESP* basicResponse);
+
+/*!
+    \ingroup OCSP
+
+    \brief Frees a WOLFSSL_OCSP_CERTID object.
+
+    OpenSSL-compatibility wrapper that frees an OCSP certificate ID
+    previously allocated by a function such as wolfSSL_OCSP_cert_to_id()
+    or wolfSSL_d2i_OCSP_CERTID().
+
+    \return void
+
+    \param certId  Pointer to the certificate ID to free.
+
+    _Example_
+    \code
+    WOLFSSL_OCSP_CERTID* id = wolfSSL_OCSP_cert_to_id(NULL, subject, issuer);
+    // ... use id ...
+    wolfSSL_OCSP_CERTID_free(id);
+    \endcode
+
+    \sa wolfSSL_OCSP_cert_to_id
+    \sa wolfSSL_d2i_OCSP_CERTID
+*/
+void wolfSSL_OCSP_CERTID_free(WOLFSSL_OCSP_CERTID* certId);
+
+/*!
+    \ingroup OCSP
+
+    \brief Frees an OCSP request structure.
+
+    OpenSSL-compatibility wrapper that releases an OcspRequest object
+    previously allocated by wolfSSL_OCSP_REQUEST_new(), including any
+    internal allocations.
+
+    \return void
+
+    \param request  Pointer to the OCSP request to free.
+
+    _Example_
+    \code
+    OcspRequest* req = wolfSSL_OCSP_REQUEST_new();
+    // ... use req ...
+    wolfSSL_OCSP_REQUEST_free(req);
+    \endcode
+
+    \sa wolfSSL_OCSP_REQUEST_new
+*/
+void wolfSSL_OCSP_REQUEST_free(OcspRequest* request);
+
+/*!
+    \ingroup OCSP
+
+    \brief Allocates a new OCSP request structure.
+
+    OpenSSL-compatibility wrapper that allocates and zero-initializes
+    an OcspRequest object. The caller must release the returned object
+    with wolfSSL_OCSP_REQUEST_free().
+
+    \return Pointer to a newly allocated OcspRequest on success.
+    \return NULL on memory allocation failure.
+
+    _Example_
+    \code
+    OcspRequest* req = wolfSSL_OCSP_REQUEST_new();
+    if (req == NULL) {
+        // allocation failure
+    }
+    \endcode
+
+    \sa wolfSSL_OCSP_REQUEST_free
+    \sa wolfSSL_OCSP_request_add0_id
+*/
+OcspRequest* wolfSSL_OCSP_REQUEST_new(void);
+
+/*!
+    \ingroup OCSP
+
+    \brief Frees an OCSP request context.
+
+    OpenSSL-compatibility wrapper that releases a WOLFSSL_OCSP_REQ_CTX
+    previously allocated by wolfSSL_OCSP_REQ_CTX_new() or
+    wolfSSL_OCSP_sendreq_new(), including its internal request/response
+    BIO and buffer.
+
+    \return void
+
+    \param ctx  Pointer to the OCSP request context to free. May be NULL.
+
+    _Example_
+    \code
+    WOLFSSL_OCSP_REQ_CTX* ctx = wolfSSL_OCSP_REQ_CTX_new(bio, 0);
+    // ... use ctx ...
+    wolfSSL_OCSP_REQ_CTX_free(ctx);
+    \endcode
+
+    \sa wolfSSL_OCSP_REQ_CTX_new
+    \sa wolfSSL_OCSP_sendreq_new
+*/
+void wolfSSL_OCSP_REQ_CTX_free(WOLFSSL_OCSP_REQ_CTX *ctx);
+
+/*!
+    \ingroup OCSP
+
+    \brief Drives the non-blocking I/O state machine of an OCSP request
+    context.
+
+    OpenSSL-compatibility wrapper that progresses the state machine of a
+    WOLFSSL_OCSP_REQ_CTX. While in the write state, it sends the buffered
+    HTTP request to the underlying BIO; while in the read state, it reads
+    and parses the HTTP OCSP response. Should be called repeatedly while
+    the operation has not yet completed.
+
+    \return WOLFSSL_SUCCESS when the operation has completed.
+    \return WOLFSSL_FATAL_ERROR if the BIO operation would block and the
+            caller should retry.
+    \return WOLFSSL_FAILURE on parameter or protocol errors.
+
+    \param ctx  Pointer to a request context created by
+                wolfSSL_OCSP_sendreq_new().
+
+    _Example_
+    \code
+    WOLFSSL_OCSP_REQ_CTX* ctx = wolfSSL_OCSP_sendreq_new(bio, path, req, 0);
+    int ret;
+    while ((ret = wolfSSL_OCSP_REQ_CTX_nbio(ctx)) == WOLFSSL_FATAL_ERROR) {
+        // wait for socket readiness, then retry
+    }
+    \endcode
+
+    \sa wolfSSL_OCSP_REQ_CTX_new
+    \sa wolfSSL_OCSP_sendreq_new
+    \sa wolfSSL_OCSP_sendreq_nbio
+*/
+int wolfSSL_OCSP_REQ_CTX_nbio(WOLFSSL_OCSP_REQ_CTX *ctx);
+
+/*!
+    \ingroup OCSP
+
+    \brief Frees an OCSP response structure.
+
+    OpenSSL-compatibility wrapper that releases an OcspResponse object
+    previously obtained from wolfSSL_d2i_OCSP_RESPONSE() or a similar
+    decode routine, including any single-response entries and the
+    encoded source buffer.
+
+    \return void
+
+    \param response  Pointer to the OCSP response to free. May be NULL.
+
+    _Example_
+    \code
+    const unsigned char* p = der;
+    OcspResponse* resp = wolfSSL_d2i_OCSP_RESPONSE(NULL, &p, derLen);
+    // ... use resp ...
+    wolfSSL_OCSP_RESPONSE_free(resp);
+    \endcode
+
+    \sa wolfSSL_d2i_OCSP_RESPONSE
+    \sa wolfSSL_OCSP_BASICRESP_free
+*/
+void wolfSSL_OCSP_RESPONSE_free(OcspResponse* response);
+
+/*!
+    \ingroup OCSP
+
+    \brief Returns a human-readable string for an OCSP certificate
+    status value.
+
+    OpenSSL-compatibility wrapper that maps an OCSP certificate status
+    code (CERT_GOOD, CERT_REVOKED, CERT_UNKNOWN) to a short string
+    suitable for logging or display.
+
+    \return A pointer to a static string describing the status:
+            "good", "revoked", "unknown", or "(UNKNOWN)" for unrecognized
+            values. The returned pointer must not be freed.
+
+    \param s  The OCSP certificate status value to translate.
+
+    _Example_
+    \code
+    int status = wolfSSL_OCSP_single_get0_status(single, NULL, NULL,
+                                                 NULL, NULL);
+    printf("status: %s\n", wolfSSL_OCSP_cert_status_str(status));
+    \endcode
+
+    \sa wolfSSL_OCSP_single_get0_status
+    \sa wolfSSL_OCSP_response_status_str
+*/
+const char *wolfSSL_OCSP_cert_status_str(long s);
+
+/*!
+    \ingroup OCSP
+
+    \brief Returns a human-readable string for a CRL revocation reason
+    code.
+
+    OpenSSL-compatibility wrapper that maps a CRL reason code to its
+    textual representation. In the current wolfSSL implementation this
+    is a stub that always returns NULL.
+
+    \return NULL in the current implementation.
+
+    \param s  The CRL reason code to translate.
+
+    _Example_
+    \code
+    const char* reasonStr = wolfSSL_OCSP_crl_reason_str(reason);
+    \endcode
+
+    \sa wolfSSL_OCSP_cert_status_str
+    \sa wolfSSL_OCSP_single_get0_status
+*/
+const char* wolfSSL_OCSP_crl_reason_str(long s);
+
+/*!
+    \ingroup OCSP
+
+    \brief Compares two OCSP certificate IDs for equality.
+
+    OpenSSL-compatibility wrapper that compares two WOLFSSL_OCSP_CERTID
+    objects by their hash algorithm OID, issuer name hash, issuer key
+    hash, and (when present) serial number.
+
+    \return 0 if the two IDs match.
+    \return Non-zero if the IDs do not match.
+    \return WOLFSSL_FATAL_ERROR if either argument is NULL.
+
+    \param a  Pointer to the first OCSP certificate ID.
+    \param b  Pointer to the second OCSP certificate ID.
+
+    _Example_
+    \code
+    if (wolfSSL_OCSP_id_cmp(a, b) == 0) {
+        // matching certificate IDs
+    }
+    \endcode
+
+    \sa wolfSSL_OCSP_cert_to_id
+    \sa wolfSSL_OCSP_CERTID_free
+*/
+int wolfSSL_OCSP_id_cmp(WOLFSSL_OCSP_CERTID *a, WOLFSSL_OCSP_CERTID *b);
+
+/*!
+    \ingroup OCSP
+
+    \brief Returns the number of single responses in an OCSP basic
+    response.
+
+    OpenSSL-compatibility wrapper that counts the linked list of
+    OcspEntry single responses contained in a WOLFSSL_OCSP_BASICRESP.
+
+    \return The number of single responses on success.
+    \return WOLFSSL_FAILURE if bs is NULL.
+
+    \param bs  Pointer to the OCSP basic response.
+
+    _Example_
+    \code
+    int n = wolfSSL_OCSP_resp_count(bs);
+    for (int i = 0; i < n; ++i) {
+        WOLFSSL_OCSP_SINGLERESP* s = wolfSSL_OCSP_resp_get0(bs, i);
+        // process single response s
+    }
+    \endcode
+
+    \sa wolfSSL_OCSP_resp_get0
+    \sa wolfSSL_OCSP_response_get1_basic
+*/
+int wolfSSL_OCSP_resp_count(WOLFSSL_OCSP_BASICRESP *bs);
+
+/*!
+    \ingroup OCSP
+
+    \brief Returns the OCSP response status code of a response.
+
+    OpenSSL-compatibility wrapper that retrieves the top-level response
+    status from a decoded OCSP response (e.g. OCSP_SUCCESSFUL,
+    OCSP_MALFORMED_REQUEST, OCSP_INTERNAL_ERROR, OCSP_TRY_LATER,
+    OCSP_SIG_REQUIRED, OCSP_UNAUTHORIZED).
+
+    \return The OCSP response status value on success.
+    \return -1 if response is NULL.
+
+    \param response  Pointer to a decoded OCSP response.
+
+    _Example_
+    \code
+    int status = wolfSSL_OCSP_response_status(resp);
+    if (status != OCSP_SUCCESSFUL) {
+        printf("OCSP failed: %s\n",
+               wolfSSL_OCSP_response_status_str(status));
+    }
+    \endcode
+
+    \sa wolfSSL_OCSP_response_status_str
+    \sa wolfSSL_d2i_OCSP_RESPONSE
+*/
+int wolfSSL_OCSP_response_status(OcspResponse *response);
+
+/*!
+    \ingroup OCSP
+
+    \brief Returns a human-readable string for an OCSP response status
+    value.
+
+    OpenSSL-compatibility wrapper that maps an OCSP response status code
+    to its textual representation as defined by RFC 6960
+    (e.g. "successful", "malformedrequest", "internalerror", "trylater",
+    "sigrequired", "unauthorized").
+
+    \return A pointer to a static string describing the status, or
+            "(UNKNOWN)" for unrecognized values. The returned pointer
+            must not be freed.
+
+    \param s  The OCSP response status value to translate.
+
+    _Example_
+    \code
+    int status = wolfSSL_OCSP_response_status(resp);
+    printf("OCSP status: %s\n", wolfSSL_OCSP_response_status_str(status));
+    \endcode
+
+    \sa wolfSSL_OCSP_response_status
+    \sa wolfSSL_OCSP_cert_status_str
+*/
+const char *wolfSSL_OCSP_response_status_str(long s);
