@@ -1058,3 +1058,42 @@ int wc_DhSetKey_ex(DhKey* key, const byte* p, word32 pSz,
     \ingroup Diffie-Hellman
  */
 int wc_FreeDhKey(DhKey* key);
+
+/*!
+    \ingroup Diffie-Hellman
+
+    \brief This function enables or disables non-blocking mode on a
+    Diffie-Hellman key. When a non-NULL DhNb context is supplied the
+    key is associated with that context and subsequent DH operations
+    are split into incremental steps, allowing the application to
+    cooperatively yield while the math executes. Pass NULL for nb to
+    disable non-blocking mode. The DhNb structure is reset to zero
+    when associated. Requires the build option WC_DH_NONBLOCK.
+
+    \return 0 Returned on success.
+    \return BAD_FUNC_ARG Returned when key is NULL.
+
+    \param key pointer to a DhKey previously initialized with wc_InitDhKey.
+    \param nb pointer to a caller-supplied DhNb context used to track
+    incremental progress, or NULL to disable non-blocking mode. The
+    structure lifetime must outlast the operations using it.
+
+    _Example_
+    \code
+    DhKey key;
+    DhNb  nb;
+    int   ret;
+
+    wc_InitDhKey(&key);
+    ret = wc_DhSetNonBlock(&key, &nb);
+    if (ret == 0) {
+        // perform DH operations; each call may return FP_WOULDBLOCK
+    }
+    wc_FreeDhKey(&key);
+    \endcode
+
+    \sa wc_InitDhKey
+    \sa wc_DhGenerateKeyPair
+    \sa wc_DhAgree
+*/
+int wc_DhSetNonBlock(DhKey* key, DhNb* nb);

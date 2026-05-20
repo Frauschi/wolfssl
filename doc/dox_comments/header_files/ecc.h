@@ -3388,3 +3388,31 @@ int wc_ecc_use_key_id(ecc_key* key, word32 keyId, word32 flags);
     \sa wc_ecc_use_key_id
 */
 int wc_ecc_get_key_id(ecc_key* key, word32* keyId);
+
+/*!
+    \ingroup ECC
+
+    \brief Returns a pointer to the internal table of supported ECC
+    curve parameter sets. The table is an array of ecc_set_type entries
+    that describe every curve compiled into the library, in the same
+    order used by the ecc_sets macro. This accessor is useful in builds
+    where direct access to the ecc_sets global is not exposed.
+    Call wc_ecc_get_sets_count to obtain the number of valid entries.
+
+    \return ecc_set_type* Pointer to the read-only array of supported
+    curve parameter sets.
+
+    _Example_
+    \code
+    const ecc_set_type* sets = wc_ecc_get_sets();
+    size_t count = wc_ecc_get_sets_count();
+    for (size_t i = 0; i < count; i++) {
+        printf("curve: %s\n", sets[i].name);
+    }
+    \endcode
+
+    \sa wc_ecc_get_sets_count
+    \sa wc_ecc_get_curve_id
+    \sa wc_ecc_get_curve_size_from_id
+*/
+const ecc_set_type *wc_ecc_get_sets(void);

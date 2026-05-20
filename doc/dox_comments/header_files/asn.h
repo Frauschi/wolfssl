@@ -307,3 +307,30 @@ int wc_DhPublicKeyDecode(const byte* input, word32* inOutIdx, DhKey* key,
 int wc_SignCert_cb(int requestSz, int sType, byte* buf, word32 buffSz,
                    int keyType, wc_SignCertCb signCb, void* signCtx,
                    WC_RNG* rng);
+
+/*!
+    \ingroup ASN
+    \brief Frees a DerBuffer that was previously allocated with AllocDer
+    (or its public wrapper wc_AllocDer). If the DerBuffer holds a private
+    key (type PRIVATEKEY_TYPE or ALT_PRIVATEKEY_TYPE) the key bytes are
+    zeroized with ForceZero before the memory is released. The pointer
+    pointed to by der is set to NULL upon return. Passing NULL or a
+    pointer to a NULL DerBuffer is safe and is a no-op.
+
+    \return none No return value.
+
+    \param der pointer to a DerBuffer pointer to free; *der is set
+    to NULL on return.
+
+    _Example_
+    \code
+    DerBuffer* der = NULL;
+    AllocDer(&der, 1024, CERT_TYPE, NULL);
+    // use der ...
+    FreeDer(&der);
+    \endcode
+
+    \sa wc_AllocDer
+    \sa wc_FreeDer
+*/
+void FreeDer(DerBuffer** der);

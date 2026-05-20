@@ -1890,6 +1890,41 @@ int wc_RsaPublicKeyDecode_ex(const byte* input, word32* inOutIdx,
 
 /*!
     \ingroup RSA
+    \brief Encodes the public portion of an RsaKey as a SubjectPublicKeyInfo
+    structure in ASN.1 DER form, including the algorithm identifier
+    sequence header. The encoded bytes are written to output and the size
+    of the encoded data is returned. This is equivalent to calling
+    wc_RsaKeyToPublicDer_ex with with_header set to 1.
+
+    \return >0 Size, in bytes, of the encoded DER data written to output.
+    \return BAD_FUNC_ARG Returned when key or output is NULL.
+    \return MEMORY_E Returned when dynamic memory allocation fails.
+
+    \param key pointer to an initialized RsaKey structure that contains
+    the public key to encode.
+    \param output buffer in which to place the DER-encoded public key.
+    \param inLen size of the output buffer, in bytes.
+
+    _Example_
+    \code
+    RsaKey key;
+    byte derBuf[294];
+    int derSz;
+    // initialize key with the public key to export
+    derSz = wc_RsaKeyToPublicDer(&key, derBuf, sizeof(derBuf));
+    if (derSz < 0) {
+        // handle error
+    }
+    \endcode
+
+    \sa wc_RsaKeyToPublicDer_ex
+    \sa wc_RsaPublicKeyDecode
+    \sa wc_RsaPublicKeyDerSize
+*/
+int wc_RsaKeyToPublicDer(RsaKey* key, byte* output, word32 inLen);
+
+/*!
+    \ingroup RSA
     \brief Calculates DER encoded RSA public key size.
 
     \return Size on success
