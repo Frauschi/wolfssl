@@ -21474,6 +21474,31 @@ static int DecodeCertInternal(DecodedCert* cert, int verify, int* criticalExt,
         cert->keyOID = dataASN[X509CERTASN_IDX_TBS_SPUBKEYINFO_ALGO_OID].data.oid.sum;
         cert->certBegin = dataASN[X509CERTASN_IDX_TBS_SEQ].offset;
 
+#if defined(WC_RSA_PSS) && defined(WOLFSSL_CHECK_RSAPSS_KEY_PARAMS)
+        /* Capture RSA-PSS parameters carried in this cert's SubjectPublicKey-
+         * Info algorithm identifier (RFC 4055). They restrict the hash/MGF/
+         * salt usable in signatures made by this key; store them so the
+         * restriction can be enforced when this cert acts as an issuer. */
+        if ((cert->keyOID == RSAPSSk) &&
+                (dataASN[X509CERTASN_IDX_TBS_SPUBKEYINFO_ALGO_P_SEQ].tag != 0)) {
+            word32 pssOff =
+                dataASN[X509CERTASN_IDX_TBS_SPUBKEYINFO_ALGO_P_SEQ].offset;
+            enum wc_HashType pssHash = WC_HASH_TYPE_SHA;
+            int pssMgf = WC_MGF1SHA1;
+            int pssSaltLen = 20;
+            /* DecodeRsaPssParams bounds itself by the SEQUENCE length, so a
+             * generous size to end-of-cert is safe. */
+            if (DecodeRsaPssParams(cert->source + pssOff,
+                    cert->maxIdx - pssOff, &pssHash, &pssMgf,
+                    &pssSaltLen) == 0) {
+                cert->keyPssHash    = pssHash;
+                cert->keyPssMgf     = pssMgf;
+                cert->keyPssSaltLen = pssSaltLen;
+                cert->keyPssParamsSet = 1;
+            }
+        }
+#endif
+
         /* No bad date error - don't always care. */
         badDate = 0;
         /* Find the item with the ASN_BEFORE date and check it. */
@@ -23157,6 +23182,21 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm,
         }
     #endif
 
+    #ifdef WOLFSSL_REQUIRE_CRITICAL_BASIC_CONSTRAINTS
+        /* https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.9
+         *   Conforming CAs MUST include [basicConstraints] in all CA
+         *   certificates ... and MUST mark the extension as critical.
+         * Enforced on intermediate CAs only: a trust anchor (self-signed root)
+         * is an explicitly-trusted input and its own extensions are not
+         * processed during RFC 5280 sec 6.1 path validation. */
+        if (cert->isCA && !cert->selfSigned && cert->extBasicConstSet &&
+                !cert->extBasicConstCrit) {
+            WOLFSSL_MSG("Intermediate CA basicConstraints not marked critical");
+            WOLFSSL_ERROR_VERBOSE(ASN_CRIT_EXT_E);
+            return ASN_CRIT_EXT_E;
+        }
+    #endif
+
     #ifndef NO_SKID
         if (cert->extSubjKeyIdSet == 0 && cert->publicKey != NULL &&
                                                          cert->pubKeySize > 0) {
@@ -23419,6 +23459,52 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm,
                     return ret;
                 }
 
+            #ifdef WOLFSSL_CHECK_EKU_CHAIN
+                /* RFC 5280 4.2.1.12 / CA-Browser Forum EKU chaining: the
+                 * extendedKeyUsages this certificate asserts must be a subset
+                 * of those the issuing CA permits (effective EKU, propagated
+                 * in FillSigner). A CA EKU of 0 (absent) or anyExtendedKeyUsage
+                 * imposes no restriction; a child asserting anyExtendedKeyUsage
+                 * under a constrained CA is likewise rejected. */
+                if (cert->extExtKeyUsageSet &&
+                        (cert->ca->extKeyUsage != 0) &&
+                        ((cert->ca->extKeyUsage & EXTKEYUSE_ANY) == 0) &&
+                        (((cert->extExtKeyUsage & EXTKEYUSE_ANY) != 0) ||
+                         ((cert->extExtKeyUsage &
+                            (byte)~cert->ca->extKeyUsage) != 0))) {
+                    WOLFSSL_MSG("Cert EKU not permitted by issuing CA EKU");
+                    WOLFSSL_ERROR_VERBOSE(EXTKEYUSAGE_E);
+                    return EXTKEYUSAGE_E;
+                }
+            #endif
+
+            #if defined(WC_RSA_PSS) && defined(WOLFSSL_CHECK_RSAPSS_KEY_PARAMS)
+                /* RFC 4055: when the issuing key is RSASSA-PSS with restricting
+                 * parameters, the signature's PSS parameters must conform to
+                 * the key's mandated hash/MGF/salt. */
+                if (cert->ca->keyPssParamsSet) {
+                    enum wc_HashType sigPssHash = WC_HASH_TYPE_SHA;
+                    int sigPssMgf = WC_MGF1SHA1;
+                    int sigPssSaltLen = 20;
+                    int pssRet = 0;
+                    if (cert->sigParamsLength > 0) {
+                        pssRet = DecodeRsaPssParams(
+                            cert->source + cert->sigParamsIndex,
+                            cert->sigParamsLength, &sigPssHash, &sigPssMgf,
+                            &sigPssSaltLen);
+                    }
+                    if ((pssRet != 0) ||
+                            ((int)sigPssHash != cert->ca->keyPssHash) ||
+                            (sigPssMgf != cert->ca->keyPssMgf) ||
+                            (sigPssSaltLen != cert->ca->keyPssSaltLen)) {
+                        WOLFSSL_MSG("Sig PSS params don't match issuer key "
+                                    "PSS params");
+                        WOLFSSL_ERROR_VERBOSE(ASN_SIG_OID_E);
+                        return ASN_SIG_OID_E;
+                    }
+                }
+            #endif
+
             #ifdef WOLFSSL_DUAL_ALG_CERTS
                 if ((ret == 0) && cert->extAltSigAlgSet &&
                     cert->extAltSigValSet) {
@@ -23642,6 +23728,26 @@ int FillSigner(Signer* signer, DecodedCert* cert, int type, DerBuffer *der)
         signer->keyUsage = cert->extKeyUsageSet ? cert->extKeyUsage
                                                 : 0xFFFF;
         signer->extKeyUsage = cert->extExtKeyUsage;
+#ifdef WOLFSSL_CHECK_EKU_CHAIN
+        /* Propagate the issuing CA's extendedKeyUsage restriction onto this
+         * signer so it applies transitively down the path (RFC 5280
+         * 4.2.1.12 chaining). A CA EKU of 0 (absent) or anyExtendedKeyUsage
+         * imposes no restriction. */
+        if (cert->ca != NULL && cert->ca->extKeyUsage != 0 &&
+                (cert->ca->extKeyUsage & EXTKEYUSE_ANY) == 0) {
+            if (signer->extKeyUsage == 0)
+                signer->extKeyUsage = cert->ca->extKeyUsage;
+            else
+                signer->extKeyUsage =
+                    (byte)(signer->extKeyUsage & cert->ca->extKeyUsage);
+        }
+#endif
+#if defined(WC_RSA_PSS) && defined(WOLFSSL_CHECK_RSAPSS_KEY_PARAMS)
+        signer->keyPssParamsSet = cert->keyPssParamsSet;
+        signer->keyPssHash      = (int)cert->keyPssHash;
+        signer->keyPssMgf       = cert->keyPssMgf;
+        signer->keyPssSaltLen   = cert->keyPssSaltLen;
+#endif
         signer->next    = NULL; /* If Key Usage not set, all uses valid. */
         cert->publicKey = 0;    /* in case lock fails don't free here.   */
         cert->pubKeyStored = 0;

@@ -1779,6 +1779,17 @@ struct DecodedCert {
 #ifdef WC_RSA_PSS
     word32  sigParamsIndex;          /* start of signature parameters    */
     word32  sigParamsLength;         /* length of signature parameters   */
+#if defined(WOLFSSL_CHECK_RSAPSS_KEY_PARAMS)
+    /* SPKI-level RSA-PSS parameters (RFC 4055) constraining how this cert's
+     * key may be used to verify signatures. Captured so the constraint can be
+     * enforced against signatures made by this key (resolves the historical
+     * "TODO: store parameters so that usage can be checked" in
+     * DecodeRsaPublicKey). */
+    enum wc_HashType keyPssHash;     /* mandated message-digest hash      */
+    int     keyPssMgf;               /* mandated MGF1 hash (WC_MGF1...)   */
+    int     keyPssSaltLen;           /* mandated salt length             */
+    byte    keyPssParamsSet;         /* 1 when key carries PSS params     */
+#endif
 #endif
     int     version;                 /* cert version, 1 or 3             */
     DNS_entry* altNames;             /* alt names list of dns entries    */
@@ -2185,6 +2196,16 @@ struct Signer {
     word32  keyOID;                  /* key type */
     word16  keyUsage;
     byte    extKeyUsage;
+#if defined(WC_RSA_PSS) && defined(WOLFSSL_CHECK_RSAPSS_KEY_PARAMS)
+    /* SPKI-level RSA-PSS parameters of this CA's key, propagated from the
+     * DecodedCert so a signature made by this key can be checked to conform
+     * (RFC 4055). Gated by the macro so the default Signer layout - which is
+     * load-bearing for PERSIST_CERT_CACHE - is unchanged. */
+    byte    keyPssParamsSet;
+    int     keyPssHash;
+    int     keyPssMgf;
+    int     keyPssSaltLen;
+#endif
     word16  maxPathLen;
     WC_BITFIELD selfSigned:1;
 #ifndef IGNORE_NAME_CONSTRAINTS
