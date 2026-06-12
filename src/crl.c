@@ -2914,7 +2914,7 @@ int wolfSSL_X509_CRL_sign(WOLFSSL_X509_CRL* crl, WOLFSSL_EVP_PKEY* pkey,
      */
     if (ret == WOLFSSL_SUCCESS) {
         totalSz = wc_SignCRL_ex(buf, tbsSz, sigType, buf, bufSz,
-                                rsaKey, eccKey, &rng);
+                                rsaKey, eccKey, NULL, NULL, &rng);
         if (totalSz < 0) {
             WOLFSSL_MSG("wc_SignCRL_ex failed");
             ret = totalSz;

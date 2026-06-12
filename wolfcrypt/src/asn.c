@@ -37578,36 +37578,44 @@ int wc_MakeCRL_ex(const byte* issuerDer, word32 issuerSz,
 /* Sign a CRL TBS and produce complete CRL DER.
  * tbsBuf: contains the TBS at the beginning
  * tbsSz: size of TBS in tbsBuf
- * sType: signature type (e.g., CTC_SHA256wRSA)
+ * sType: signature type (e.g., CTC_SHA256wRSA, CTC_ML_DSA_44)
  * buf: output buffer for complete CRL. May be the same as tbsBuf.
  * bufSz: size of output buffer
- * rsaKey/eccKey: signing key (one must be non-NULL)
+ * rsaKey/eccKey/mldsaKey/slhDsaKey: signing key (exactly one must be non-NULL).
+ *     ML-DSA and SLH-DSA produce post-quantum signatures; their (much larger)
+ *     signature buffer is sized from the key rather than assumed classic.
  * rng: random number generator
  *
  * Returns: size of complete CRL on success, negative error on failure
  */
 int wc_SignCRL_ex(const byte* tbsBuf, int tbsSz, int sType,
                   byte* buf, word32 bufSz,
-                  RsaKey* rsaKey, ecc_key* eccKey, WC_RNG* rng)
+                  RsaKey* rsaKey, ecc_key* eccKey,
+                  wc_MlDsaKey* mldsaKey, SlhDsaKey* slhDsaKey, WC_RNG* rng)
 {
     int ret;
     int sigSz;
-    word32 sigCap = MAX_ENCODED_CLASSIC_SIG_SZ;
+    int maxSigSz;
+    int nKeys = 0;
     CertSignCtx  certSignCtx_lcl;
     CertSignCtx* certSignCtx = &certSignCtx_lcl;
     void* heap = NULL;
 
     if (tbsBuf == NULL || tbsSz <= 0 || buf == NULL || rng == NULL)
         return BAD_FUNC_ARG;
-    if (rsaKey == NULL && eccKey == NULL)
-        return BAD_FUNC_ARG;
-    if (rsaKey != NULL && eccKey != NULL)
+
+    /* Exactly one signing key must be supplied. */
+    if (rsaKey    != NULL) nKeys++;
+    if (eccKey    != NULL) nKeys++;
+    if (mldsaKey  != NULL) nKeys++;
+    if (slhDsaKey != NULL) nKeys++;
+    if (nKeys != 1)
         return BAD_FUNC_ARG;
 
     /* The CRL's signatureAlgorithm OID is written from sType while the
      * signature is produced from the key, so reject a mismatch. */
-    ret = CheckSigTypeForKey(sType, rsaKey, eccKey, NULL, NULL, NULL, NULL,
-        NULL, NULL, NULL);
+    ret = CheckSigTypeForKey(sType, rsaKey, eccKey, NULL, NULL, NULL, mldsaKey,
+        slhDsaKey, NULL, NULL);
     if (ret != 0) {
         WOLFSSL_MSG("Signature type does not match signing key");
         return ret;
@@ -37615,17 +37623,24 @@ int wc_SignCRL_ex(const byte* tbsBuf, int tbsSz, int sType,
 
     XMEMSET(certSignCtx, 0, sizeof(*certSignCtx));
 
-    heap = GetSigningKeyHeap(rsaKey, eccKey, NULL, NULL, NULL, NULL, NULL, NULL);
+    heap = GetSigningKeyHeap(rsaKey, eccKey, NULL, NULL, mldsaKey, slhDsaKey,
+        NULL, NULL);
 
     /* Copy TBS to output buffer first */
     if ((word32)tbsSz > bufSz)
         return BUFFER_E;
     XMEMCPY(buf, tbsBuf, (size_t)tbsSz);
 
-    /* Only RSA/ECC keys are accepted above, so the signature is a classic
-     * (non-PQC) one and fits MAX_ENCODED_CLASSIC_SIG_SZ. */
+    /* Size the signature buffer from the key in use so post-quantum
+     * (ML-DSA/SLH-DSA) signatures, which far exceed a classic signature, get
+     * enough room. */
+    maxSigSz = GetSignatureBufferSz(rsaKey, eccKey, NULL, NULL, NULL, mldsaKey,
+        slhDsaKey, NULL, NULL);
+    if (maxSigSz <= 0)
+        return (maxSigSz < 0) ? maxSigSz : ALGO_ID_E;
+
 #ifndef WOLFSSL_NO_MALLOC
-    certSignCtx->sig = (byte*)XMALLOC(MAX_ENCODED_CLASSIC_SIG_SZ, heap,
+    certSignCtx->sig = (byte*)XMALLOC((word32)maxSigSz, heap,
         DYNAMIC_TYPE_TMP_BUFFER);
     if (certSignCtx->sig == NULL)
         return MEMORY_E;
@@ -37633,15 +37648,19 @@ int wc_SignCRL_ex(const byte* tbsBuf, int tbsSz, int sType,
      * uninitialized memory if MakeSignature fails before writing sig. */
     certSignCtx->sig[0] = 0;
 #else
-    /* Don't claim more capacity than the fixed sig buffer really has. */
-    if (sigCap > (word32)sizeof(certSignCtx->sig))
-        sigCap = (word32)sizeof(certSignCtx->sig);
+    /* Without dynamic memory the signature buffer is a fixed array in
+     * CertSignCtx; reject rather than overflow it. */
+    if ((word32)maxSigSz > WOLFSSL_MAX_SIG_SZ) {
+        WOLFSSL_MSG("Signature larger than fixed CertSignCtx buffer");
+        return BUFFER_E;
+    }
 #endif
 
     /* Create signature */
     sigSz = MakeSignature(certSignCtx, buf, (word32)tbsSz, certSignCtx->sig,
-                          sigCap, rsaKey, eccKey, NULL, NULL,
-                          NULL, NULL, NULL, NULL, NULL, rng, (word32)sType, heap);
+                          (word32)maxSigSz, rsaKey, eccKey, NULL, NULL,
+                          NULL, mldsaKey, slhDsaKey, NULL, NULL, rng,
+                          (word32)sType, heap);
     if (sigSz < 0) {
 #ifndef WOLFSSL_NO_MALLOC
         XFREE(certSignCtx->sig, heap, DYNAMIC_TYPE_TMP_BUFFER);

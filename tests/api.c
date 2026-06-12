@@ -177,6 +177,9 @@
 #ifdef WOLFSSL_HAVE_MLDSA
     #include <wolfssl/wolfcrypt/wc_mldsa.h>
 #endif
+#ifdef WOLFSSL_HAVE_SLHDSA
+    #include <wolfssl/wolfcrypt/wc_slhdsa.h>
+#endif
 #if defined(WOLFSSL_HAVE_MLKEM)
     #include <wolfssl/wolfcrypt/wc_mlkem.h>
 #endif
@@ -26144,7 +26147,7 @@ static int test_wc_MakeCRL_max_crlnum(void)
     }
     if (EXPECT_SUCCESS()) {
         crlSz = wc_SignCRL_ex(tbsBuf, tbsSz, CTC_SHA256wRSA,
-            crlBuf, (word32)bufSz, &rsaKey, NULL, &rng);
+            crlBuf, (word32)bufSz, &rsaKey, NULL, NULL, NULL, &rng);
         ExpectIntGT(crlSz, 0);
     }
 
@@ -26153,7 +26156,7 @@ static int test_wc_MakeCRL_max_crlnum(void)
      * paired with an ECDSA OID must return ALGO_ID_E. --- */
     if (EXPECT_SUCCESS()) {
         ExpectIntEQ(wc_SignCRL_ex(tbsBuf, tbsSz, CTC_SHA256wECDSA,
-            crlBuf, (word32)bufSz, &rsaKey, NULL, &rng),
+            crlBuf, (word32)bufSz, &rsaKey, NULL, NULL, NULL, &rng),
             WC_NO_ERR_TRACE(ALGO_ID_E));
     }
 
@@ -26213,6 +26216,251 @@ static int test_wc_MakeCRL_max_crlnum(void)
     }
     if (rsaKeyInit) {
         wc_FreeRsaKey(&rsaKey);
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
+#if defined(WOLFSSL_CERT_GEN) && defined(HAVE_CRL) && !defined(NO_FILESYSTEM) && \
+    !defined(NO_ASN) && \
+    (defined(WOLFSSL_HAVE_MLDSA) || defined(WOLFSSL_HAVE_SLHDSA))
+/* Build a CRL, sign it with a post-quantum CA key (ML-DSA or SLH-DSA) through
+ * wc_MakeCRL_ex + wc_SignCRL_ex, then load it via the certificate manager so
+ * the PQC signature is verified against the issuing CA. Exactly one of
+ * mldsaKey/slhDsaKey is non-NULL; the other is only referenced as a NULL
+ * pointer so this compiles whether or not both algorithms are enabled. Also
+ * confirms a tampered signature is rejected. Returns the EXPECT result. */
+static int pqc_crl_sign_verify(const byte* caCertDer, word32 caCertDerSz,
+    wc_MlDsaKey* mldsaKey, SlhDsaKey* slhDsaKey, int sigType)
+{
+    EXPECT_DECLS;
+    WOLFSSL_CERT_MANAGER* cm = NULL;
+    DecodedCert caCert;
+    int caCertInit = 0;
+    WC_RNG rng;
+    int rngInit = 0;
+    byte issuerDer[1024];
+    word32 issuerDerSz = 0;
+    byte* tbsBuf = NULL;
+    byte* crlBuf = NULL;
+    int tbsSz = 0;
+    int crlSz = 0;
+    int bufSz = 0;
+
+    /* thisUpdate in the past, nextUpdate far in the future so the CRL is
+     * current whenever the test runs. */
+    const byte thisUpdate[] = "260101000000Z"; /* Jan 1, 2026 */
+    const byte nextUpdate[] = "350101000000Z"; /* Jan 1, 2035 */
+    /* Minimal CRL number for the v2 extension. */
+    const byte crlNum[] = { 0x01 };
+
+    /* Extract the issuer Name (= CA subject) for the CRL's issuer field so the
+     * verifier can locate this CA by name. subjectRaw lacks the outer SEQUENCE
+     * tag, so re-wrap it. */
+    wc_InitDecodedCert(&caCert, caCertDer, caCertDerSz, NULL);
+    caCertInit = 1;
+    ExpectIntEQ(wc_ParseCert(&caCert, CERT_TYPE, 0, NULL), 0);
+    if (EXPECT_SUCCESS()) {
+        word32 seqHdrSz = SetSequence((word32)caCert.subjectRawLen, issuerDer);
+        ExpectIntLE((int)(seqHdrSz + (word32)caCert.subjectRawLen),
+            (int)sizeof(issuerDer));
+        if (EXPECT_SUCCESS()) {
+            XMEMCPY(issuerDer + seqHdrSz, caCert.subjectRaw,
+                (size_t)caCert.subjectRawLen);
+            issuerDerSz = seqHdrSz + (word32)caCert.subjectRawLen;
+        }
+    }
+
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    if (EXPECT_SUCCESS())
+        rngInit = 1;
+
+    /* Size, then encode, the TBSCertList. */
+    if (EXPECT_SUCCESS()) {
+        tbsSz = wc_MakeCRL_ex(issuerDer, issuerDerSz,
+            thisUpdate, ASN_UTC_TIME, nextUpdate, ASN_UTC_TIME,
+            NULL, crlNum, (word32)sizeof(crlNum), sigType, 2, NULL, 0);
+        ExpectIntGT(tbsSz, 0);
+    }
+    if (EXPECT_SUCCESS()) {
+        /* Generous room for the (large) PQC signature and ASN.1 wrappers;
+         * SLH-DSA signatures alone are several KB. */
+        bufSz = tbsSz + 32768;
+        ExpectNotNull(tbsBuf = (byte*)XMALLOC(bufSz, NULL,
+            DYNAMIC_TYPE_TMP_BUFFER));
+        ExpectNotNull(crlBuf = (byte*)XMALLOC(bufSz, NULL,
+            DYNAMIC_TYPE_TMP_BUFFER));
+    }
+    if (EXPECT_SUCCESS()) {
+        tbsSz = wc_MakeCRL_ex(issuerDer, issuerDerSz,
+            thisUpdate, ASN_UTC_TIME, nextUpdate, ASN_UTC_TIME,
+            NULL, crlNum, (word32)sizeof(crlNum), sigType, 2,
+            tbsBuf, (word32)bufSz);
+        ExpectIntGT(tbsSz, 0);
+    }
+
+    /* Sign the CRL with the post-quantum key. */
+    if (EXPECT_SUCCESS()) {
+        crlSz = wc_SignCRL_ex(tbsBuf, tbsSz, sigType, crlBuf, (word32)bufSz,
+            NULL, NULL, mldsaKey, slhDsaKey, &rng);
+        ExpectIntGT(crlSz, 0);
+    }
+
+    /* Load the issuing CA and verify the freshly signed CRL. */
+    ExpectNotNull(cm = wolfSSL_CertManagerNew());
+    ExpectIntEQ(wolfSSL_CertManagerLoadCABuffer(cm, caCertDer, caCertDerSz,
+        WOLFSSL_FILETYPE_ASN1), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_CertManagerEnableCRL(cm, WOLFSSL_CRL_CHECKALL),
+        WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_CertManagerLoadCRLBuffer(cm, crlBuf, crlSz,
+        WOLFSSL_FILETYPE_ASN1), WOLFSSL_SUCCESS);
+
+    /* Negative: corrupt the last signature byte; verification must now fail. */
+    if (EXPECT_SUCCESS()) {
+        WOLFSSL_CERT_MANAGER* cm2 = NULL;
+        crlBuf[crlSz - 1] ^= 0xFF;
+        ExpectNotNull(cm2 = wolfSSL_CertManagerNew());
+        ExpectIntEQ(wolfSSL_CertManagerLoadCABuffer(cm2, caCertDer,
+            caCertDerSz, WOLFSSL_FILETYPE_ASN1), WOLFSSL_SUCCESS);
+        ExpectIntEQ(wolfSSL_CertManagerEnableCRL(cm2, WOLFSSL_CRL_CHECKALL),
+            WOLFSSL_SUCCESS);
+        ExpectIntNE(wolfSSL_CertManagerLoadCRLBuffer(cm2, crlBuf, crlSz,
+            WOLFSSL_FILETYPE_ASN1), WOLFSSL_SUCCESS);
+        wolfSSL_CertManagerFree(cm2);
+    }
+
+    wolfSSL_CertManagerFree(cm);
+    XFREE(crlBuf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(tbsBuf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    if (rngInit)
+        wc_FreeRng(&rng);
+    if (caCertInit)
+        wc_FreeDecodedCert(&caCert);
+    return EXPECT_RESULT();
+}
+#endif /* CRL gen + (MLDSA | SLHDSA) */
+
+/* Sign and verify CRLs with ML-DSA CA keys for all three parameter sets. */
+static int test_wc_SignCRL_mldsa(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_CERT_GEN) && defined(HAVE_CRL) && !defined(NO_FILESYSTEM) && \
+    !defined(NO_ASN) && defined(WOLFSSL_HAVE_MLDSA) && \
+    defined(WOLFSSL_PEM_TO_DER)
+    static const struct {
+        const char* certDer;
+        const char* keyPem;
+        int         sigType;
+    } cases[] = {
+        { "./certs/mldsa/mldsa44-cert.der", "./certs/mldsa/mldsa44-key.pem",
+          CTC_ML_DSA_44 },
+        { "./certs/mldsa/mldsa65-cert.der", "./certs/mldsa/mldsa65-key.pem",
+          CTC_ML_DSA_65 },
+        { "./certs/mldsa/mldsa87-cert.der", "./certs/mldsa/mldsa87-key.pem",
+          CTC_ML_DSA_87 },
+    };
+    int i;
+    int n = (int)(sizeof(cases) / sizeof(cases[0]));
+
+    for (i = 0; i < n; i++) {
+        byte*  certDer = NULL;
+        size_t certDerSz = 0;
+        byte*  keyPem  = NULL;
+        size_t keyPemSz = 0;
+        byte*  keyDer  = NULL;
+        int    keyDerSz = 0;
+        wc_MlDsaKey key;
+        int    keyInit = 0;
+        word32 idx = 0;
+
+        ExpectIntEQ(load_file(cases[i].certDer, &certDer, &certDerSz), 0);
+        ExpectIntEQ(load_file(cases[i].keyPem, &keyPem, &keyPemSz), 0);
+
+        /* Convert the PKCS#8 PEM private key to DER. */
+        if (EXPECT_SUCCESS()) {
+            keyDer = (byte*)XMALLOC(keyPemSz, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            ExpectNotNull(keyDer);
+        }
+        if (EXPECT_SUCCESS()) {
+            keyDerSz = wc_KeyPemToDer(keyPem, (int)keyPemSz, keyDer,
+                (int)keyPemSz, NULL);
+            ExpectIntGT(keyDerSz, 0);
+        }
+
+        ExpectIntEQ(wc_MlDsaKey_Init(&key, NULL, INVALID_DEVID), 0);
+        if (EXPECT_SUCCESS())
+            keyInit = 1;
+        ExpectIntEQ(wc_MlDsaKey_PrivateKeyDecode(&key, keyDer, (word32)keyDerSz,
+            &idx), 0);
+
+        if (EXPECT_SUCCESS()) {
+            ExpectIntEQ(pqc_crl_sign_verify(certDer, (word32)certDerSz, &key,
+                NULL, cases[i].sigType), TEST_SUCCESS);
+        }
+
+        if (keyInit)
+            wc_MlDsaKey_Free(&key);
+        XFREE(keyDer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        XFREE(keyPem, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        XFREE(certDer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
+/* Sign and verify CRLs with SLH-DSA CA keys (SHA2 and SHAKE 128s roots). */
+static int test_wc_SignCRL_slhdsa(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_CERT_GEN) && defined(HAVE_CRL) && !defined(NO_FILESYSTEM) && \
+    !defined(NO_ASN) && defined(WOLFSSL_HAVE_SLHDSA)
+    static const struct {
+        const char* certDer;
+        const char* keyDer;
+        int         sigType;
+        int         param;
+    } cases[] = {
+        /* SHAKE variants are always built with --enable-slhdsa. */
+        { "./certs/slhdsa/root-slhdsa-shake-128s.der",
+          "./certs/slhdsa/root-slhdsa-shake-128s-priv.der",
+          CTC_SLH_DSA_SHAKE_128S, SLHDSA_SHAKE128S },
+#ifdef WOLFSSL_SLHDSA_SHA2
+        { "./certs/slhdsa/root-slhdsa-sha2-128s.der",
+          "./certs/slhdsa/root-slhdsa-sha2-128s-priv.der",
+          CTC_SLH_DSA_SHA2_128S, SLHDSA_SHA2_128S },
+#endif
+    };
+    int i;
+    int n = (int)(sizeof(cases) / sizeof(cases[0]));
+
+    for (i = 0; i < n; i++) {
+        byte*  certDer = NULL;
+        size_t certDerSz = 0;
+        byte*  keyDer  = NULL;
+        size_t keyDerSz = 0;
+        SlhDsaKey key;
+        int    keyInit = 0;
+        word32 idx = 0;
+
+        ExpectIntEQ(load_file(cases[i].certDer, &certDer, &certDerSz), 0);
+        ExpectIntEQ(load_file(cases[i].keyDer, &keyDer, &keyDerSz), 0);
+
+        ExpectIntEQ(wc_SlhDsaKey_Init(&key, (enum SlhDsaParam)cases[i].param,
+            NULL, INVALID_DEVID), 0);
+        if (EXPECT_SUCCESS())
+            keyInit = 1;
+        ExpectIntEQ(wc_SlhDsaKey_PrivateKeyDecode(keyDer, &idx, &key,
+            (word32)keyDerSz), 0);
+
+        if (EXPECT_SUCCESS()) {
+            ExpectIntEQ(pqc_crl_sign_verify(certDer, (word32)certDerSz, NULL,
+                &key, cases[i].sigType), TEST_SUCCESS);
+        }
+
+        if (keyInit)
+            wc_SlhDsaKey_Free(&key);
+        XFREE(keyDer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        XFREE(certDer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
 #endif
     return EXPECT_RESULT();
@@ -37208,6 +37456,8 @@ TEST_CASE testCases[] = {
     TEST_DECL(test_sk_X509_CRL_encode),
     TEST_DECL(test_wolfSSL_X509_CRL_sign_large),
     TEST_DECL(test_wc_MakeCRL_max_crlnum),
+    TEST_DECL(test_wc_SignCRL_mldsa),
+    TEST_DECL(test_wc_SignCRL_slhdsa),
 
     /* OpenSSL X509 REQ API test */
     TEST_DECL(test_wolfSSL_d2i_X509_REQ),
