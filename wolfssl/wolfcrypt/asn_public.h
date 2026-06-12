@@ -716,8 +716,8 @@ WOLFSSL_API int wc_MakeCRL_ex(const byte* issuerDer, word32 issuerSz,
                   byte* output, word32 outputSz);
 WOLFSSL_API int wc_SignCRL_ex(const byte* tbsBuf, int tbsSz, int sType,
                   byte* buf, word32 bufSz,
-                  RsaKey* rsaKey, ecc_key* eccKey,
-                  wc_MlDsaKey* mldsaKey, SlhDsaKey* slhDsaKey, WC_RNG* rng);
+                  RsaKey* rsaKey, ecc_key* eccKey, WC_RNG* rng,
+                  wc_MlDsaKey* mldsaKey, SlhDsaKey* slhDsaKey);
 #endif /* WOLFSSL_CERT_GEN && HAVE_CRL */
 
 WOLFSSL_API int wc_GetDateInfo(const byte* certDate, int certDateSz,

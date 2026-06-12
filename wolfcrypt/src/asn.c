@@ -37583,15 +37583,17 @@ int wc_MakeCRL_ex(const byte* issuerDer, word32 issuerSz,
  * bufSz: size of output buffer
  * rsaKey/eccKey/mldsaKey/slhDsaKey: signing key (exactly one must be non-NULL).
  *     ML-DSA and SLH-DSA produce post-quantum signatures; their (much larger)
- *     signature buffer is sized from the key rather than assumed classic.
+ *     signature buffer is sized from the key rather than assumed classic. The
+ *     PQC key pointers are last so the original RSA/ECC parameter order is
+ *     preserved.
  * rng: random number generator
  *
  * Returns: size of complete CRL on success, negative error on failure
  */
 int wc_SignCRL_ex(const byte* tbsBuf, int tbsSz, int sType,
                   byte* buf, word32 bufSz,
-                  RsaKey* rsaKey, ecc_key* eccKey,
-                  wc_MlDsaKey* mldsaKey, SlhDsaKey* slhDsaKey, WC_RNG* rng)
+                  RsaKey* rsaKey, ecc_key* eccKey, WC_RNG* rng,
+                  wc_MlDsaKey* mldsaKey, SlhDsaKey* slhDsaKey)
 {
     int ret;
     int sigSz;
@@ -37605,10 +37607,10 @@ int wc_SignCRL_ex(const byte* tbsBuf, int tbsSz, int sType,
         return BAD_FUNC_ARG;
 
     /* Exactly one signing key must be supplied. */
-    if (rsaKey    != NULL) nKeys++;
-    if (eccKey    != NULL) nKeys++;
-    if (mldsaKey  != NULL) nKeys++;
-    if (slhDsaKey != NULL) nKeys++;
+    if (rsaKey    != NULL) { nKeys++; }
+    if (eccKey    != NULL) { nKeys++; }
+    if (mldsaKey  != NULL) { nKeys++; }
+    if (slhDsaKey != NULL) { nKeys++; }
     if (nKeys != 1)
         return BAD_FUNC_ARG;
 
