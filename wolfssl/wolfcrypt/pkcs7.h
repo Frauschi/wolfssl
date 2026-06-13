@@ -294,11 +294,12 @@ struct wc_PKCS7 {
     byte issuerHash[KEYID_SIZE];  /* hash of all alt Names                */
     byte issuerSn[MAX_SN_SZ];     /* singleCert's serial number           */
 #if defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA)
-    /* PQC public keys (e.g. ML-DSA, up to MAX_PQC_PUBLIC_KEY_SZ bytes) are
-     * larger than the RSA modulus+exponent encoding, so size the buffer for
-     * the larger of the two when post-quantum signature support is enabled. */
-    byte publicKey[(MAX_PQC_PUBLIC_KEY_SZ > (MAX_RSA_INT_SZ + MAX_RSA_E_SZ)) ?
-                   MAX_PQC_PUBLIC_KEY_SZ : (MAX_RSA_INT_SZ + MAX_RSA_E_SZ)];
+    /* PQC public keys (e.g. ML-DSA) are larger than the RSA modulus+exponent
+     * encoding. MAX_PUBLIC_KEY_SZ accounts for the full SubjectPublicKeyInfo
+     * (raw key + AlgorithmIdentifier + SEQUENCE headers), so use the larger
+     * of it and the RSA bound when post-quantum support is enabled. */
+    byte publicKey[(MAX_PUBLIC_KEY_SZ > (MAX_RSA_INT_SZ + MAX_RSA_E_SZ)) ?
+                   MAX_PUBLIC_KEY_SZ : (MAX_RSA_INT_SZ + MAX_RSA_E_SZ)];
 #else
     byte publicKey[MAX_RSA_INT_SZ + MAX_RSA_E_SZ]; /* MAX RSA key size (m + e)*/
 #endif

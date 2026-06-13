@@ -67446,7 +67446,6 @@ typedef struct {
     const char* certFile;   /* signer certificate, DER */
     const char* keyFile;    /* matching ML-DSA private key, PKCS#8 DER */
     int         hashOID;    /* message-digest algorithm for signed attrs */
-    const char* desc;
 } pkcs7MlDsaVector;
 
 /* Round-trip (encode then verify) test of CMS/PKCS#7 SignedData using ML-DSA
@@ -67474,20 +67473,26 @@ static wc_test_ret_t pkcs7signed_mldsa_test(void)
     #define MLDSA_CERT(n) CERT_ROOT "mldsa" CERT_PATH_SEP "mldsa" n "-cert.der"
     #define MLDSA_KEY(n)  CERT_ROOT "mldsa" CERT_PATH_SEP "mldsa" n "-key.der"
 
-    pkcs7MlDsaVector vectors[6];
+    /* one row per (level, message-digest) combination that is enabled;
+     * SHA-512 always, plus SHAKE256/SHAKE128 to exercise those digest OIDs */
+    pkcs7MlDsaVector vectors[12];
     testSz = 0;
 
 #ifndef WOLFSSL_NO_ML_DSA_44
     vectors[testSz].certFile = MLDSA_CERT("44");
     vectors[testSz].keyFile  = MLDSA_KEY("44");
     vectors[testSz].hashOID  = SHA512h;
-    vectors[testSz].desc     = "ML-DSA-44 / SHA-512";
     testSz++;
     #if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE256)
     vectors[testSz].certFile = MLDSA_CERT("44");
     vectors[testSz].keyFile  = MLDSA_KEY("44");
     vectors[testSz].hashOID  = SHAKE256h;
-    vectors[testSz].desc     = "ML-DSA-44 / SHAKE256";
+    testSz++;
+    #endif
+    #if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE128)
+    vectors[testSz].certFile = MLDSA_CERT("44");
+    vectors[testSz].keyFile  = MLDSA_KEY("44");
+    vectors[testSz].hashOID  = SHAKE128h;
     testSz++;
     #endif
 #endif
@@ -67495,13 +67500,17 @@ static wc_test_ret_t pkcs7signed_mldsa_test(void)
     vectors[testSz].certFile = MLDSA_CERT("65");
     vectors[testSz].keyFile  = MLDSA_KEY("65");
     vectors[testSz].hashOID  = SHA512h;
-    vectors[testSz].desc     = "ML-DSA-65 / SHA-512";
     testSz++;
     #if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE256)
     vectors[testSz].certFile = MLDSA_CERT("65");
     vectors[testSz].keyFile  = MLDSA_KEY("65");
     vectors[testSz].hashOID  = SHAKE256h;
-    vectors[testSz].desc     = "ML-DSA-65 / SHAKE256";
+    testSz++;
+    #endif
+    #if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE128)
+    vectors[testSz].certFile = MLDSA_CERT("65");
+    vectors[testSz].keyFile  = MLDSA_KEY("65");
+    vectors[testSz].hashOID  = SHAKE128h;
     testSz++;
     #endif
 #endif
@@ -67509,7 +67518,6 @@ static wc_test_ret_t pkcs7signed_mldsa_test(void)
     vectors[testSz].certFile = MLDSA_CERT("87");
     vectors[testSz].keyFile  = MLDSA_KEY("87");
     vectors[testSz].hashOID  = SHA512h;
-    vectors[testSz].desc     = "ML-DSA-87 / SHA-512";
     testSz++;
 #endif
 
