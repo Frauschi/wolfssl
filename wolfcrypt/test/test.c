@@ -67438,6 +67438,184 @@ static wc_test_ret_t pkcs7signed_run_SingleShotVectors(
 }
 
 
+#if defined(WOLFSSL_HAVE_MLDSA) && !defined(WOLFSSL_MLDSA_NO_ASN1) && \
+    !defined(WOLFSSL_MLDSA_NO_SIGN) && !defined(WOLFSSL_MLDSA_NO_VERIFY) && \
+    !defined(NO_FILESYSTEM) && !defined(NO_ASN)
+
+typedef struct {
+    const char* certFile;   /* signer certificate, DER */
+    const char* keyFile;    /* matching ML-DSA private key, PKCS#8 DER */
+    int         hashOID;    /* message-digest algorithm for signed attrs */
+    const char* desc;
+} pkcs7MlDsaVector;
+
+/* Round-trip (encode then verify) test of CMS/PKCS#7 SignedData using ML-DSA
+ * signatures, per RFC 9882. Exercises each enabled ML-DSA parameter set with
+ * both a SHA-512 and (when available) a SHAKE256 message digest. */
+static wc_test_ret_t pkcs7signed_mldsa_test(void)
+{
+    wc_test_ret_t ret = 0;
+    WC_RNG  rng;
+    wc_PKCS7* pkcs7 = NULL;
+    XFILE   f = NULL;
+    byte*   cert = NULL;
+    byte*   key  = NULL;
+    byte*   out  = NULL;
+    word32  certSz, keySz;
+    int     encodedSz;
+    int     i, testSz;
+    int     rngInit = 0;
+
+    /* "Hello PQC" */
+    WOLFSSL_SMALL_STACK_STATIC const byte content[] = {
+        0x48,0x65,0x6c,0x6c,0x6f,0x20,0x50,0x51,0x43
+    };
+
+    #define MLDSA_CERT(n) CERT_ROOT "mldsa" CERT_PATH_SEP "mldsa" n "-cert.der"
+    #define MLDSA_KEY(n)  CERT_ROOT "mldsa" CERT_PATH_SEP "mldsa" n "-key.der"
+
+    pkcs7MlDsaVector vectors[6];
+    testSz = 0;
+
+#ifndef WOLFSSL_NO_ML_DSA_44
+    vectors[testSz].certFile = MLDSA_CERT("44");
+    vectors[testSz].keyFile  = MLDSA_KEY("44");
+    vectors[testSz].hashOID  = SHA512h;
+    vectors[testSz].desc     = "ML-DSA-44 / SHA-512";
+    testSz++;
+    #if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE256)
+    vectors[testSz].certFile = MLDSA_CERT("44");
+    vectors[testSz].keyFile  = MLDSA_KEY("44");
+    vectors[testSz].hashOID  = SHAKE256h;
+    vectors[testSz].desc     = "ML-DSA-44 / SHAKE256";
+    testSz++;
+    #endif
+#endif
+#ifndef WOLFSSL_NO_ML_DSA_65
+    vectors[testSz].certFile = MLDSA_CERT("65");
+    vectors[testSz].keyFile  = MLDSA_KEY("65");
+    vectors[testSz].hashOID  = SHA512h;
+    vectors[testSz].desc     = "ML-DSA-65 / SHA-512";
+    testSz++;
+    #if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE256)
+    vectors[testSz].certFile = MLDSA_CERT("65");
+    vectors[testSz].keyFile  = MLDSA_KEY("65");
+    vectors[testSz].hashOID  = SHAKE256h;
+    vectors[testSz].desc     = "ML-DSA-65 / SHAKE256";
+    testSz++;
+    #endif
+#endif
+#ifndef WOLFSSL_NO_ML_DSA_87
+    vectors[testSz].certFile = MLDSA_CERT("87");
+    vectors[testSz].keyFile  = MLDSA_KEY("87");
+    vectors[testSz].hashOID  = SHA512h;
+    vectors[testSz].desc     = "ML-DSA-87 / SHA-512";
+    testSz++;
+#endif
+
+    XMEMSET(&rng, 0, sizeof(rng));
+
+    cert = (byte*)XMALLOC(FOURK_BUF * 2, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    key  = (byte*)XMALLOC(FOURK_BUF * 2, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    out  = (byte*)XMALLOC(FOURK_BUF * 5, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    if (cert == NULL || key == NULL || out == NULL)
+        ERROR_OUT(WC_TEST_RET_ENC_ERRNO, out_lbl);
+
+    ret = wc_InitRng_ex(&rng, HEAP_HINT, devId);
+    if (ret != 0)
+        ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out_lbl);
+    rngInit = 1;
+
+    for (i = 0; i < testSz; i++) {
+        /* load signer certificate (DER) */
+        f = XFOPEN(vectors[i].certFile, "rb");
+        if (f == NULL)
+            ERROR_OUT(WC_TEST_RET_ENC_ERRNO, out_lbl);
+        certSz = (word32)XFREAD(cert, 1, FOURK_BUF * 2, f);
+        XFCLOSE(f);
+        f = NULL;
+        if (certSz == 0)
+            ERROR_OUT(WC_TEST_RET_ENC_NC, out_lbl);
+
+        /* load matching ML-DSA private key (PKCS#8 DER) */
+        f = XFOPEN(vectors[i].keyFile, "rb");
+        if (f == NULL)
+            ERROR_OUT(WC_TEST_RET_ENC_ERRNO, out_lbl);
+        keySz = (word32)XFREAD(key, 1, FOURK_BUF * 2, f);
+        XFCLOSE(f);
+        f = NULL;
+        if (keySz == 0)
+            ERROR_OUT(WC_TEST_RET_ENC_NC, out_lbl);
+
+        /* --- encode SignedData --- */
+        pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+        if (pkcs7 == NULL)
+            ERROR_OUT(WC_TEST_RET_ENC_ERRNO, out_lbl);
+
+        ret = wc_PKCS7_InitWithCert(pkcs7, cert, certSz);
+        if (ret != 0)
+            ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out_lbl);
+
+        pkcs7->rng          = &rng;
+        pkcs7->content      = (byte*)content;
+        pkcs7->contentSz    = (word32)sizeof(content);
+        pkcs7->contentOID   = DATA;
+        pkcs7->hashOID      = vectors[i].hashOID;
+        pkcs7->privateKey   = key;
+        pkcs7->privateKeySz = keySz;
+
+        encodedSz = wc_PKCS7_EncodeSignedData(pkcs7, out, FOURK_BUF * 5);
+        if (encodedSz <= 0)
+            ERROR_OUT(WC_TEST_RET_ENC_EC(encodedSz), out_lbl);
+
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = NULL;
+
+        /* --- verify SignedData (signer cert is embedded in the bundle) --- */
+        pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+        if (pkcs7 == NULL)
+            ERROR_OUT(WC_TEST_RET_ENC_ERRNO, out_lbl);
+
+        ret = wc_PKCS7_InitWithCert(pkcs7, NULL, 0);
+        if (ret != 0)
+            ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out_lbl);
+
+        ret = wc_PKCS7_VerifySignedData(pkcs7, out, (word32)encodedSz);
+        if (ret != 0)
+            ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out_lbl);
+
+        /* content should be recovered and match what was signed */
+        if (pkcs7->contentSz != (word32)sizeof(content) ||
+                XMEMCMP(pkcs7->content, content, sizeof(content)) != 0) {
+            ERROR_OUT(WC_TEST_RET_ENC_NC, out_lbl);
+        }
+
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = NULL;
+    }
+
+    ret = 0;
+
+out_lbl:
+    if (f != NULL)
+        XFCLOSE(f);
+    if (pkcs7 != NULL)
+        wc_PKCS7_Free(pkcs7);
+    if (rngInit)
+        wc_FreeRng(&rng);
+    XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key,  HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(out,  HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+
+    #undef MLDSA_CERT
+    #undef MLDSA_KEY
+
+    return ret;
+}
+
+#endif /* WOLFSSL_HAVE_MLDSA && sign && verify && filesystem */
+
+
 WOLFSSL_TEST_SUBROUTINE wc_test_ret_t pkcs7signed_test(void)
 {
     wc_test_ret_t ret = 0;
@@ -67566,6 +67744,13 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t pkcs7signed_test(void)
         ret = pkcs7callback_test(
                             rsaClientCertBuf, (word32)rsaClientCertBufSz,
                             rsaClientPrivKeyBuf, (word32)rsaClientPrivKeyBufSz);
+#endif
+
+#if defined(WOLFSSL_HAVE_MLDSA) && !defined(WOLFSSL_MLDSA_NO_ASN1) && \
+    !defined(WOLFSSL_MLDSA_NO_SIGN) && !defined(WOLFSSL_MLDSA_NO_VERIFY) && \
+    !defined(NO_FILESYSTEM) && !defined(NO_ASN)
+    if (ret >= 0)
+        ret = pkcs7signed_mldsa_test();
 #endif
 
     XFREE(rsaClientCertBuf,    HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
