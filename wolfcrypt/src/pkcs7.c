@@ -1187,7 +1187,7 @@ static int wc_PKCS7_CheckPublicKeyDer(wc_PKCS7* pkcs7, int keyOID,
             /* Sanity check: decode the ML-DSA public key from its SPKI. */
             byte level = 0;
             wc_MlDsaKey* mldsa = (wc_MlDsaKey*)XMALLOC(sizeof(wc_MlDsaKey),
-                                    pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                                    pkcs7->heap, DYNAMIC_TYPE_MLDSA);
             if (mldsa == NULL) {
                 ret = MEMORY_E;
                 break;
@@ -1204,7 +1204,7 @@ static int wc_PKCS7_CheckPublicKeyDer(wc_PKCS7* pkcs7, int keyOID,
                 }
                 wc_MlDsaKey_Free(mldsa);
             }
-            XFREE(mldsa, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+            XFREE(mldsa, pkcs7->heap, DYNAMIC_TYPE_MLDSA);
             break;
         }
 #endif
@@ -2334,7 +2334,7 @@ static int wc_PKCS7_GetSignSize(wc_PKCS7* pkcs7)
             byte level = 0;
             word32 idx = 0;
             wc_MlDsaKey* privKey = (wc_MlDsaKey*)XMALLOC(sizeof(wc_MlDsaKey),
-                pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                pkcs7->heap, DYNAMIC_TYPE_MLDSA);
             if (privKey == NULL)
                 return MEMORY_E;
 
@@ -2350,7 +2350,7 @@ static int wc_PKCS7_GetSignSize(wc_PKCS7* pkcs7)
                     ret = wc_MlDsaKey_SigSize(privKey);
                 wc_MlDsaKey_Free(privKey);
             }
-            XFREE(privKey, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+            XFREE(privKey, pkcs7->heap, DYNAMIC_TYPE_MLDSA);
         }
         break;
     #endif
@@ -2841,7 +2841,7 @@ static int wc_PKCS7_MlDsaSign(wc_PKCS7* pkcs7, const byte* msg, word32 msgSz,
     }
 
     key = (wc_MlDsaKey*)XMALLOC(sizeof(wc_MlDsaKey), pkcs7->heap,
-                                DYNAMIC_TYPE_TMP_BUFFER);
+                                DYNAMIC_TYPE_MLDSA);
     if (key == NULL) {
         return MEMORY_E;
     }
@@ -2886,7 +2886,7 @@ static int wc_PKCS7_MlDsaSign(wc_PKCS7* pkcs7, const byte* msg, word32 msgSz,
     }
 
     wc_MlDsaKey_Free(key);
-    XFREE(key, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, pkcs7->heap, DYNAMIC_TYPE_MLDSA);
 
     if (ret == 0) {
         return (int)sigSz;
@@ -5297,11 +5297,14 @@ static int wc_PKCS7_MlDsaVerify(wc_PKCS7* pkcs7, byte* sig, int sigSz,
     int res = 0;
     int verified = 0;
     byte level = 0;
+    /* wc_MlDsaKey embeds full key buffers (several KB), so it is always heap
+     * allocated rather than placed on the stack even in non-WOLFSSL_SMALL_STACK
+     * builds, to keep the stack footprint small on constrained targets. This
+     * matches the ML-DSA key handling in asn.c. */
+    wc_MlDsaKey* key = NULL;
 #ifdef WOLFSSL_SMALL_STACK
-    wc_MlDsaKey* key;
-    DecodedCert* dCert;
+    DecodedCert* dCert = NULL;
 #else
-    wc_MlDsaKey key[1];
     DecodedCert dCert[1];
 #endif
     word32 idx;
@@ -5310,17 +5313,17 @@ static int wc_PKCS7_MlDsaVerify(wc_PKCS7* pkcs7, byte* sig, int sigSz,
         return BAD_FUNC_ARG;
     }
 
-#ifdef WOLFSSL_SMALL_STACK
     key = (wc_MlDsaKey*)XMALLOC(sizeof(wc_MlDsaKey), pkcs7->heap,
-                                DYNAMIC_TYPE_TMP_BUFFER);
+                                DYNAMIC_TYPE_MLDSA);
     if (key == NULL) {
         return MEMORY_E;
     }
 
+#ifdef WOLFSSL_SMALL_STACK
     dCert = (DecodedCert*)XMALLOC(sizeof(DecodedCert), pkcs7->heap,
                                   DYNAMIC_TYPE_DCERT);
     if (dCert == NULL) {
-        XFREE(key, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        XFREE(key, pkcs7->heap, DYNAMIC_TYPE_MLDSA);
         return MEMORY_E;
     }
 #endif
@@ -5410,8 +5413,8 @@ static int wc_PKCS7_MlDsaVerify(wc_PKCS7* pkcs7, byte* sig, int sigSz,
         ret = SIG_VERIFY_E;
     }
 
+    XFREE(key, pkcs7->heap, DYNAMIC_TYPE_MLDSA);
 #ifdef WOLFSSL_SMALL_STACK
-    XFREE(key,   pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
     XFREE(dCert, pkcs7->heap, DYNAMIC_TYPE_DCERT);
 #endif
 
