@@ -67451,18 +67451,35 @@ typedef struct {
 #if defined(WOLFSSL_SHA3) && \
     (defined(WOLFSSL_SHAKE256) || defined(WOLFSSL_SHAKE128))
 /* RFC 8702: a SHAKE digest AlgorithmIdentifier MUST omit the parameters
- * field. Scan the encoded bundle for the digest OID and confirm it is not
- * followed by a NULL (0x05) parameter. Returns 1 if absent/not present. */
-static int pkcs7_digest_params_absent(const byte* buf, word32 bufSz,
-                                      const byte* oidDer, word32 oidDerSz)
+ * field. A digest algorithm appears in a CMS SignedData both in the
+ * SignedData.digestAlgorithms SET and in the SignerInfo.digestAlgorithm, so
+ * every occurrence must be checked. Walk the buffer for each
+ * "SEQUENCE { OID oidDer }" (anchored on the SEQUENCE tag to avoid matching
+ * the OID bytes inside signatures/keys) and confirm the SEQUENCE holds the
+ * OID only, i.e. the (short-form) SEQUENCE length equals the OID length so the
+ * parameters field is absent. *found receives the number of digest
+ * AlgorithmIdentifiers inspected; the return value is the number that carry a
+ * (non-absent) parameters field. */
+static int pkcs7_digest_oid_params_present(const byte* buf, word32 bufSz,
+            const byte* oidDer, word32 oidDerSz, int* found)
 {
+    int present = 0;
     word32 i;
-    for (i = 0; oidDerSz <= bufSz && i + oidDerSz <= bufSz; i++) {
-        if (XMEMCMP(buf + i, oidDer, oidDerSz) == 0) {
-            return (i + oidDerSz >= bufSz) || (buf[i + oidDerSz] != 0x05);
+    *found = 0;
+    if (oidDerSz == 0 || bufSz < oidDerSz + 2)
+        return 0;
+    for (i = 2; i + oidDerSz <= bufSz; i++) {
+        /* AlgorithmIdentifier ::= SEQUENCE { OBJECT IDENTIFIER, params } is
+         * encoded as 0x30 <len> <oidDer> [params]; oidDer begins with its own
+         * 0x06 tag, so the SEQUENCE tag sits two octets before the match. */
+        if (buf[i - 2] == 0x30 && XMEMCMP(buf + i, oidDer, oidDerSz) == 0) {
+            (*found)++;
+            /* short-form length: absent params <=> SEQUENCE wraps the OID only */
+            if (buf[i - 1] != (byte)oidDerSz)
+                present++;
         }
     }
-    return 1; /* OID not present: nothing to check */
+    return present;
 }
 #endif
 
@@ -67593,13 +67610,17 @@ static wc_test_ret_t pkcs7signed_mldsa_test(void)
             ERROR_OUT(WC_TEST_RET_ENC_EC(encodedSz), out_lbl);
 
         /* RFC 8702: a SHAKE digest algorithm must be encoded with absent
-         * parameters, not NULL. Confirm the produced bundle complies. */
+         * parameters, not NULL. Confirm both the SignedData.digestAlgorithms
+         * and the SignerInfo.digestAlgorithm occurrences comply. */
     #if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE256)
         if (vectors[i].hashOID == SHAKE256h) {
             static const byte shake256OidDer[] = { 0x06,0x09,0x60,0x86,0x48,
                 0x01,0x65,0x03,0x04,0x02,0x0c };
-            if (!pkcs7_digest_params_absent(out, (word32)encodedSz,
-                    shake256OidDer, (word32)sizeof(shake256OidDer)))
+            int found = 0;
+            if (pkcs7_digest_oid_params_present(out, (word32)encodedSz,
+                    shake256OidDer, (word32)sizeof(shake256OidDer), &found) != 0)
+                ERROR_OUT(WC_TEST_RET_ENC_NC, out_lbl);
+            if (found < 2)   /* digestAlgorithms SET + SignerInfo must be seen */
                 ERROR_OUT(WC_TEST_RET_ENC_NC, out_lbl);
         }
     #endif
@@ -67607,8 +67628,11 @@ static wc_test_ret_t pkcs7signed_mldsa_test(void)
         if (vectors[i].hashOID == SHAKE128h) {
             static const byte shake128OidDer[] = { 0x06,0x09,0x60,0x86,0x48,
                 0x01,0x65,0x03,0x04,0x02,0x0b };
-            if (!pkcs7_digest_params_absent(out, (word32)encodedSz,
-                    shake128OidDer, (word32)sizeof(shake128OidDer)))
+            int found = 0;
+            if (pkcs7_digest_oid_params_present(out, (word32)encodedSz,
+                    shake128OidDer, (word32)sizeof(shake128OidDer), &found) != 0)
+                ERROR_OUT(WC_TEST_RET_ENC_NC, out_lbl);
+            if (found < 2)
                 ERROR_OUT(WC_TEST_RET_ENC_NC, out_lbl);
         }
     #endif

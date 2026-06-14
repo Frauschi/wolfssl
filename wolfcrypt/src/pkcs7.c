@@ -1063,10 +1063,19 @@ static enum wc_HashType wc_PKCS7_OidGetHash(int oid)
     return wc_OidGetHash(oid);
 }
 
-/* Returns whether the digest AlgorithmIdentifier parameters field should be
- * omitted (absent) rather than encoded as NULL. RFC 8702 requires the
- * SHAKE128/SHAKE256 digest identifiers to have absent parameters; for all
- * other digests the caller's pkcs7->hashParamsAbsent preference is honored. */
+/* Returns whether the parameters field of a CMS structural digest
+ * AlgorithmIdentifier (SignedData.digestAlgorithms / SignerInfo.digestAlgorithm)
+ * should be omitted (absent) rather than encoded as NULL.
+ *
+ * RFC 8702 requires the SHAKE128/SHAKE256 digest identifiers to have ABSENT
+ * parameters, so those are always forced absent. For the SHA-2 family RFC 5754
+ * says the parameters SHOULD be absent but receivers MUST accept both forms;
+ * to preserve wolfSSL's long-standing output and interoperability the caller's
+ * pkcs7->hashParamsAbsent preference (default: NULL) is honored there.
+ *
+ * This applies only to the CMS structural AlgorithmIdentifiers; the PKCS#1
+ * v1.5 DigestInfo used internally for RSA signatures keeps the NULL parameter
+ * that is conventional for that structure (RFC 8017) and is unaffected. */
 static byte wc_PKCS7_DigestParamsAbsent(const wc_PKCS7* pkcs7)
 {
 #if defined(WOLFSSL_SHA3) && \
@@ -3968,12 +3977,27 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
     }
 
     if (hashBuf == NULL && pkcs7->sidType != DEGENERATE_SID) {
+        /* Only the deterministic-size algorithms (RSA, RSA-PSS, ML-DSA) reach
+         * this final signing pass; ECDSA requires a pre-supplied hash and signs
+         * earlier. The signature is now produced over the finalized attributes,
+         * and the size reserved during the sizing pass above is baked into the
+         * SignerInfo/SEQUENCE lengths. */
+        word32 reservedSigSz = esd->encContentDigestSz;
+
         /* Calculate the final hash and encrypt it. */
         WOLFSSL_MSG("Recreating signature with new hash");
         ret = wc_PKCS7_SignedDataBuildSignature(pkcs7, flatSignedAttribs,
                                                 flatSignedAttribsSz, esd);
         if (ret < 0) {
             idx = ret;
+            goto out;
+        }
+
+        /* Enforce the fixed-size invariant: a signature length that differs
+         * from the reserved size would corrupt the already-encoded lengths. */
+        if (esd->encContentDigestSz != reservedSigSz) {
+            WOLFSSL_MSG("Signature size changed between sizing and signing");
+            idx = BUFFER_E;
             goto out;
         }
     }
