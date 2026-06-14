@@ -1320,16 +1320,36 @@ int wc_PKCS7_InitWithCert(wc_PKCS7* pkcs7, byte* derCert, word32 derCertSz)
             return ret;
         }
 
-        if (dCert->pubKeySize > sizeof(pkcs7->publicKey) ||
-            dCert->serialSz > MAX_SN_SZ) {
+        if (dCert->serialSz > MAX_SN_SZ) {
             WOLFSSL_MSG("Invalid size in certificate");
             FreeDecodedCert(dCert);
             WC_FREE_VAR_EX(dCert, pkcs7->heap, DYNAMIC_TYPE_DCERT);
             return ASN_PARSE_E;
         }
 
-        XMEMCPY(pkcs7->publicKey, dCert->publicKey, dCert->pubKeySize);
-        pkcs7->publicKeySz = dCert->pubKeySize;
+#ifdef WC_PKCS7_HAVE_MLDSA
+        if (dCert->keyOID == ML_DSA_44k || dCert->keyOID == ML_DSA_65k ||
+                dCert->keyOID == ML_DSA_87k) {
+            /* ML-DSA public keys are large and are never read back from
+             * pkcs7->publicKey (verification re-parses the key from the signer
+             * certificate). Skip storing it to keep the wc_PKCS7 structure
+             * small: only the RSA/ECC raw-sign callback paths consume
+             * publicKey, and they are guarded by publicKeySz > 0. */
+            pkcs7->publicKeySz = 0;
+        }
+        else
+#endif
+        {
+            if (dCert->pubKeySize > sizeof(pkcs7->publicKey)) {
+                WOLFSSL_MSG("Invalid size in certificate");
+                FreeDecodedCert(dCert);
+                WC_FREE_VAR_EX(dCert, pkcs7->heap, DYNAMIC_TYPE_DCERT);
+                return ASN_PARSE_E;
+            }
+
+            XMEMCPY(pkcs7->publicKey, dCert->publicKey, dCert->pubKeySize);
+            pkcs7->publicKeySz = dCert->pubKeySize;
+        }
         pkcs7->publicKeyOID = dCert->keyOID;
         /* Do not derive publicKeyOID from cert signatureOID: the cert's
          * signature is how the cert was signed by its issuer; the signer

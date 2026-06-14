@@ -293,16 +293,10 @@ struct wc_PKCS7 {
     int devId;                    /* device ID for HW based private key   */
     byte issuerHash[KEYID_SIZE];  /* hash of all alt Names                */
     byte issuerSn[MAX_SN_SZ];     /* singleCert's serial number           */
-#if defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA)
-    /* PQC public keys (e.g. ML-DSA) are larger than the RSA modulus+exponent
-     * encoding. MAX_PUBLIC_KEY_SZ accounts for the full SubjectPublicKeyInfo
-     * (raw key + AlgorithmIdentifier + SEQUENCE headers), so use the larger
-     * of it and the RSA bound when post-quantum support is enabled. */
-    byte publicKey[(MAX_PUBLIC_KEY_SZ > (MAX_RSA_INT_SZ + MAX_RSA_E_SZ)) ?
-                   MAX_PUBLIC_KEY_SZ : (MAX_RSA_INT_SZ + MAX_RSA_E_SZ)];
-#else
+    /* Signer public key, retained only for RSA/ECC (consumed by the raw-sign
+     * callback paths). PQC keys (e.g. ML-DSA) are large and never read back
+     * from here, so they are not stored and this stays RSA-sized. */
     byte publicKey[MAX_RSA_INT_SZ + MAX_RSA_E_SZ]; /* MAX RSA key size (m + e)*/
-#endif
     word32 certSz[MAX_PKCS7_CERTS];
 
      /* flags - up to 16-bits */
