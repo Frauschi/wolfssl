@@ -67448,6 +67448,24 @@ typedef struct {
     int         hashOID;    /* message-digest algorithm for signed attrs */
 } pkcs7MlDsaVector;
 
+#if defined(WOLFSSL_SHA3) && \
+    (defined(WOLFSSL_SHAKE256) || defined(WOLFSSL_SHAKE128))
+/* RFC 8702: a SHAKE digest AlgorithmIdentifier MUST omit the parameters
+ * field. Scan the encoded bundle for the digest OID and confirm it is not
+ * followed by a NULL (0x05) parameter. Returns 1 if absent/not present. */
+static int pkcs7_digest_params_absent(const byte* buf, word32 bufSz,
+                                      const byte* oidDer, word32 oidDerSz)
+{
+    word32 i;
+    for (i = 0; oidDerSz <= bufSz && i + oidDerSz <= bufSz; i++) {
+        if (XMEMCMP(buf + i, oidDer, oidDerSz) == 0) {
+            return (i + oidDerSz >= bufSz) || (buf[i + oidDerSz] != 0x05);
+        }
+    }
+    return 1; /* OID not present: nothing to check */
+}
+#endif
+
 /* Round-trip (encode then verify) test of CMS/PKCS#7 SignedData using ML-DSA
  * signatures, per RFC 9882. Exercises each enabled ML-DSA parameter set with
  * both a SHA-512 and (when available) a SHAKE256 message digest. */
@@ -67474,7 +67492,11 @@ static wc_test_ret_t pkcs7signed_mldsa_test(void)
     #define MLDSA_KEY(n)  CERT_ROOT "mldsa" CERT_PATH_SEP "mldsa" n "-key.der"
 
     /* one row per (level, message-digest) combination that is enabled;
-     * SHA-512 always, plus SHAKE256/SHAKE128 to exercise those digest OIDs */
+     * SHA-512 always (RFC 9882 recommendation), plus SHAKE256 to exercise the
+     * SHAKE digest-OID path. SHAKE128 (128-bit collision strength) is only
+     * paired with ML-DSA-44 (NIST level 2), where the message-digest strength
+     * matches the signature; pairing it with the stronger levels would weaken
+     * the content binding, so it is intentionally not used there. */
     pkcs7MlDsaVector vectors[12];
     testSz = 0;
 
@@ -67505,12 +67527,6 @@ static wc_test_ret_t pkcs7signed_mldsa_test(void)
     vectors[testSz].certFile = MLDSA_CERT("65");
     vectors[testSz].keyFile  = MLDSA_KEY("65");
     vectors[testSz].hashOID  = SHAKE256h;
-    testSz++;
-    #endif
-    #if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE128)
-    vectors[testSz].certFile = MLDSA_CERT("65");
-    vectors[testSz].keyFile  = MLDSA_KEY("65");
-    vectors[testSz].hashOID  = SHAKE128h;
     testSz++;
     #endif
 #endif
@@ -67575,6 +67591,27 @@ static wc_test_ret_t pkcs7signed_mldsa_test(void)
         encodedSz = wc_PKCS7_EncodeSignedData(pkcs7, out, FOURK_BUF * 5);
         if (encodedSz <= 0)
             ERROR_OUT(WC_TEST_RET_ENC_EC(encodedSz), out_lbl);
+
+        /* RFC 8702: a SHAKE digest algorithm must be encoded with absent
+         * parameters, not NULL. Confirm the produced bundle complies. */
+    #if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE256)
+        if (vectors[i].hashOID == SHAKE256h) {
+            static const byte shake256OidDer[] = { 0x06,0x09,0x60,0x86,0x48,
+                0x01,0x65,0x03,0x04,0x02,0x0c };
+            if (!pkcs7_digest_params_absent(out, (word32)encodedSz,
+                    shake256OidDer, (word32)sizeof(shake256OidDer)))
+                ERROR_OUT(WC_TEST_RET_ENC_NC, out_lbl);
+        }
+    #endif
+    #if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE128)
+        if (vectors[i].hashOID == SHAKE128h) {
+            static const byte shake128OidDer[] = { 0x06,0x09,0x60,0x86,0x48,
+                0x01,0x65,0x03,0x04,0x02,0x0b };
+            if (!pkcs7_digest_params_absent(out, (word32)encodedSz,
+                    shake128OidDer, (word32)sizeof(shake128OidDer)))
+                ERROR_OUT(WC_TEST_RET_ENC_NC, out_lbl);
+        }
+    #endif
 
         wc_PKCS7_Free(pkcs7);
         pkcs7 = NULL;

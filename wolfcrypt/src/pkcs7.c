@@ -1063,6 +1063,21 @@ static enum wc_HashType wc_PKCS7_OidGetHash(int oid)
     return wc_OidGetHash(oid);
 }
 
+/* Returns whether the digest AlgorithmIdentifier parameters field should be
+ * omitted (absent) rather than encoded as NULL. RFC 8702 requires the
+ * SHAKE128/SHAKE256 digest identifiers to have absent parameters; for all
+ * other digests the caller's pkcs7->hashParamsAbsent preference is honored. */
+static byte wc_PKCS7_DigestParamsAbsent(const wc_PKCS7* pkcs7)
+{
+#if defined(WOLFSSL_SHA3) && \
+    (defined(WOLFSSL_SHAKE256) || defined(WOLFSSL_SHAKE128))
+    if (pkcs7->hashOID == SHAKE256h || pkcs7->hashOID == SHAKE128h) {
+        return 1;
+    }
+#endif
+    return pkcs7->hashParamsAbsent;
+}
+
 /* Verify RSA/ECC key is correctly formatted, used as sanity check after
  * import of key/cert.
  *
@@ -3531,7 +3546,7 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
     if (pkcs7->sidType != DEGENERATE_SID) {
         signerInfoSz += esd->signerVersionSz;
         esd->signerDigAlgoIdSz = SetAlgoIDEx(pkcs7->hashOID, esd->signerDigAlgoId,
-                                          oidHashType, 0, pkcs7->hashParamsAbsent);
+                                  oidHashType, 0, wc_PKCS7_DigestParamsAbsent(pkcs7));
         signerInfoSz += esd->signerDigAlgoIdSz;
 
         /* set signatureAlgorithm */
@@ -3602,7 +3617,13 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
         /* ECDSA produces a variable-length signature and must be signed now to
          * learn the exact size. RSA, RSA-PSS and fixed-size PQC signatures
          * (e.g. ML-DSA) have a deterministic size, so only reserve space here
-         * and sign once, on the final pass below, over the finalized attrs. */
+         * and sign once, on the final pass below, over the finalized attrs.
+         *
+         * INVARIANT: for algorithms on this path the size reserved here
+         * (wc_PKCS7_GetSignSize) MUST equal the length the final signing pass
+         * produces, since the SignerInfo/SEQUENCE lengths are computed from it.
+         * This holds for RSA (modulus size) and ML-DSA (fixed per-level size);
+         * a variable-length signature algorithm must NOT use this branch. */
         if (pkcs7->publicKeyOID != ECDSAk && hashBuf == NULL) {
             ret = wc_PKCS7_GetSignSize(pkcs7);
             esd->encContentDigestSz = (word32)ret;
@@ -3644,7 +3665,7 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
 
     if (pkcs7->sidType != DEGENERATE_SID) {
         esd->singleDigAlgoIdSz = SetAlgoIDEx(pkcs7->hashOID, esd->singleDigAlgoId,
-                                      oidHashType, 0, pkcs7->hashParamsAbsent);
+                                  oidHashType, 0, wc_PKCS7_DigestParamsAbsent(pkcs7));
     }
     esd->digAlgoIdSetSz = SetSet(esd->singleDigAlgoIdSz, esd->digAlgoIdSet);
 
