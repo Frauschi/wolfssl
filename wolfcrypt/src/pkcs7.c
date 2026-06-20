@@ -7218,6 +7218,15 @@ static int PKCS7_VerifySignedData(wc_PKCS7* pkcs7, const byte* hashBuf,
                     if (ret == 0 && MAX_PKCS7_CERTS > 0) {
                         int sz = 0;
                         int i;
+                        /* Absolute end of the certificate set within pkiMsg2.
+                         * idx is the start of the set: 0 in streaming mode
+                         * (the set was copied to a standalone buffer), or the
+                         * absolute offset into the message in non-streaming
+                         * mode. The set spans [idx, idx + length). Bounding the
+                         * loop with the relative length alone stops short by
+                         * idx bytes in non-streaming mode and can drop the last
+                         * certificate. */
+                        word32 certSetEnd = idx + (word32)length;
 
                         pkcs7->cert[0]   = cert;
                         pkcs7->certSz[0] = (word32)certSz;
@@ -7225,7 +7234,7 @@ static int PKCS7_VerifySignedData(wc_PKCS7* pkcs7, const byte* hashBuf,
 
                         for (i = 1; i < MAX_PKCS7_CERTS &&
                                 certIdx + 1 < pkiMsg2Sz &&
-                                certIdx + 1 < (word32)length; i++) {
+                                certIdx + 1 < certSetEnd; i++) {
                             localIdx = certIdx;
 
                             if (ret == 0 && GetASNTag(pkiMsg2, &certIdx, &tag,

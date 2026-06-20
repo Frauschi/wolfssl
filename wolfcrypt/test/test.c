@@ -67808,6 +67808,99 @@ out:
 
     return ret;
 }
+
+/* Regression test for the multi-certificate decode bound. A SignedData whose
+ * eContent is larger than the certificate set pushes the cert set to a large
+ * offset within the message; the decoder must still parse every certificate.
+ * Without the fixed bound this drops the trailing certificates in non-streaming
+ * (NO_PKCS7_STREAM) builds. */
+static wc_test_ret_t pkcs7_signed_multi_cert_test(
+        byte* cert1, word32 cert1Sz, byte* key, word32 keySz,
+        byte* cert2, word32 cert2Sz, byte* cert3, word32 cert3Sz)
+{
+    wc_test_ret_t ret = 0;
+    wc_PKCS7* pkcs7 = NULL;
+    WC_RNG rng;
+    int    rngInit = 0;
+    byte*  out = NULL;
+    byte*  content = NULL;
+    int    encSz = 0;
+    const word32 outSz = FOURK_BUF * 4;
+    const word32 contentSz = FOURK_BUF;   /* larger than the certificate set */
+    int    found1 = 0, found2 = 0, found3 = 0, j;
+
+    content = (byte*)XMALLOC(contentSz, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    out     = (byte*)XMALLOC(outSz, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    if (content == NULL || out == NULL)
+        ERROR_OUT(WC_TEST_RET_ENC_ERRNO, out);
+    XMEMSET(content, 0xA5, contentSz);
+
+    ret = wc_InitRng_ex(&rng, HEAP_HINT, devId);
+    if (ret != 0)
+        ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
+    rngInit = 1;
+
+    pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+    if (pkcs7 == NULL)
+        ERROR_OUT(WC_TEST_RET_ENC_ERRNO, out);
+
+    ret = wc_PKCS7_InitWithCert(pkcs7, cert1, cert1Sz);
+    if (ret == 0)
+        ret = wc_PKCS7_AddCertificate(pkcs7, cert2, cert2Sz);
+    if (ret == 0)
+        ret = wc_PKCS7_AddCertificate(pkcs7, cert3, cert3Sz);
+    if (ret != 0)
+        ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
+
+    pkcs7->rng          = &rng;
+    pkcs7->content      = content;
+    pkcs7->contentSz    = contentSz;
+    pkcs7->contentOID   = DATA;
+    pkcs7->hashOID      = SHA256h;
+    pkcs7->encryptOID   = RSAk;
+    pkcs7->privateKey   = key;
+    pkcs7->privateKeySz = keySz;
+
+    encSz = wc_PKCS7_EncodeSignedData(pkcs7, out, outSz);
+    if (encSz <= 0)
+        ERROR_OUT(WC_TEST_RET_ENC_EC(encSz), out);
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+
+    pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+    if (pkcs7 == NULL)
+        ERROR_OUT(WC_TEST_RET_ENC_ERRNO, out);
+    ret = wc_PKCS7_VerifySignedData(pkcs7, out, (word32)encSz);
+    if (ret != 0)
+        ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
+
+    /* all three certificates must be decoded (SET OF is unordered) */
+    for (j = 0; j < MAX_PKCS7_CERTS; j++) {
+        if (pkcs7->certSz[j] == cert1Sz &&
+            XMEMCMP(pkcs7->cert[j], cert1, cert1Sz) == 0)
+            found1 = 1;
+        if (pkcs7->certSz[j] == cert2Sz &&
+            XMEMCMP(pkcs7->cert[j], cert2, cert2Sz) == 0)
+            found2 = 1;
+        if (pkcs7->certSz[j] == cert3Sz &&
+            XMEMCMP(pkcs7->cert[j], cert3, cert3Sz) == 0)
+            found3 = 1;
+    }
+    if (!found1 || !found2 || !found3)
+        ERROR_OUT(WC_TEST_RET_ENC_NC, out);
+
+    ret = 0;
+
+out:
+    if (pkcs7 != NULL)
+        wc_PKCS7_Free(pkcs7);
+    if (rngInit)
+        wc_FreeRng(&rng);
+    XFREE(out, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(content, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+
+    return ret;
+}
 #endif /* !NO_RSA && !NO_SHA256 */
 
 
@@ -67962,6 +68055,14 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t pkcs7signed_test(void)
         ret = pkcs7_decoded_attrib_shape_test(
                             rsaClientCertBuf, (word32)rsaClientCertBufSz,
                             rsaClientPrivKeyBuf, (word32)rsaClientPrivKeyBufSz);
+
+    /* multi-certificate decode with large content (cert-set bound) */
+    if (ret >= 0)
+        ret = pkcs7_signed_multi_cert_test(
+                            rsaClientCertBuf, (word32)rsaClientCertBufSz,
+                            rsaClientPrivKeyBuf, (word32)rsaClientPrivKeyBufSz,
+                            rsaServerCertBuf, (word32)rsaServerCertBufSz,
+                            rsaCaCertBuf,     (word32)rsaCaCertBufSz);
 #endif
 
     XFREE(rsaClientCertBuf,    HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
