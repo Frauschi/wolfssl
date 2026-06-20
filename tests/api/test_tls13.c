@@ -1136,14 +1136,14 @@ int test_tls13_cert_with_extern_psk_rejects_resumption(void)
     wolfSSL_set_verify(ssl_c, WOLFSSL_VERIFY_NONE, NULL);
     wolfSSL_set_verify(ssl_s, WOLFSSL_VERIFY_NONE, NULL);
 #if defined(HAVE_ECC)
-    ExpectTrue(wolfSSL_CTX_use_certificate_file(ctx_s, eccCertFile,
+    ExpectTrue(wolfSSL_use_certificate_file(ssl_s, eccCertFile,
         CERT_FILETYPE) == WOLFSSL_SUCCESS);
-    ExpectTrue(wolfSSL_CTX_use_PrivateKey_file(ctx_s, eccKeyFile,
+    ExpectTrue(wolfSSL_use_PrivateKey_file(ssl_s, eccKeyFile,
         CERT_FILETYPE) == WOLFSSL_SUCCESS);
 #else
-    ExpectTrue(wolfSSL_CTX_use_certificate_file(ctx_s, svrCertFile,
+    ExpectTrue(wolfSSL_use_certificate_file(ssl_s, svrCertFile,
         CERT_FILETYPE) == WOLFSSL_SUCCESS);
-    ExpectTrue(wolfSSL_CTX_use_PrivateKey_file(ctx_s, svrKeyFile,
+    ExpectTrue(wolfSSL_use_PrivateKey_file(ssl_s, svrKeyFile,
         CERT_FILETYPE) == WOLFSSL_SUCCESS);
 #endif
 
@@ -1424,14 +1424,14 @@ int test_tls13_cert_with_extern_psk_sh_confirms_resumption(void)
     wolfSSL_set_verify(ssl_c, WOLFSSL_VERIFY_NONE, NULL);
     wolfSSL_set_verify(ssl_s, WOLFSSL_VERIFY_NONE, NULL);
 #if defined(HAVE_ECC)
-    ExpectTrue(wolfSSL_CTX_use_certificate_file(ctx_s, eccCertFile,
+    ExpectTrue(wolfSSL_use_certificate_file(ssl_s, eccCertFile,
         CERT_FILETYPE) == WOLFSSL_SUCCESS);
-    ExpectTrue(wolfSSL_CTX_use_PrivateKey_file(ctx_s, eccKeyFile,
+    ExpectTrue(wolfSSL_use_PrivateKey_file(ssl_s, eccKeyFile,
         CERT_FILETYPE) == WOLFSSL_SUCCESS);
 #else
-    ExpectTrue(wolfSSL_CTX_use_certificate_file(ctx_s, svrCertFile,
+    ExpectTrue(wolfSSL_use_certificate_file(ssl_s, svrCertFile,
         CERT_FILETYPE) == WOLFSSL_SUCCESS);
-    ExpectTrue(wolfSSL_CTX_use_PrivateKey_file(ctx_s, svrKeyFile,
+    ExpectTrue(wolfSSL_use_PrivateKey_file(ssl_s, svrKeyFile,
         CERT_FILETYPE) == WOLFSSL_SUCCESS);
 #endif
 
