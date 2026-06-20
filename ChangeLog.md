@@ -19,6 +19,14 @@
   decoded-attribute value shape is documentation of existing behavior and does
   not change it.
 
+* **PKCS#7 multi-certificate decode fix (non-streaming)**: Fixed the additional
+  -certificate loop in `wc_PKCS7_VerifySignedData` to bound against the absolute
+  end of the certificate set rather than its relative length. In `NO_PKCS7_STREAM`
+  builds this previously stopped short and dropped trailing certificates (and,
+  with a large eContent preceding the certificate set, could drop all but the
+  first certificate, causing signature verification to fail when the signer
+  certificate was among those dropped). Streaming builds were unaffected.
+
 * **Behavioral change (RSA-PSS trailerField enforcement)**: `DecodeRsaPssParams`
   (and its public wrapper `wc_DecodeRsaPssParams`) now enforces RFC 8017 A.2.3,
   which mandates `trailerField == trailerFieldBC(1)`.  In the default build

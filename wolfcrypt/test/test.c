@@ -67507,6 +67507,7 @@ static wc_test_ret_t pkcs7_certsonly_test(byte* cert1, word32 cert1Sz,
     XFREE(out, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
     out = NULL;
 
+#if MAX_PKCS7_CERTS >= 3
     /* --- three certificates, in input order --- */
     pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
     if (pkcs7 == NULL)
@@ -67559,6 +67560,9 @@ static wc_test_ret_t pkcs7_certsonly_test(byte* cert1, word32 cert1Sz,
         if (!found1 || !found2 || !found3)
             ERROR_OUT(WC_TEST_RET_ENC_NC, out);
     }
+#else
+    (void)cert2; (void)cert2Sz; (void)cert3; (void)cert3Sz;
+#endif /* MAX_PKCS7_CERTS >= 3 */
 
     ret = 0;
 
@@ -67572,9 +67576,13 @@ out:
 #endif /* !NO_RSA */
 
 #if !defined(NO_RSA) && !defined(NO_SHA256)
+/* The nine-attribute case below needs more slots than the inline array holds
+ * (MAX_SIGNED_ATTRIBS_SZ), which requires a heap allocation; skip it on
+ * no-malloc builds unless the inline array was enlarged at build time. */
+#if !defined(WOLFSSL_NO_MALLOC) || (MAX_SIGNED_ATTRIBS_SZ >= 9)
 /* Test that a SignedData carrying six user signed attributes plus the three
- * CMS auto-defaults (nine total) encodes and verifies. This exceeds the old
- * MAX_SIGNED_ATTRIBS_SZ default of 7. */
+ * CMS auto-defaults (nine total) encodes and verifies. This exceeds the
+ * default inline capacity (MAX_SIGNED_ATTRIBS_SZ == 7). */
 static wc_test_ret_t pkcs7_signed_attribs_count_test(byte* cert, word32 certSz,
                                                      byte* key, word32 keySz)
 {
@@ -67676,6 +67684,7 @@ out:
 
     return ret;
 }
+#endif /* !WOLFSSL_NO_MALLOC || MAX_SIGNED_ATTRIBS_SZ >= 9 */
 
 /* Test that decoded signed-attribute values follow the documented, stable
  * shape (the contents of the SET OF AttributeValue, outer SET tag stripped)
@@ -67818,6 +67827,12 @@ static wc_test_ret_t pkcs7_signed_multi_cert_test(
         byte* cert1, word32 cert1Sz, byte* key, word32 keySz,
         byte* cert2, word32 cert2Sz, byte* cert3, word32 cert3Sz)
 {
+#if MAX_PKCS7_CERTS < 3
+    /* needs at least three certificate slots to exercise the bound */
+    (void)cert1; (void)cert1Sz; (void)key; (void)keySz;
+    (void)cert2; (void)cert2Sz; (void)cert3; (void)cert3Sz;
+    return 0;
+#else
     wc_test_ret_t ret = 0;
     wc_PKCS7* pkcs7 = NULL;
     WC_RNG rng;
@@ -67900,6 +67915,7 @@ out:
     XFREE(content, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
 
     return ret;
+#endif /* MAX_PKCS7_CERTS < 3 */
 }
 #endif /* !NO_RSA && !NO_SHA256 */
 
@@ -68044,11 +68060,13 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t pkcs7signed_test(void)
 #endif
 
 #if !defined(NO_RSA) && !defined(NO_SHA256)
-    /* signed-attribute count beyond the old MAX_SIGNED_ATTRIBS_SZ default */
+#if !defined(WOLFSSL_NO_MALLOC) || (MAX_SIGNED_ATTRIBS_SZ >= 9)
+    /* signed-attribute count beyond the inline capacity */
     if (ret >= 0)
         ret = pkcs7_signed_attribs_count_test(
                             rsaClientCertBuf, (word32)rsaClientCertBufSz,
                             rsaClientPrivKeyBuf, (word32)rsaClientPrivKeyBufSz);
+#endif
 
     /* decoded signed-attribute value shape */
     if (ret >= 0)

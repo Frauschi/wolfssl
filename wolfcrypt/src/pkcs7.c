@@ -1571,8 +1571,15 @@ int wc_PKCS7_GetSignedAttribValue(wc_PKCS7* pkcs7, const byte* oid,
         return ASN_PARSE_E;
     }
 
-    /* attrib->value holds the SET contents; parse the first AttributeValue
-     * TLV (tag + length + content) and return a pointer spanning it */
+    /* attrib->value must be the SET contents with the outer SET tag stripped
+     * (the documented shape). Reject a value that still carries a SET wrapper,
+     * which would indicate the value is not in the expected form. */
+    if (attrib->value[0] == (ASN_SET | ASN_CONSTRUCTED)) {
+        return ASN_PARSE_E;
+    }
+
+    /* parse the first AttributeValue TLV (tag + length + content) and return a
+     * pointer spanning it */
     idx = 1; /* skip the value tag */
     if (GetLength(attrib->value, &idx, &length, attrib->valueSz) < 0) {
         return ASN_PARSE_E;
@@ -1584,6 +1591,9 @@ int wc_PKCS7_GetSignedAttribValue(wc_PKCS7* pkcs7, const byte* oid,
 
     *out   = attrib->value;
     *outSz = idx + (word32)length;
+    if (*outSz > (word32)WC_MAX_SINT_OF(int)) {
+        return BUFFER_E;
+    }
     return (int)*outSz;
 }
 
@@ -1671,11 +1681,13 @@ typedef struct ESD {
                         byte digEncAlgoId[MAX_ALGO_SZ];
 #endif
                         byte signedAttribSet[MAX_SET_SZ];
-                            /* signedAttribs is allocated at encode time, sized
-                             * to the actual attribute count, so it is not
-                             * bounded by MAX_SIGNED_ATTRIBS_SZ and adds no
-                             * fixed per-ESD footprint. signedAttribsCap holds
-                             * its allocated entry count. */
+                            /* Working attribute array. signedAttribs points at
+                             * the inline buffer for the common case (no heap
+                             * use, important for no-malloc/static-memory builds)
+                             * and is redirected to a heap allocation only when
+                             * the attribute count exceeds MAX_SIGNED_ATTRIBS_SZ.
+                             * signedAttribsCap holds the usable entry count. */
+                            EncodedAttrib signedAttribsInline[MAX_SIGNED_ATTRIBS_SZ];
                             EncodedAttrib* signedAttribs;
                         byte signerDigest[MAX_OCTET_STR_SZ];
     word32 signedAttribsCap;
@@ -3326,30 +3338,50 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
         }
         signerInfoSz += esd->digEncAlgoIdSz;
 
-        /* Allocate the working attribute array, sized to the actual number of
-         * attributes: user-supplied plus up to the CMS auto-defaults
+        /* Point the working attribute array at the inline buffer, sized for the
+         * actual attribute count: user-supplied plus the CMS auto-defaults
          * (contentType, messageDigest, and, unless NO_ASN_TIME, signingTime).
-         * This avoids a fixed per-ESD array and any MAX_SIGNED_ATTRIBS_SZ cap. */
+         * Only fall back to a heap allocation when more attributes are needed
+         * than fit inline, so the common case stays allocation-free. */
         {
         #ifdef NO_ASN_TIME
             word32 defaultAttribCap = 2;
         #else
             word32 defaultAttribCap = 3;
         #endif
-            esd->signedAttribsCap = defaultAttribCap + pkcs7->signedAttribsSz;
-            /* detect addition and multiplication overflow */
-            if (esd->signedAttribsCap < pkcs7->signedAttribsSz ||
-                esd->signedAttribsCap >
-                    ((word32)WC_MAX_SINT_OF(int) / (word32)sizeof(EncodedAttrib))) {
+            word32 neededCap = defaultAttribCap + pkcs7->signedAttribsSz;
+
+            /* detect addition overflow */
+            if (neededCap < pkcs7->signedAttribsSz) {
                 idx = BUFFER_E;
                 goto out;
             }
-            esd->signedAttribs = (EncodedAttrib*)XMALLOC(
-                esd->signedAttribsCap * (word32)sizeof(EncodedAttrib),
-                pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
-            if (esd->signedAttribs == NULL) {
-                idx = MEMORY_E;
+
+            if (neededCap <= MAX_SIGNED_ATTRIBS_SZ) {
+                esd->signedAttribs    = esd->signedAttribsInline;
+                esd->signedAttribsCap = MAX_SIGNED_ATTRIBS_SZ;
+            }
+            else {
+            #ifdef WOLFSSL_NO_MALLOC
+                /* cannot grow beyond the inline array without a heap */
+                idx = BUFFER_E;
                 goto out;
+            #else
+                /* detect multiplication overflow */
+                if (neededCap > ((word32)WC_MAX_SINT_OF(int) /
+                                 (word32)sizeof(EncodedAttrib))) {
+                    idx = BUFFER_E;
+                    goto out;
+                }
+                esd->signedAttribs = (EncodedAttrib*)XMALLOC(
+                    neededCap * (word32)sizeof(EncodedAttrib),
+                    pkcs7->heap, DYNAMIC_TYPE_PKCS7);
+                if (esd->signedAttribs == NULL) {
+                    idx = MEMORY_E;
+                    goto out;
+                }
+                esd->signedAttribsCap = neededCap;
+            #endif
             }
             XMEMSET(esd->signedAttribs, 0,
                 esd->signedAttribsCap * (word32)sizeof(EncodedAttrib));
@@ -3783,13 +3815,17 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
 
     XFREE(flatSignedAttribs, pkcs7->heap, DYNAMIC_TYPE_PKCS7);
 
-    /* free working attribute array (allocated above) before freeing esd. In
-     * small-stack builds esd is heap-allocated and may be NULL here. */
+    /* free the working attribute array only if it was heap-allocated (i.e. it
+     * is not the inline buffer) before freeing esd. In small-stack builds esd
+     * is heap-allocated and may be NULL here. */
 #ifdef WOLFSSL_SMALL_STACK
     if (esd != NULL)
 #endif
     {
-        XFREE(esd->signedAttribs, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        if (esd->signedAttribs != NULL &&
+            esd->signedAttribs != esd->signedAttribsInline) {
+            XFREE(esd->signedAttribs, pkcs7->heap, DYNAMIC_TYPE_PKCS7);
+        }
         esd->signedAttribs = NULL;
     }
 
@@ -7219,14 +7255,18 @@ static int PKCS7_VerifySignedData(wc_PKCS7* pkcs7, const byte* hashBuf,
                         int sz = 0;
                         int i;
                         /* Absolute end of the certificate set within pkiMsg2.
-                         * idx is the start of the set: 0 in streaming mode
-                         * (the set was copied to a standalone buffer), or the
-                         * absolute offset into the message in non-streaming
-                         * mode. The set spans [idx, idx + length). Bounding the
-                         * loop with the relative length alone stops short by
-                         * idx bytes in non-streaming mode and can drop the last
-                         * certificate. */
+                         * idx is the start of the set, so the set spans
+                         * [idx, idx + length). In non-streaming mode idx is the
+                         * absolute offset into the message; in streaming mode it
+                         * is typically 0 (the set was copied to a standalone
+                         * buffer). Bounding the loop with the relative length
+                         * alone stops short by idx bytes in non-streaming mode
+                         * and can drop the last certificate. Clamp to pkiMsg2Sz
+                         * to guard against overflow/over-long length (reads stay
+                         * bounded by the certIdx + 1 < pkiMsg2Sz check below). */
                         word32 certSetEnd = idx + (word32)length;
+                        if (certSetEnd < idx || certSetEnd > pkiMsg2Sz)
+                            certSetEnd = pkiMsg2Sz;
 
                         pkcs7->cert[0]   = cert;
                         pkcs7->certSz[0] = (word32)certSz;
