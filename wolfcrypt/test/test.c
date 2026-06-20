@@ -67452,6 +67452,21 @@ static wc_test_ret_t pkcs7_certsonly_test(byte* cert1, word32 cert1Sz,
     int    encSz = 0;
     int    needed = 0;
 
+    /* --- error paths --- */
+    if (wc_PKCS7_EncodeCertsOnlySignedData(NULL, NULL, 0) !=
+            WC_NO_ERR_TRACE(BAD_FUNC_ARG))
+        return WC_TEST_RET_ENC_NC;
+
+    /* no certificates loaded -> BAD_FUNC_ARG */
+    pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+    if (pkcs7 == NULL)
+        return WC_TEST_RET_ENC_ERRNO;
+    if (wc_PKCS7_EncodeCertsOnlySignedData(pkcs7, NULL, 0) !=
+            WC_NO_ERR_TRACE(BAD_FUNC_ARG))
+        ERROR_OUT(WC_TEST_RET_ENC_NC, out);
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+
     /* --- single certificate, with size-probe --- */
     pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
     if (pkcs7 == NULL)
@@ -67571,6 +67586,7 @@ static wc_test_ret_t pkcs7_signed_attribs_count_test(byte* cert, word32 certSz,
     int    encSz = 0;
     const word32 outSz = FOURK_BUF * 2;
     int    i;
+    byte   content[] = "signed attribs count test";
 
     /* six distinct user attribute OIDs (arbitrary, well-formed OID TLVs) and
      * PrintableString values */
@@ -67614,8 +67630,8 @@ static wc_test_ret_t pkcs7_signed_attribs_count_test(byte* cert, word32 certSz,
         ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
 
     pkcs7->rng           = &rng;
-    pkcs7->content       = (byte*)"signed attribs count test";
-    pkcs7->contentSz     = 26;
+    pkcs7->content       = content;
+    pkcs7->contentSz     = (word32)XSTRLEN((char*)content);
     pkcs7->contentOID    = DATA;
     pkcs7->hashOID       = SHA256h;
     pkcs7->encryptOID    = RSAk;
@@ -67679,6 +67695,9 @@ static wc_test_ret_t pkcs7_decoded_attrib_shape_test(byte* cert, word32 certSz,
     word32 valPtrSz = 0;
     byte   getBuf[32];
     word32 getBufSz;
+    byte   content[] = "decoded attrib shape test";
+    /* an OID content (no tag/len) that is not present among the attributes */
+    static const byte oidAbsent[] = { 0x55,0x04,0x63 };
 
     /* one PrintableString-valued and one OCTET STRING-valued attribute */
     static const byte oidPS[] = { 0x06,0x03, 0x55,0x04,0x0A };
@@ -67709,8 +67728,8 @@ static wc_test_ret_t pkcs7_decoded_attrib_shape_test(byte* cert, word32 certSz,
         ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
 
     pkcs7->rng             = &rng;
-    pkcs7->content         = (byte*)"decoded attrib shape test";
-    pkcs7->contentSz       = 26;
+    pkcs7->content         = content;
+    pkcs7->contentSz       = (word32)XSTRLEN((char*)content);
     pkcs7->contentOID      = DATA;
     pkcs7->hashOID         = SHA256h;
     pkcs7->encryptOID      = RSAk;
@@ -67760,6 +67779,22 @@ static wc_test_ret_t pkcs7_decoded_attrib_shape_test(byte* cert, word32 certSz,
         ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
     if (valPtrSz != sizeof(valPS) ||
         XMEMCMP(valPtr, valPS, sizeof(valPS)) != 0)
+        ERROR_OUT(WC_TEST_RET_ENC_NC, out);
+
+    /* error paths: bad args -> BAD_FUNC_ARG */
+    if (wc_PKCS7_GetSignedAttribValue(NULL, oidPS + 2, sizeof(oidPS) - 2,
+            &valPtr, &valPtrSz) != WC_NO_ERR_TRACE(BAD_FUNC_ARG))
+        ERROR_OUT(WC_TEST_RET_ENC_NC, out);
+    if (wc_PKCS7_GetSignedAttribValue(pkcs7, NULL, 0,
+            &valPtr, &valPtrSz) != WC_NO_ERR_TRACE(BAD_FUNC_ARG))
+        ERROR_OUT(WC_TEST_RET_ENC_NC, out);
+    if (wc_PKCS7_GetSignedAttribValue(pkcs7, oidPS + 2, sizeof(oidPS) - 2,
+            NULL, &valPtrSz) != WC_NO_ERR_TRACE(BAD_FUNC_ARG))
+        ERROR_OUT(WC_TEST_RET_ENC_NC, out);
+
+    /* absent OID -> ASN_UNKNOWN_OID_E (distinct from a malformed value) */
+    if (wc_PKCS7_GetSignedAttribValue(pkcs7, oidAbsent, sizeof(oidAbsent),
+            &valPtr, &valPtrSz) != WC_NO_ERR_TRACE(ASN_UNKNOWN_OID_E))
         ERROR_OUT(WC_TEST_RET_ENC_NC, out);
 
     ret = 0;

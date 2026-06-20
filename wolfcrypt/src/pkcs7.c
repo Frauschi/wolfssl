@@ -1541,13 +1541,16 @@ int wc_PKCS7_GetAttributeValue(wc_PKCS7* pkcs7, const byte* oid, word32 oidSz,
  * PKCS7DecodedAttrib.value shape (which is the SET OF AttributeValue contents).
  *
  * pkcs7  - pointer to PKCS7 structure that has decoded a SignedData
- * oid    - OID of the attribute to look for (sum form not used; raw OID bytes)
+ * oid    - the OID *content* octets to match (no tag/length), matching the
+ *          convention used by wc_PKCS7_GetAttributeValue(). For example, for
+ *          the OID encoded as 0x06 0x03 0x55 0x04 0x03, pass {0x55,0x04,0x03}.
  * oidSz  - size of oid, octets
  * out    - [OUT] set to point at the first AttributeValue TLV (not copied)
  * outSz  - [OUT] set to the length of that TLV
  *
- * Returns the length of the value (>0) on success, ASN_PARSE_E if the
- * attribute is absent or malformed, BAD_FUNC_ARG on bad arguments. */
+ * Returns the length of the value (>0) on success, ASN_UNKNOWN_OID_E if no
+ * attribute with that OID is present, ASN_PARSE_E if the attribute is present
+ * but malformed, BAD_FUNC_ARG on bad arguments. */
 int wc_PKCS7_GetSignedAttribValue(wc_PKCS7* pkcs7, const byte* oid,
         word32 oidSz, const byte** out, word32* outSz)
 {
@@ -1561,7 +1564,7 @@ int wc_PKCS7_GetSignedAttribValue(wc_PKCS7* pkcs7, const byte* oid,
 
     attrib = findAttrib(pkcs7, oid, oidSz);
     if (attrib == NULL) {
-        return ASN_PARSE_E;
+        return ASN_UNKNOWN_OID_E;
     }
 
     if (attrib->value == NULL || attrib->valueSz < 2) {
@@ -1668,8 +1671,14 @@ typedef struct ESD {
                         byte digEncAlgoId[MAX_ALGO_SZ];
 #endif
                         byte signedAttribSet[MAX_SET_SZ];
-                            EncodedAttrib signedAttribs[MAX_SIGNED_ATTRIBS_SZ];
+                            /* signedAttribs is allocated at encode time, sized
+                             * to the actual attribute count, so it is not
+                             * bounded by MAX_SIGNED_ATTRIBS_SZ and adds no
+                             * fixed per-ESD footprint. signedAttribsCap holds
+                             * its allocated entry count. */
+                            EncodedAttrib* signedAttribs;
                         byte signerDigest[MAX_OCTET_STR_SZ];
+    word32 signedAttribsCap;
     word32 innerOctetsSz, innerContSeqSz, contentInfoSeqSz;
     word32 outerSeqSz, outerContentSz, innerSeqSz, versionSz, digAlgoIdSetSz,
            singleDigAlgoIdSz, certsSetSz;
@@ -2379,9 +2388,13 @@ static int wc_PKCS7_BuildSignedAttributes(wc_PKCS7* pkcs7, ESD* esd,
 
     /* add custom signed attributes if set */
     if (pkcs7->signedAttribsSz > 0 && pkcs7->signedAttribs != NULL) {
-        word32 availableSpace = MAX_SIGNED_ATTRIBS_SZ - atrIdx;
+        /* esd->signedAttribs was allocated to hold all attributes, but guard
+         * against writing past it in case the working array was undersized */
+        word32 availableSpace = (esd->signedAttribsCap > atrIdx) ?
+                                (esd->signedAttribsCap - atrIdx) : 0;
 
-        if (pkcs7->signedAttribsSz > availableSpace)
+        if (esd->signedAttribs == NULL ||
+            pkcs7->signedAttribsSz > availableSpace)
             return BUFFER_E;
 
         esd->signedAttribsCount += pkcs7->signedAttribsSz;
@@ -3313,6 +3326,35 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
         }
         signerInfoSz += esd->digEncAlgoIdSz;
 
+        /* Allocate the working attribute array, sized to the actual number of
+         * attributes: user-supplied plus up to the CMS auto-defaults
+         * (contentType, messageDigest, and, unless NO_ASN_TIME, signingTime).
+         * This avoids a fixed per-ESD array and any MAX_SIGNED_ATTRIBS_SZ cap. */
+        {
+        #ifdef NO_ASN_TIME
+            word32 defaultAttribCap = 2;
+        #else
+            word32 defaultAttribCap = 3;
+        #endif
+            esd->signedAttribsCap = defaultAttribCap + pkcs7->signedAttribsSz;
+            /* detect addition and multiplication overflow */
+            if (esd->signedAttribsCap < pkcs7->signedAttribsSz ||
+                esd->signedAttribsCap >
+                    ((word32)WC_MAX_SINT_OF(int) / (word32)sizeof(EncodedAttrib))) {
+                idx = BUFFER_E;
+                goto out;
+            }
+            esd->signedAttribs = (EncodedAttrib*)XMALLOC(
+                esd->signedAttribsCap * (word32)sizeof(EncodedAttrib),
+                pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+            if (esd->signedAttribs == NULL) {
+                idx = MEMORY_E;
+                goto out;
+            }
+            XMEMSET(esd->signedAttribs, 0,
+                esd->signedAttribsCap * (word32)sizeof(EncodedAttrib));
+        }
+
         /* build up signed attributes, include contentType, signingTime, and
            messageDigest by default */
         ret = wc_PKCS7_BuildSignedAttributes(pkcs7, esd, pkcs7->contentType,
@@ -3741,6 +3783,16 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
 
     XFREE(flatSignedAttribs, pkcs7->heap, DYNAMIC_TYPE_PKCS7);
 
+    /* free working attribute array (allocated above) before freeing esd. In
+     * small-stack builds esd is heap-allocated and may be NULL here. */
+#ifdef WOLFSSL_SMALL_STACK
+    if (esd != NULL)
+#endif
+    {
+        XFREE(esd->signedAttribs, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        esd->signedAttribs = NULL;
+    }
+
     WC_FREE_VAR_EX(esd, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
     WC_FREE_VAR_EX(signedDataOid, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
 
@@ -4000,36 +4052,50 @@ int wc_PKCS7_EncodeCertsOnlySignedData(wc_PKCS7* pkcs7, byte* output,
     int    savedContentOID;
     byte*  savedContent;
     word32 savedContentSz;
+    word32 savedContentTypeSz;
+    byte   savedContentType[MAX_OID_SZ];
 
     if (pkcs7 == NULL || pkcs7->certList == NULL) {
         WOLFSSL_MSG("PKCS7 struct null, or no certificates have been added");
         return BAD_FUNC_ARG;
     }
 
-    /* save fields we override so the call is non-destructive to caller state */
-    savedSidType    = pkcs7->sidType;
-    savedDetached   = pkcs7->detached;
-    savedContentOID = pkcs7->contentOID;
-    savedContent    = pkcs7->content;
-    savedContentSz  = pkcs7->contentSz;
-
-    /* force the degenerate, no-content shape */
-    pkcs7->sidType  = DEGENERATE_SID;
-    pkcs7->detached = 1;            /* suppress the [0] eContent */
-    if (pkcs7->contentOID == 0) {
-        pkcs7->contentOID = DATA;   /* eContentType = id-data */
+    if (pkcs7->noCerts) {
+        WOLFSSL_MSG("noCerts is set; certs-only SignedData would be empty");
+        return BAD_FUNC_ARG;
     }
-    pkcs7->content   = NULL;
-    pkcs7->contentSz = 0;
+
+    /* save every field we override so the call is non-destructive to caller
+     * state, including contentType/contentTypeSz which PKCS7_EncodeSigned()
+     * regenerates from contentOID */
+    savedSidType       = pkcs7->sidType;
+    savedDetached      = pkcs7->detached;
+    savedContentOID    = pkcs7->contentOID;
+    savedContent       = pkcs7->content;
+    savedContentSz     = pkcs7->contentSz;
+    savedContentTypeSz = pkcs7->contentTypeSz;
+    XMEMCPY(savedContentType, pkcs7->contentType, sizeof(savedContentType));
+
+    /* force the degenerate, no-content, id-data shape. Clearing contentTypeSz
+     * makes PKCS7_EncodeSigned() regenerate eContentType from contentOID, so
+     * the output is always id-data regardless of any prior custom contentType */
+    pkcs7->sidType      = DEGENERATE_SID;
+    pkcs7->detached     = 1;          /* suppress the [0] eContent */
+    pkcs7->contentOID   = DATA;       /* eContentType = id-data */
+    pkcs7->contentTypeSz = 0;
+    pkcs7->content      = NULL;
+    pkcs7->contentSz    = 0;
 
     ret = wc_PKCS7_EncodeSignedData(pkcs7, output, outputSz);
 
     /* restore caller state */
-    pkcs7->sidType    = savedSidType;
-    pkcs7->detached   = savedDetached;
-    pkcs7->contentOID = savedContentOID;
-    pkcs7->content    = savedContent;
-    pkcs7->contentSz  = savedContentSz;
+    pkcs7->sidType       = savedSidType;
+    pkcs7->detached      = savedDetached;
+    pkcs7->contentOID    = savedContentOID;
+    pkcs7->content       = savedContent;
+    pkcs7->contentSz     = savedContentSz;
+    pkcs7->contentTypeSz = savedContentTypeSz;
+    XMEMCPY(pkcs7->contentType, savedContentType, sizeof(savedContentType));
 
     return ret;
 }

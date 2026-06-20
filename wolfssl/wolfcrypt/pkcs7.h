@@ -63,15 +63,15 @@
     #define MAX_ORI_VALUE_SZ 512
 #endif
 
-/* Max number of signed attributes that can be encoded in a SignedData
- * SignerInfo. This counts user-supplied attributes plus up to three CMS
- * auto-default attributes (contentType, messageDigest, signingTime).
- * Override at build time with -DMAX_SIGNED_ATTRIBS_SZ=. Default raised to 12
- * to accommodate profiles such as SCEP CertRep (RFC 8894), which carry up to
- * six user attributes (messageType, pkiStatus, transactionID, senderNonce,
- * recipientNonce, failInfo) alongside the auto-defaults. */
+/* Historical bound on the number of signed attributes in a SignedData
+ * SignerInfo. The encoder no longer uses this to size a fixed array: the
+ * working attribute array is now allocated at encode time, sized to the actual
+ * attribute count (user-supplied attributes plus up to three CMS auto-defaults:
+ * contentType, messageDigest, signingTime). The macro is retained for source
+ * compatibility with builds that define it; it does not cap the attribute
+ * count and imposes no per-structure footprint. */
 #ifndef MAX_SIGNED_ATTRIBS_SZ
-    #define MAX_SIGNED_ATTRIBS_SZ 12
+    #define MAX_SIGNED_ATTRIBS_SZ 7
 #endif
 
 #ifndef MAX_AUTH_ATTRIBS_SZ

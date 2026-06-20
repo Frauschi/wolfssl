@@ -6,15 +6,18 @@
   `wc_PKCS7_EncodeCertsOnlySignedData()` to emit a degenerate, certs-only
   CMS/PKCS#7 SignedData (no signer, no signed attributes, no eContent) around
   the certificate(s) loaded into the PKCS7 structure; useful for EST `/cacerts`
-  and SCEP GetCACert responses. Raised the default `MAX_SIGNED_ATTRIBS_SZ` from
-  7 to 12 (still overridable with `-DMAX_SIGNED_ATTRIBS_SZ=`) and fixed the
-  backing `ESD.signedAttribs` array to track the macro, allowing profiles such
-  as SCEP CertRep (RFC 8894) to carry their full set of signed attributes.
-  Documented the stable shape of `PKCS7DecodedAttrib.value` (the contents of
-  the `SET OF AttributeValue`, with the outer SET tag stripped) and added
-  `wc_PKCS7_GetSignedAttribValue()` to fetch the first AttributeValue TLV by OID
-  without copying. The decoded-attribute value shape is documentation of
-  existing behavior and does not change it.
+  and SCEP GetCACert responses. The SignedData signer-attribute working array
+  is now allocated at encode time, sized to the actual attribute count, instead
+  of a fixed array bounded by `MAX_SIGNED_ATTRIBS_SZ`; this removes the prior
+  cap (so profiles such as SCEP CertRep (RFC 8894) can carry their full set of
+  signed attributes) and adds no fixed per-structure footprint.
+  `MAX_SIGNED_ATTRIBS_SZ` is retained for source compatibility but no longer
+  bounds the attribute count. Documented the stable shape of
+  `PKCS7DecodedAttrib.value` (the contents of the `SET OF AttributeValue`, with
+  the outer SET tag stripped) and added `wc_PKCS7_GetSignedAttribValue()` to
+  fetch the first AttributeValue TLV by OID without copying. The
+  decoded-attribute value shape is documentation of existing behavior and does
+  not change it.
 
 * **Behavioral change (RSA-PSS trailerField enforcement)**: `DecodeRsaPssParams`
   (and its public wrapper `wc_DecodeRsaPssParams`) now enforces RFC 8017 A.2.3,
