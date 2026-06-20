@@ -6744,6 +6744,15 @@ static int CheckPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 helloSz,
 #endif
 
     if (!*usingPSK) {
+        /* No suitable PSK was negotiated. When the server has a PSK configured
+         * and requires one (failNoPSK), fail with a dedicated error instead of
+         * falling back to a certificate handshake. This must run before the
+         * no-certificate BAD_BINDER check below so a PSK-only server (no cert)
+         * still reports PSK_MISSING_ERROR. */
+        if (ssl->options.havePSK && ssl->options.failNoPSK) {
+            WOLFSSL_ERROR_VERBOSE(PSK_MISSING_ERROR);
+            return PSK_MISSING_ERROR;
+        }
     #ifndef NO_CERTS
         if (ssl->buffers.certificate == NULL
         #ifdef WOLFSSL_CERT_SETUP_CB
@@ -6927,11 +6936,6 @@ static int CheckPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 helloSz,
         }
     }
     else {
-        if (ssl->options.havePSK && ssl->options.failNoPSK) {
-            WOLFSSL_ERROR_VERBOSE(PSK_MISSING_ERROR);
-            return PSK_MISSING_ERROR;
-        }
-
 #ifdef WOLFSSL_CERT_WITH_EXTERN_PSK
         /* If no PSK is found, we remove the extension to make sure it
          * is not sent back to the client */
