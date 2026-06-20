@@ -1535,6 +1535,56 @@ int wc_PKCS7_GetAttributeValue(wc_PKCS7* pkcs7, const byte* oid, word32 oidSz,
 }
 
 
+/* Locate a decoded signed attribute by OID and return, without copying, a
+ * pointer to its first AttributeValue encoded as a full TLV (tag + length +
+ * content). This is a convenience layer over the documented
+ * PKCS7DecodedAttrib.value shape (which is the SET OF AttributeValue contents).
+ *
+ * pkcs7  - pointer to PKCS7 structure that has decoded a SignedData
+ * oid    - OID of the attribute to look for (sum form not used; raw OID bytes)
+ * oidSz  - size of oid, octets
+ * out    - [OUT] set to point at the first AttributeValue TLV (not copied)
+ * outSz  - [OUT] set to the length of that TLV
+ *
+ * Returns the length of the value (>0) on success, ASN_PARSE_E if the
+ * attribute is absent or malformed, BAD_FUNC_ARG on bad arguments. */
+int wc_PKCS7_GetSignedAttribValue(wc_PKCS7* pkcs7, const byte* oid,
+        word32 oidSz, const byte** out, word32* outSz)
+{
+    PKCS7DecodedAttrib* attrib;
+    word32 idx = 0;
+    int    length = 0;
+
+    if (pkcs7 == NULL || oid == NULL || out == NULL || outSz == NULL) {
+        return BAD_FUNC_ARG;
+    }
+
+    attrib = findAttrib(pkcs7, oid, oidSz);
+    if (attrib == NULL) {
+        return ASN_PARSE_E;
+    }
+
+    if (attrib->value == NULL || attrib->valueSz < 2) {
+        return ASN_PARSE_E;
+    }
+
+    /* attrib->value holds the SET contents; parse the first AttributeValue
+     * TLV (tag + length + content) and return a pointer spanning it */
+    idx = 1; /* skip the value tag */
+    if (GetLength(attrib->value, &idx, &length, attrib->valueSz) < 0) {
+        return ASN_PARSE_E;
+    }
+
+    if (idx + (word32)length > attrib->valueSz) {
+        return ASN_PARSE_E;
+    }
+
+    *out   = attrib->value;
+    *outSz = idx + (word32)length;
+    return (int)*outSz;
+}
+
+
 /* build PKCS#7 data content type */
 int wc_PKCS7_EncodeData(wc_PKCS7* pkcs7, byte* output, word32 outputSz)
 {
@@ -1618,7 +1668,7 @@ typedef struct ESD {
                         byte digEncAlgoId[MAX_ALGO_SZ];
 #endif
                         byte signedAttribSet[MAX_SET_SZ];
-                            EncodedAttrib signedAttribs[7];
+                            EncodedAttrib signedAttribs[MAX_SIGNED_ATTRIBS_SZ];
                         byte signerDigest[MAX_OCTET_STR_SZ];
     word32 innerOctetsSz, innerContSeqSz, contentInfoSeqSz;
     word32 outerSeqSz, outerContentSz, innerSeqSz, versionSz, digAlgoIdSetSz,
@@ -3054,7 +3104,10 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
 
     byte signingTime[MAX_TIME_STRING_SZ];
 
-    if (pkcs7 == NULL || pkcs7->hashOID == 0 ||
+    /* hashOID is unused on the degenerate (certs-only) path, so only require
+     * it when an actual signer is present */
+    if (pkcs7 == NULL ||
+        (pkcs7->hashOID == 0 && pkcs7->sidType != DEGENERATE_SID) ||
         outputSz == NULL) {
         WOLFSSL_MSG("PKCS7 struct / outputSz null, or hashOID is 0");
         return BAD_FUNC_ARG;
@@ -3900,6 +3953,84 @@ int wc_PKCS7_EncodeSignedData(wc_PKCS7* pkcs7, byte* output, word32 outputSz)
         ret = PKCS7_EncodeSigned(pkcs7, NULL, 0, output, &outputSz,
             NULL, NULL);
     }
+    return ret;
+}
+
+
+/* Encode a certs-only (degenerate) CMS/PKCS#7 SignedData around the
+ * certificate(s) already loaded into the PKCS7 structure via
+ * wc_PKCS7_InitWithCert() and/or wc_PKCS7_AddCertificate().
+ *
+ * The produced structure has no signer, no signed attributes and no eContent.
+ * It is the form used by, for example, EST /cacerts and SCEP GetCACert
+ * responses, and round-trips through wc_PKCS7_VerifySignedData() (which
+ * repopulates pkcs7->cert[]/certSz[]).
+ *
+ * Resulting structure:
+ *   ContentInfo SEQUENCE {
+ *     contentType  OID signedData
+ *     content [0] EXPLICIT SignedData SEQUENCE {
+ *       version            INTEGER 1
+ *       digestAlgorithms   SET {}                -- empty
+ *       encapContentInfo   SEQUENCE { eContentType OID id-data } -- no eContent
+ *       certificates  [0] IMPLICIT <concatenated cert DERs>
+ *       signerInfos        SET {}                -- empty
+ *     }
+ *   }
+ *
+ * Certificates are emitted in the order maintained in pkcs7->certList. Note
+ * that wc_PKCS7_AddCertificate() prepends, so the resulting order is the
+ * reverse of the wc_PKCS7_AddCertificate() call order (the certificates field
+ * is a SET OF and therefore unordered, so this does not affect verification).
+ *
+ * pkcs7    - pointer to initialized PKCS7 structure with at least one
+ *            certificate loaded
+ * output   - output buffer for the encoded structure. If NULL (or outputSz is
+ *            0) the required length is returned without writing.
+ * outputSz - size of output buffer, octets
+ *
+ * Returns number of bytes written (or required size in the probe case) on
+ * success, negative on error. */
+int wc_PKCS7_EncodeCertsOnlySignedData(wc_PKCS7* pkcs7, byte* output,
+                                       word32 outputSz)
+{
+    int    ret;
+    int    savedSidType;
+    word16 savedDetached;
+    int    savedContentOID;
+    byte*  savedContent;
+    word32 savedContentSz;
+
+    if (pkcs7 == NULL || pkcs7->certList == NULL) {
+        WOLFSSL_MSG("PKCS7 struct null, or no certificates have been added");
+        return BAD_FUNC_ARG;
+    }
+
+    /* save fields we override so the call is non-destructive to caller state */
+    savedSidType    = pkcs7->sidType;
+    savedDetached   = pkcs7->detached;
+    savedContentOID = pkcs7->contentOID;
+    savedContent    = pkcs7->content;
+    savedContentSz  = pkcs7->contentSz;
+
+    /* force the degenerate, no-content shape */
+    pkcs7->sidType  = DEGENERATE_SID;
+    pkcs7->detached = 1;            /* suppress the [0] eContent */
+    if (pkcs7->contentOID == 0) {
+        pkcs7->contentOID = DATA;   /* eContentType = id-data */
+    }
+    pkcs7->content   = NULL;
+    pkcs7->contentSz = 0;
+
+    ret = wc_PKCS7_EncodeSignedData(pkcs7, output, outputSz);
+
+    /* restore caller state */
+    pkcs7->sidType    = savedSidType;
+    pkcs7->detached   = savedDetached;
+    pkcs7->contentOID = savedContentOID;
+    pkcs7->content    = savedContent;
+    pkcs7->contentSz  = savedContentSz;
+
     return ret;
 }
 

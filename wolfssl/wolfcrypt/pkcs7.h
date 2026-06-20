@@ -63,8 +63,15 @@
     #define MAX_ORI_VALUE_SZ 512
 #endif
 
+/* Max number of signed attributes that can be encoded in a SignedData
+ * SignerInfo. This counts user-supplied attributes plus up to three CMS
+ * auto-default attributes (contentType, messageDigest, signingTime).
+ * Override at build time with -DMAX_SIGNED_ATTRIBS_SZ=. Default raised to 12
+ * to accommodate profiles such as SCEP CertRep (RFC 8894), which carry up to
+ * six user attributes (messageType, pkiStatus, transactionID, senderNonce,
+ * recipientNonce, failInfo) alongside the auto-defaults. */
 #ifndef MAX_SIGNED_ATTRIBS_SZ
-    #define MAX_SIGNED_ATTRIBS_SZ 7
+    #define MAX_SIGNED_ATTRIBS_SZ 12
 #endif
 
 #ifndef MAX_AUTH_ATTRIBS_SZ
@@ -175,6 +182,22 @@ typedef struct PKCS7Attrib {
 } PKCS7Attrib;
 
 
+/* A single decoded signed/unsigned attribute, as produced when verifying a
+ * SignedData. The value/valueSz fields follow a stable, guaranteed shape:
+ *
+ *   oid/oidSz   : the attribute OID, encoded as <tag><len><content> (i.e. the
+ *                 full OBJECT IDENTIFIER TLV).
+ *   value/valueSz: the *contents of the SET OF AttributeValue*, i.e. the bytes
+ *                 inside the attribute's SET, with the outer SET (tag 0x31) and
+ *                 its length removed. A CMS attribute is SET OF AttributeValue
+ *                 and may legitimately carry more than one value, so this is
+ *                 the concatenation of all AttributeValue TLVs. For the common
+ *                 single-valued case it is exactly one AttributeValue encoded
+ *                 as <tag><len><content> (for example 0x13 PrintableString or
+ *                 0x04 OCTET STRING).
+ *
+ * To fetch the first AttributeValue (tag+len+content) by OID without copying,
+ * use wc_PKCS7_GetSignedAttribValue(). */
 typedef struct PKCS7DecodedAttrib {
     struct PKCS7DecodedAttrib* next;
     byte* oid;
@@ -410,6 +433,8 @@ WOLFSSL_API void wc_PKCS7_Free(wc_PKCS7* pkcs7);
 
 WOLFSSL_API int wc_PKCS7_GetAttributeValue(wc_PKCS7* pkcs7, const byte* oid,
         word32 oidSz, byte* out, word32* outSz);
+WOLFSSL_API int wc_PKCS7_GetSignedAttribValue(wc_PKCS7* pkcs7, const byte* oid,
+        word32 oidSz, const byte** out, word32* outSz);
 
 WOLFSSL_API int wc_PKCS7_SetSignerIdentifierType(wc_PKCS7* pkcs7, int type);
 WOLFSSL_API int wc_PKCS7_SetContentType(wc_PKCS7* pkcs7, byte* contentType,
@@ -429,6 +454,8 @@ WOLFSSL_API int  wc_PKCS7_SetDetached(wc_PKCS7* pkcs7, word16 flag);
 WOLFSSL_API int  wc_PKCS7_NoDefaultSignedAttribs(wc_PKCS7* pkcs7);
 WOLFSSL_API int  wc_PKCS7_SetDefaultSignedAttribs(wc_PKCS7* pkcs7, word16 flag);
 WOLFSSL_API int  wc_PKCS7_EncodeSignedData(wc_PKCS7* pkcs7,
+                                          byte* output, word32 outputSz);
+WOLFSSL_API int  wc_PKCS7_EncodeCertsOnlySignedData(wc_PKCS7* pkcs7,
                                           byte* output, word32 outputSz);
 WOLFSSL_API int  wc_PKCS7_EncodeSignedData_ex(wc_PKCS7* pkcs7, const byte* hashBuf,
                                           word32 hashSz, byte* outputHead,
