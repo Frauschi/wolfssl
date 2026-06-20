@@ -3191,6 +3191,7 @@ enum { /* ssl Constants */
     WOLFSSL_VERIFY_CLIENT_ONCE          = 1 << 2,
     WOLFSSL_VERIFY_POST_HANDSHAKE       = 1 << 3,
     WOLFSSL_VERIFY_FAIL_EXCEPT_PSK      = 1 << 4,
+    WOLFSSL_VERIFY_FAIL_IF_NO_PSK       = 1 << 5,
     WOLFSSL_VERIFY_DEFAULT              = 1 << 9,
 
     WOLFSSL_SESS_CACHE_OFF                = 0x0000,
