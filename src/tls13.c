@@ -5308,6 +5308,17 @@ static int EchCheckAcceptance(WOLFSSL* ssl, byte* label, word16 labelSz,
 }
 #endif /* HAVE_ECH */
 
+/* Returns 1 when a mandatory external PSK is configured
+ * (WOLFSSL_VERIFY_FAIL_IF_NO_PSK with a PSK callback registered) but the
+ * handshake negotiated no PSK at all. In that case the caller must abort with
+ * PSK_MISSING_ERROR rather than fall back to a certificate handshake.
+ * Note: havePSK is only set by registering an external-PSK callback, so a
+ * peer relying solely on session-ticket resumption is unaffected. */
+static WC_INLINE int MandatoryPskMissing(const WOLFSSL* ssl)
+{
+    return ssl->options.havePSK && ssl->options.failNoPSK;
+}
+
 /* handle processing of TLS 1.3 server_hello (2) and hello_retry_request (6) */
 /* Handle the ServerHello message from the server.
  * Only a client will receive this message.
@@ -5909,8 +5920,8 @@ int DoTls13ServerHello(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
         while (psk != NULL && !psk->chosen)
             psk = psk->next;
         if (psk == NULL) {
-            if (ssl->options.havePSK && ssl->options.failNoPSK) {
-                WOLFSSL_MSG("No PSK key found");
+            if (MandatoryPskMissing(ssl)) {
+                WOLFSSL_MSG("Server did not negotiate a mandatory PSK");
                 WOLFSSL_ERROR_VERBOSE(PSK_MISSING_ERROR);
                 return PSK_MISSING_ERROR;
             }
@@ -6678,7 +6689,9 @@ static int CheckPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 helloSz,
         if (usingPSK)
             *usingPSK = 0;
 
-        if (ssl->options.havePSK && ssl->options.failNoPSK) {
+        /* No PSK extension at all: if a mandatory external PSK is configured,
+         * refuse the connection rather than continue without one. */
+        if (MandatoryPskMissing(ssl)) {
             WOLFSSL_ERROR_VERBOSE(PSK_MISSING_ERROR);
             return PSK_MISSING_ERROR;
         }
@@ -6744,12 +6757,12 @@ static int CheckPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 helloSz,
 #endif
 
     if (!*usingPSK) {
-        /* No suitable PSK was negotiated. When the server has a PSK configured
-         * and requires one (failNoPSK), fail with a dedicated error instead of
-         * falling back to a certificate handshake. This must run before the
-         * no-certificate BAD_BINDER check below so a PSK-only server (no cert)
-         * still reports PSK_MISSING_ERROR. */
-        if (ssl->options.havePSK && ssl->options.failNoPSK) {
+        /* No suitable PSK was negotiated. When a mandatory external PSK is
+         * configured, fail with a dedicated error instead of falling back to a
+         * certificate handshake. This must run before the no-certificate
+         * BAD_BINDER check below so a PSK-only server (no cert) still reports
+         * PSK_MISSING_ERROR. */
+        if (MandatoryPskMissing(ssl)) {
             WOLFSSL_ERROR_VERBOSE(PSK_MISSING_ERROR);
             return PSK_MISSING_ERROR;
         }
@@ -11879,7 +11892,8 @@ int DoTls13Finished(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
     }
 #endif
 
-#if !defined(NO_PSK) && defined(WOLFSSL_CERT_WITH_EXTERN_PSK)
+#if !defined(NO_CERTS) && !defined(NO_PSK) && \
+    defined(WOLFSSL_CERT_WITH_EXTERN_PSK)
     /* Verify the server sent a certificate if requested */
     if (ssl->options.side == WOLFSSL_CLIENT_END && ssl->options.pskNegotiated &&
             ssl->options.failNoCert) {

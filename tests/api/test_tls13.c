@@ -1135,6 +1135,10 @@ int test_tls13_cert_with_extern_psk_rejects_resumption(void)
 
     wolfSSL_set_verify(ssl_c, WOLFSSL_VERIFY_NONE, NULL);
     wolfSSL_set_verify(ssl_s, WOLFSSL_VERIFY_NONE, NULL);
+    /* Load on ssl_s, not ctx_s: ssl_s already exists (test_memio_setup created
+     * it) and shares the CTX key buffers. Reloading on ctx_s would free those
+     * buffers, leaving ssl_s with a dangling key that crashes when the server
+     * decodes it for CertificateVerify. */
 #if defined(HAVE_ECC)
     ExpectTrue(wolfSSL_use_certificate_file(ssl_s, eccCertFile,
         CERT_FILETYPE) == WOLFSSL_SUCCESS);
@@ -1328,6 +1332,10 @@ int test_tls13_cert_with_extern_psk_sh_missing_key_share(void)
 
     wolfSSL_set_verify(ssl_c, WOLFSSL_VERIFY_NONE, NULL);
     wolfSSL_set_verify(ssl_s, WOLFSSL_VERIFY_NONE, NULL);
+    /* Load on ssl_s, not ctx_s: ssl_s already exists (test_memio_setup created
+     * it) and shares the CTX key buffers. Reloading on ctx_s would free those
+     * buffers, leaving ssl_s with a dangling key that crashes when the server
+     * decodes it for CertificateVerify. */
 #if defined(HAVE_ECC)
     ExpectTrue(wolfSSL_use_certificate_file(ssl_s, eccCertFile,
         CERT_FILETYPE) == WOLFSSL_SUCCESS);
@@ -1423,6 +1431,10 @@ int test_tls13_cert_with_extern_psk_sh_confirms_resumption(void)
 
     wolfSSL_set_verify(ssl_c, WOLFSSL_VERIFY_NONE, NULL);
     wolfSSL_set_verify(ssl_s, WOLFSSL_VERIFY_NONE, NULL);
+    /* Load on ssl_s, not ctx_s: ssl_s already exists (test_memio_setup created
+     * it) and shares the CTX key buffers. Reloading on ctx_s would free those
+     * buffers, leaving ssl_s with a dangling key that crashes when the server
+     * decodes it for CertificateVerify. */
 #if defined(HAVE_ECC)
     ExpectTrue(wolfSSL_use_certificate_file(ssl_s, eccCertFile,
         CERT_FILETYPE) == WOLFSSL_SUCCESS);

@@ -2908,14 +2908,16 @@ int wolfSSL_GetSessionAtIndex(int index, WOLFSSL_SESSION* session);
     SSL_VERIFY_FAIL_IF_NO_PEER_CERT except in the case of a PSK connection.
     If a PSK connection is being made then the connection will go through
     without a peer cert. WOLFSSL_VERIFY_FAIL_IF_NO_PSK Client and server mode:
-    require that a Pre-Shared Key be negotiated when the endpoint has one
-    configured; the handshake fails with PSK_MISSING_ERROR otherwise. This is
-    intended for external PSKs (not session-ticket resumption) so that the PSK
-    acts as an additional security factor. To preserve forward secrecy a
-    mandatory external PSK must also use an (EC)DHE key exchange; a pure psk_ke
-    handshake with an external PSK is rejected with PSK_KEY_ERROR. Session-ticket
-    resumption is exempt from this (EC)DHE requirement and may complete without
-    it.
+    require that an external Pre-Shared Key be negotiated. This option keys off
+    the external-PSK callback: it has no effect unless a PSK callback is
+    registered, and a peer relying solely on session-ticket resumption is
+    unaffected by it. When a PSK callback is configured but the handshake
+    negotiates no PSK, the handshake fails with PSK_MISSING_ERROR instead of
+    falling back to a certificate handshake, so the PSK acts as an additional
+    security factor. To preserve forward secrecy a mandatory external PSK must
+    also use an (EC)DHE key exchange; a pure psk_ke handshake with an external
+    PSK is rejected with PSK_KEY_ERROR. Session-ticket resumption is exempt from
+    this (EC)DHE requirement and may complete without it.
 
     \return none No return.
 
@@ -2964,14 +2966,16 @@ void wolfSSL_CTX_set_verify(WOLFSSL_CTX* ctx, int mode,
     SSL_VERIFY_FAIL_IF_NO_PEER_CERT except in the case of a PSK connection.
     If a PSK connection is being made then the connection will go through
     without a peer cert. WOLFSSL_VERIFY_FAIL_IF_NO_PSK Client and server mode:
-    require that a Pre-Shared Key be negotiated when the endpoint has one
-    configured; the handshake fails with PSK_MISSING_ERROR otherwise. This is
-    intended for external PSKs (not session-ticket resumption) so that the PSK
-    acts as an additional security factor. To preserve forward secrecy a
-    mandatory external PSK must also use an (EC)DHE key exchange; a pure psk_ke
-    handshake with an external PSK is rejected with PSK_KEY_ERROR. Session-ticket
-    resumption is exempt from this (EC)DHE requirement and may complete without
-    it.
+    require that an external Pre-Shared Key be negotiated. This option keys off
+    the external-PSK callback: it has no effect unless a PSK callback is
+    registered, and a peer relying solely on session-ticket resumption is
+    unaffected by it. When a PSK callback is configured but the handshake
+    negotiates no PSK, the handshake fails with PSK_MISSING_ERROR instead of
+    falling back to a certificate handshake, so the PSK acts as an additional
+    security factor. To preserve forward secrecy a mandatory external PSK must
+    also use an (EC)DHE key exchange; a pure psk_ke handshake with an external
+    PSK is rejected with PSK_KEY_ERROR. Session-ticket resumption is exempt from
+    this (EC)DHE requirement and may complete without it.
 
     \return none No return.
 
