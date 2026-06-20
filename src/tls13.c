@@ -4386,9 +4386,11 @@ static int SetupPskKey(WOLFSSL* ssl, PreSharedKey* psk, int clientHello)
                 return PSK_KEY_ERROR;
             }
         }
-        else if (ssl->options.onlyPskDheKe || ssl->options.failNoPSK) {
-            /* A mandatory PSK (failNoPSK) must be combined with (EC)DHE for
-             * forward secrecy, so reject a pure psk_ke negotiation here too. */
+        else if (ssl->options.onlyPskDheKe ||
+                 (ssl->options.failNoPSK && !psk->resumption)) {
+            /* A mandatory external PSK (failNoPSK) must be combined with
+             * (EC)DHE for forward secrecy, so reject a pure psk_ke
+             * negotiation. Session-ticket resumption is exempt. */
             WOLFSSL_ERROR_VERBOSE(PSK_KEY_ERROR);
             return PSK_KEY_ERROR;
         }
@@ -6903,9 +6905,11 @@ static int CheckPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 helloSz,
                 ssl->namedGroup = ssl->session->namedGroup;
             *usingPSK = 2; /* generate new ephemeral key */
         }
-        else if (ssl->options.onlyPskDheKe || ssl->options.failNoPSK) {
-            /* A mandatory PSK (failNoPSK) must be combined with (EC)DHE for
-             * forward secrecy, so reject a pure psk_ke negotiation here too. */
+        else if (ssl->options.onlyPskDheKe ||
+                 (ssl->options.failNoPSK && !ssl->options.resuming)) {
+            /* A mandatory external PSK (failNoPSK) must be combined with
+             * (EC)DHE for forward secrecy, so reject a pure psk_ke
+             * negotiation. Session-ticket resumption is exempt. */
             return PSK_KEY_ERROR;
         }
         else

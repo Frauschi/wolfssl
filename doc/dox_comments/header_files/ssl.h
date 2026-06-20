@@ -2911,9 +2911,11 @@ int wolfSSL_GetSessionAtIndex(int index, WOLFSSL_SESSION* session);
     require that a Pre-Shared Key be negotiated when the endpoint has one
     configured; the handshake fails with PSK_MISSING_ERROR otherwise. This is
     intended for external PSKs (not session-ticket resumption) so that the PSK
-    acts as an additional security factor. To preserve forward secrecy the
-    negotiated PSK must also use an (EC)DHE key exchange; a pure psk_ke
-    handshake is rejected with PSK_KEY_ERROR.
+    acts as an additional security factor. To preserve forward secrecy a
+    mandatory external PSK must also use an (EC)DHE key exchange; a pure psk_ke
+    handshake with an external PSK is rejected with PSK_KEY_ERROR. Session-ticket
+    resumption is exempt from this (EC)DHE requirement and may complete without
+    it.
 
     \return none No return.
 
@@ -2965,9 +2967,11 @@ void wolfSSL_CTX_set_verify(WOLFSSL_CTX* ctx, int mode,
     require that a Pre-Shared Key be negotiated when the endpoint has one
     configured; the handshake fails with PSK_MISSING_ERROR otherwise. This is
     intended for external PSKs (not session-ticket resumption) so that the PSK
-    acts as an additional security factor. To preserve forward secrecy the
-    negotiated PSK must also use an (EC)DHE key exchange; a pure psk_ke
-    handshake is rejected with PSK_KEY_ERROR.
+    acts as an additional security factor. To preserve forward secrecy a
+    mandatory external PSK must also use an (EC)DHE key exchange; a pure psk_ke
+    handshake with an external PSK is rejected with PSK_KEY_ERROR. Session-ticket
+    resumption is exempt from this (EC)DHE requirement and may complete without
+    it.
 
     \return none No return.
 
