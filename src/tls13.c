@@ -4386,7 +4386,9 @@ static int SetupPskKey(WOLFSSL* ssl, PreSharedKey* psk, int clientHello)
                 return PSK_KEY_ERROR;
             }
         }
-        else if (ssl->options.onlyPskDheKe) {
+        else if (ssl->options.onlyPskDheKe || ssl->options.failNoPSK) {
+            /* A mandatory PSK (failNoPSK) must be combined with (EC)DHE for
+             * forward secrecy, so reject a pure psk_ke negotiation here too. */
             WOLFSSL_ERROR_VERBOSE(PSK_KEY_ERROR);
             return PSK_KEY_ERROR;
         }
@@ -5905,7 +5907,7 @@ int DoTls13ServerHello(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
         while (psk != NULL && !psk->chosen)
             psk = psk->next;
         if (psk == NULL) {
-            if (ssl->options.failNoPSK) {
+            if (ssl->options.havePSK && ssl->options.failNoPSK) {
                 WOLFSSL_MSG("No PSK key found");
                 WOLFSSL_ERROR_VERBOSE(PSK_MISSING_ERROR);
                 return PSK_MISSING_ERROR;
@@ -6901,7 +6903,9 @@ static int CheckPreSharedKeys(WOLFSSL* ssl, const byte* input, word32 helloSz,
                 ssl->namedGroup = ssl->session->namedGroup;
             *usingPSK = 2; /* generate new ephemeral key */
         }
-        else if (ssl->options.onlyPskDheKe) {
+        else if (ssl->options.onlyPskDheKe || ssl->options.failNoPSK) {
+            /* A mandatory PSK (failNoPSK) must be combined with (EC)DHE for
+             * forward secrecy, so reject a pure psk_ke negotiation here too. */
             return PSK_KEY_ERROR;
         }
         else

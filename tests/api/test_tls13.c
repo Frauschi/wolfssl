@@ -1675,6 +1675,165 @@ int test_tls13_fail_if_no_psk_rejects_no_psk(void)
     return EXPECT_RESULT();
 }
 
+int test_tls13_fail_if_no_psk_client_no_psk_configured(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_TLS13) && !defined(NO_PSK) && \
+    defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && \
+    defined(HAVE_SUPPORTED_CURVES) && \
+    !defined(NO_WOLFSSL_CLIENT) && !defined(NO_WOLFSSL_SERVER) && \
+    !defined(NO_CERTS) && !defined(NO_FILESYSTEM) && \
+    (defined(HAVE_ECC) || !defined(NO_RSA))
+    WOLFSSL_CTX *ctx_c = NULL;
+    WOLFSSL_CTX *ctx_s = NULL;
+    WOLFSSL *ssl_c = NULL;
+    WOLFSSL *ssl_s = NULL;
+    struct test_memio_ctx test_ctx;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfTLSv1_3_client_method, wolfTLSv1_3_server_method), 0);
+
+    /* The client requires a PSK but configures none. Because failNoPSK is gated
+     * on havePSK, this must NOT hard-fail: a normal certificate handshake is
+     * expected to succeed instead of raising PSK_MISSING_ERROR. */
+    wolfSSL_set_verify(ssl_c, WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PSK,
+        NULL);
+    wolfSSL_set_verify(ssl_s, WOLFSSL_VERIFY_NONE, NULL);
+#if defined(HAVE_ECC)
+    ExpectTrue(wolfSSL_use_certificate_file(ssl_s, eccCertFile,
+        CERT_FILETYPE) == WOLFSSL_SUCCESS);
+    ExpectTrue(wolfSSL_use_PrivateKey_file(ssl_s, eccKeyFile,
+        CERT_FILETYPE) == WOLFSSL_SUCCESS);
+    ExpectTrue(wolfSSL_CTX_load_verify_locations(ctx_c, caEccCertFile,
+        NULL) == WOLFSSL_SUCCESS);
+#else
+    ExpectTrue(wolfSSL_use_certificate_file(ssl_s, svrCertFile,
+        CERT_FILETYPE) == WOLFSSL_SUCCESS);
+    ExpectTrue(wolfSSL_use_PrivateKey_file(ssl_s, svrKeyFile,
+        CERT_FILETYPE) == WOLFSSL_SUCCESS);
+    ExpectTrue(wolfSSL_CTX_load_verify_locations(ctx_c, caCertFile,
+        NULL) == WOLFSSL_SUCCESS);
+#endif
+
+    ExpectIntEQ(ssl_c->options.failNoPSK, 1);
+    ExpectIntEQ(ssl_c->options.havePSK, 0);
+    ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 20, NULL), 0);
+    ExpectIntEQ(ssl_c->options.pskNegotiated, 0);
+
+    wolfSSL_free(ssl_c);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_s);
+#endif
+    return EXPECT_RESULT();
+}
+
+int test_tls13_fail_if_no_psk_client_rejects(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_TLS13) && !defined(NO_PSK) && \
+    defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && \
+    defined(HAVE_SUPPORTED_CURVES) && \
+    !defined(NO_WOLFSSL_CLIENT) && !defined(NO_WOLFSSL_SERVER) && \
+    !defined(NO_CERTS) && !defined(NO_FILESYSTEM) && \
+    (defined(HAVE_ECC) || !defined(NO_RSA))
+    WOLFSSL_CTX *ctx_c = NULL;
+    WOLFSSL_CTX *ctx_s = NULL;
+    WOLFSSL *ssl_c = NULL;
+    WOLFSSL *ssl_s = NULL;
+    struct test_memio_ctx test_ctx;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfTLSv1_3_client_method, wolfTLSv1_3_server_method), 0);
+
+    /* The client requires a PSK and has one configured, but the server has no
+     * PSK callback so it never selects one. The client must abort with
+     * PSK_MISSING_ERROR rather than fall back to a cert-only handshake. */
+    wolfSSL_set_verify(ssl_c, WOLFSSL_VERIFY_FAIL_IF_NO_PSK, NULL);
+    wolfSSL_set_verify(ssl_s, WOLFSSL_VERIFY_NONE, NULL);
+#if defined(HAVE_ECC)
+    ExpectTrue(wolfSSL_use_certificate_file(ssl_s, eccCertFile,
+        CERT_FILETYPE) == WOLFSSL_SUCCESS);
+    ExpectTrue(wolfSSL_use_PrivateKey_file(ssl_s, eccKeyFile,
+        CERT_FILETYPE) == WOLFSSL_SUCCESS);
+#else
+    ExpectTrue(wolfSSL_use_certificate_file(ssl_s, svrCertFile,
+        CERT_FILETYPE) == WOLFSSL_SUCCESS);
+    ExpectTrue(wolfSSL_use_PrivateKey_file(ssl_s, svrKeyFile,
+        CERT_FILETYPE) == WOLFSSL_SUCCESS);
+#endif
+    /* Only the client installs a PSK callback. */
+    wolfSSL_set_psk_client_callback(ssl_c, test_tls13_fnp_client_cb);
+
+    ExpectIntNE(test_memio_do_handshake(ssl_c, ssl_s, 20, NULL), 0);
+    ExpectIntEQ(wolfSSL_get_error(ssl_c, WC_NO_ERR_TRACE(WOLFSSL_FATAL_ERROR)),
+        WC_NO_ERR_TRACE(PSK_MISSING_ERROR));
+
+    wolfSSL_free(ssl_c);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_s);
+#endif
+    return EXPECT_RESULT();
+}
+
+int test_tls13_fail_if_no_psk_requires_dhe(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_TLS13) && !defined(NO_PSK) && \
+    defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && \
+    defined(HAVE_SUPPORTED_CURVES) && \
+    !defined(NO_WOLFSSL_CLIENT) && !defined(NO_WOLFSSL_SERVER)
+    WOLFSSL_CTX *ctx_c = NULL;
+    WOLFSSL_CTX *ctx_s = NULL;
+    WOLFSSL *ssl_c = NULL;
+    WOLFSSL *ssl_s = NULL;
+    struct test_memio_ctx test_ctx;
+
+    /* Baseline: a pure psk_ke handshake (no DHE) succeeds when the PSK is
+     * optional, confirming the setup itself is valid. */
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfTLSv1_3_client_method, wolfTLSv1_3_server_method), 0);
+    wolfSSL_set_verify(ssl_c, WOLFSSL_VERIFY_NONE, NULL);
+    wolfSSL_set_verify(ssl_s, WOLFSSL_VERIFY_NONE, NULL);
+    wolfSSL_set_psk_client_callback(ssl_c, test_tls13_fnp_client_cb);
+    wolfSSL_set_psk_server_callback(ssl_s, test_tls13_fnp_server_cb);
+    ExpectIntEQ(wolfSSL_no_dhe_psk(ssl_c), 0);
+    ExpectIntEQ(wolfSSL_no_dhe_psk(ssl_s), 0);
+    ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 20, NULL), 0);
+    ExpectIntEQ(ssl_s->options.pskNegotiated, 1);
+    wolfSSL_free(ssl_c);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_s);
+    ssl_c = NULL; ssl_s = NULL; ctx_c = NULL; ctx_s = NULL;
+
+    /* With failNoPSK on the server, the same pure psk_ke negotiation (no
+     * forward secrecy) must be rejected with PSK_KEY_ERROR. */
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfTLSv1_3_client_method, wolfTLSv1_3_server_method), 0);
+    wolfSSL_set_verify(ssl_c, WOLFSSL_VERIFY_NONE, NULL);
+    wolfSSL_set_verify(ssl_s, WOLFSSL_VERIFY_FAIL_IF_NO_PSK, NULL);
+    wolfSSL_set_psk_client_callback(ssl_c, test_tls13_fnp_client_cb);
+    wolfSSL_set_psk_server_callback(ssl_s, test_tls13_fnp_server_cb);
+    ExpectIntEQ(wolfSSL_no_dhe_psk(ssl_c), 0);
+    ExpectIntEQ(wolfSSL_no_dhe_psk(ssl_s), 0);
+    ExpectIntNE(test_memio_do_handshake(ssl_c, ssl_s, 20, NULL), 0);
+    ExpectIntEQ(wolfSSL_get_error(ssl_s, WC_NO_ERR_TRACE(WOLFSSL_FATAL_ERROR)),
+        WC_NO_ERR_TRACE(PSK_KEY_ERROR));
+
+    wolfSSL_free(ssl_c);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_s);
+#endif
+    return EXPECT_RESULT();
+}
+
 #if defined(WOLFSSL_TLS13) && defined(HAVE_SESSION_TICKET) && \
     !defined(NO_WOLFSSL_SERVER) && defined(HAVE_ECC) && \
     defined(BUILD_TLS_AES_128_GCM_SHA256) && \

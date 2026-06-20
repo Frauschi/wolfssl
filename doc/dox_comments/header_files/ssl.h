@@ -2907,7 +2907,13 @@ int wolfSSL_GetSessionAtIndex(int index, WOLFSSL_SESSION* session);
     side. Server mode: the verification is the same as
     SSL_VERIFY_FAIL_IF_NO_PEER_CERT except in the case of a PSK connection.
     If a PSK connection is being made then the connection will go through
-    without a peer cert.
+    without a peer cert. WOLFSSL_VERIFY_FAIL_IF_NO_PSK Client and server mode:
+    require that a Pre-Shared Key be negotiated when the endpoint has one
+    configured; the handshake fails with PSK_MISSING_ERROR otherwise. This is
+    intended for external PSKs (not session-ticket resumption) so that the PSK
+    acts as an additional security factor. To preserve forward secrecy the
+    negotiated PSK must also use an (EC)DHE key exchange; a pure psk_ke
+    handshake is rejected with PSK_KEY_ERROR.
 
     \return none No return.
 
@@ -2955,7 +2961,13 @@ void wolfSSL_CTX_set_verify(WOLFSSL_CTX* ctx, int mode,
     side. Server mode: the verification is the same as
     SSL_VERIFY_FAIL_IF_NO_PEER_CERT except in the case of a PSK connection.
     If a PSK connection is being made then the connection will go through
-    without a peer cert.
+    without a peer cert. WOLFSSL_VERIFY_FAIL_IF_NO_PSK Client and server mode:
+    require that a Pre-Shared Key be negotiated when the endpoint has one
+    configured; the handshake fails with PSK_MISSING_ERROR otherwise. This is
+    intended for external PSKs (not session-ticket resumption) so that the PSK
+    acts as an additional security factor. To preserve forward secrecy the
+    negotiated PSK must also use an (EC)DHE key exchange; a pure psk_ke
+    handshake is rejected with PSK_KEY_ERROR.
 
     \return none No return.
 
