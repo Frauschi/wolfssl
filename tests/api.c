@@ -28250,7 +28250,6 @@ static int error_test(void)
 #endif
         { -9, WC_SPAN1_FIRST_E + 1 },
         { -300, -300 },
-        /* -335 is PSK_MISSING_ERROR (has a reason string); -336 is unused. */
         { -336, -336 },
         { -346, -349 },
         { -356, -356 },
