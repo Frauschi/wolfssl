@@ -30400,7 +30400,7 @@ static int test_prioritize_psk(void)
 
 #if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
     !defined(NO_PSK) && !defined(WOLFSSL_PSK_ONE_ID) && \
-    defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && \
+    defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES_BUILD) && \
     defined(HAVE_AESGCM) && !defined(NO_SHA256) && defined(WOLFSSL_AES_128)
 /* Shared external PSK (EPSK) and ImportedIdentity inputs used by both the
  * client and server importer callbacks (RFC 9258). */
@@ -30412,6 +30412,8 @@ static const unsigned char test_psk_importer_epsk[] = {
 static const char  test_psk_importer_context[] = "RFC 9258 test context";
 /* Toggle whether the EPSK carries an optional context. */
 static int test_psk_importer_use_context = 0;
+/* When set, the server returns a different EPSK so the binder must not match. */
+static int test_psk_importer_server_wrong_key = 0;
 
 static int test_psk_importer_client_cb(WOLFSSL* ssl, char* id, word32 idMax,
         unsigned char* ctx, word32* ctxSz, unsigned char* key, word32* keySz)
@@ -30467,6 +30469,10 @@ static int test_psk_importer_server_cb(WOLFSSL* ssl, const char* id,
     if ((word32)sizeof(test_psk_importer_epsk) > *keySz)
         return -1;
     XMEMCPY(key, test_psk_importer_epsk, sizeof(test_psk_importer_epsk));
+    if (test_psk_importer_server_wrong_key) {
+        /* Flip a byte so the derived PSK (and thus the binder) differs. */
+        key[0] ^= 0xFF;
+    }
     *keySz = (word32)sizeof(test_psk_importer_epsk);
 
     return 0;
@@ -30475,7 +30481,7 @@ static int test_psk_importer_server_cb(WOLFSSL* ssl, const char* id,
 /* Run a single TLS 1.3 handshake that authenticates with an imported external
  * PSK (RFC 9258), restricted to the given cipher suite. */
 static int test_tls13_external_psk_importer_one(const char* cipher,
-        int expectedSuite, int useContext, int preExtracted)
+        int expectedSuite, int useContext, int preExtracted, int expectFail)
 {
     EXPECT_DECLS;
     WOLFSSL_CTX *ctx_c = NULL, *ctx_s = NULL;
@@ -30508,10 +30514,15 @@ static int test_tls13_external_psk_importer_one(const char* cipher,
     ExpectIntEQ(wolfSSL_set_cipher_list(ssl_c, cipher), WOLFSSL_SUCCESS);
     ExpectIntEQ(wolfSSL_set_cipher_list(ssl_s, cipher), WOLFSSL_SUCCESS);
 
-    ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
-
-    ExpectIntEQ(wolfSSL_get_current_cipher_suite(ssl_c), expectedSuite);
-    ExpectIntEQ(wolfSSL_get_current_cipher_suite(ssl_s), expectedSuite);
+    if (expectFail) {
+        /* A mismatched imported PSK must abort the handshake. */
+        ExpectIntNE(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
+    }
+    else {
+        ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
+        ExpectIntEQ(wolfSSL_get_current_cipher_suite(ssl_c), expectedSuite);
+        ExpectIntEQ(wolfSSL_get_current_cipher_suite(ssl_s), expectedSuite);
+    }
 
     wolfSSL_free(ssl_c);
     wolfSSL_free(ssl_s);
@@ -30525,24 +30536,104 @@ static int test_tls13_external_psk_importer(void)
 {
     EXPECT_DECLS;
 
+    test_psk_importer_server_wrong_key = 0;
+
     /* HKDF_SHA256 target_kdf, without and with an optional context. */
     ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
-        0x1301, 0, 0), TEST_SUCCESS);
+        0x1301, 0, 0, 0), TEST_SUCCESS);
     ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
-        0x1301, 1, 0), TEST_SUCCESS);
+        0x1301, 1, 0, 0), TEST_SUCCESS);
     /* Pre-extracted EPSK (HKDF-Extract is skipped during import). */
     ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
-        0x1301, 1, 1), TEST_SUCCESS);
+        0x1301, 1, 1, 0), TEST_SUCCESS);
 #if defined(WOLFSSL_SHA384) && defined(WOLFSSL_AES_256)
     /* HKDF_SHA384 target_kdf exercises the L = 48 derived-PSK length. */
     ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES256-GCM-SHA384",
-        0x1302, 1, 0), TEST_SUCCESS);
+        0x1302, 1, 0, 0), TEST_SUCCESS);
 #endif
+
+    /* Negative: server derives a different imported PSK -> binder mismatch
+     * -> handshake must fail. */
+    test_psk_importer_server_wrong_key = 1;
+    ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
+        0x1301, 1, 0, 1), TEST_SUCCESS);
+    test_psk_importer_server_wrong_key = 0;
+
+    return EXPECT_RESULT();
+}
+
+/* Directly exercise ImportedIdentity (de)serialization, including the
+ * malformed inputs a peer could send (RFC 9258, Section 3.1). */
+static int test_tls13_external_psk_importer_parse(void)
+{
+    EXPECT_DECLS;
+    byte   out[128];
+    word16 outLen = (word16)sizeof(out);
+    const char* id = "abc";
+    const char* ctx = "xy";
+    ProtocolVersion pv;
+    byte*  pId = NULL;
+    byte*  pCtx = NULL;
+    word16 pIdLen = 0;
+    word16 pCtxLen = 0;
+    byte   pHkdf = 0;
+    ProtocolVersion pProto;
+
+    pv.major = SSLv3_MAJOR;
+    pv.minor = TLSv1_3_MINOR;
+
+    /* Round-trip a well-formed ImportedIdentity. */
+    ExpectIntEQ(TLSX_PreSharedKey_CreateImportedIdentity((const byte*)id, 3,
+        (const byte*)ctx, 2, sha256_mac, pv, out, &outLen), 0);
+    ExpectIntEQ(TLSX_PreSharedKey_ParseImportedIdentity(out, outLen, &pId,
+        &pIdLen, &pCtx, &pCtxLen, &pHkdf, &pProto), 0);
+    ExpectIntEQ(pIdLen, 3);
+    ExpectNotNull(pId);
+    ExpectIntEQ(XMEMCMP(pId, id, 3), 0);
+    ExpectIntEQ(pCtxLen, 2);
+    ExpectIntEQ(pHkdf, sha256_mac);
+    ExpectIntEQ(pProto.major, pv.major);
+    ExpectIntEQ(pProto.minor, pv.minor);
+
+    /* Malformed: empty external_identity must be rejected (the historical
+     * NULL-deref case). */
+    {
+        byte empty[] = { 0x00, 0x00, 0x00, 0x00, 0x03, 0x04, 0x00, 0x01 };
+        pId = NULL;
+        ExpectIntNE(TLSX_PreSharedKey_ParseImportedIdentity(empty,
+            (word16)sizeof(empty), &pId, &pIdLen, &pCtx, &pCtxLen, &pHkdf,
+            &pProto), 0);
+    }
+
+    /* Malformed: total length below the minimum header is rejected. */
+    ExpectIntNE(TLSX_PreSharedKey_ParseImportedIdentity(out, 7, &pId, &pIdLen,
+        &pCtx, &pCtxLen, &pHkdf, &pProto), 0);
+
+    /* Malformed: identity length exceeds the buffer is rejected. */
+    {
+        byte ovf[] = { 0xFF, 0xFF, 0x00, 0x00, 0x03, 0x04, 0x00, 0x01 };
+        ExpectIntNE(TLSX_PreSharedKey_ParseImportedIdentity(ovf,
+            (word16)sizeof(ovf), &pId, &pIdLen, &pCtx, &pCtxLen, &pHkdf,
+            &pProto), 0);
+    }
+
+    /* Malformed: unsupported target_kdf is rejected. */
+    {
+        byte badKdf[sizeof(out)];
+        XMEMCPY(badKdf, out, outLen);
+        badKdf[outLen - 1] = 0x09; /* not HKDF_SHA256/HKDF_SHA384 */
+        ExpectIntNE(TLSX_PreSharedKey_ParseImportedIdentity(badKdf, outLen,
+            &pId, &pIdLen, &pCtx, &pCtxLen, &pHkdf, &pProto), 0);
+    }
 
     return EXPECT_RESULT();
 }
 #else
 static int test_tls13_external_psk_importer(void)
+{
+    return TEST_SKIPPED;
+}
+static int test_tls13_external_psk_importer_parse(void)
 {
     return TEST_SKIPPED;
 }
@@ -35680,6 +35771,7 @@ TEST_CASE testCases[] = {
     /* Can't memory test as client/server Asserts in thread. */
     TEST_DECL(test_prioritize_psk),
     TEST_DECL(test_tls13_external_psk_importer),
+    TEST_DECL(test_tls13_external_psk_importer_parse),
 
     /* Can't memory test as client/server hangs. */
     TEST_DECL(test_wc_CryptoCb),

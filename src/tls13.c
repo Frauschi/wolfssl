@@ -1334,6 +1334,8 @@ static int DeriveImportedPreSharedKey(WOLFSSL* ssl, PreSharedKey* psk)
 
     #ifdef WOLFSSL_CHECK_MEM_ZERO
         wc_MemZero_Add("DeriveImportedPreSharedKey hkdfLabel", hkdfLabel, idx);
+        wc_MemZero_Add("DeriveImportedPreSharedKey okm", okm, sizeof(okm));
+        wc_MemZero_Add("DeriveImportedPreSharedKey prk", prk, sizeof(prk));
     #endif
 
         /* okm holds ipskx; prk holds epskx. Both are dedicated buffers so the
@@ -1363,7 +1365,6 @@ static int DeriveImportedPreSharedKey(WOLFSSL* ssl, PreSharedKey* psk)
                 ret = wc_HKDF_Expand_ex(WC_SHA256, prk, WC_SHA256_DIGEST_SIZE,
                         hkdfLabel, idx, okm, outputLen, ssl->heap, ssl->devId);
             }
-            ForceZero(prk, sizeof(prk));
         }
         PRIVATE_KEY_LOCK();
 
@@ -1373,10 +1374,13 @@ static int DeriveImportedPreSharedKey(WOLFSSL* ssl, PreSharedKey* psk)
         }
 
         ForceZero(okm, sizeof(okm));
+        ForceZero(prk, sizeof(prk));
         ForceZero(hkdfLabel, idx);
 
     #ifdef WOLFSSL_CHECK_MEM_ZERO
         wc_MemZero_Check(hkdfLabel, idx);
+        wc_MemZero_Check(prk, sizeof(prk));
+        wc_MemZero_Check(okm, sizeof(okm));
     #endif
     }
 
@@ -6554,39 +6558,49 @@ int FindPskSuite(const WOLFSSL* ssl, PreSharedKey* psk, byte* psk_key,
         ProtocolVersion targetProtocol;
         byte targetKdf = 0;
 
+        XMEMSET(&targetProtocol, 0, sizeof(targetProtocol));
+
         /* Decode the received ImportedIdentity. If this call fails, the
          * received identity may also be not an imported one. */
         if (TLSX_PreSharedKey_ParseImportedIdentity(psk->identity,
                 psk->identityLen, &id, &idSz, &ctx, &ctxSz,
-                &targetKdf, &targetProtocol) == 0) {
+                &targetKdf, &targetProtocol) == 0 &&
+            /* The KDF and protocol bound into the ImportedIdentity must match
+             * the ones being negotiated (RFC 9258, Section 3.1). */
+            SuiteMac(suite) == targetKdf &&
+            targetProtocol.major == ssl->version.major &&
+            targetProtocol.minor == ssl->version.minor) {
+            /* The importer callback expects a NUL-terminated identity. Copy
+             * it out instead of mutating the received message buffer. */
+            char* idStr = (char*)XMALLOC((word32)idSz + 1, ssl->heap,
+                                         DYNAMIC_TYPE_TMP_BUFFER);
+            if (idStr == NULL)
+                return MEMORY_ERROR;
+            XMEMCPY(idStr, id, idSz);
+            idStr[idSz] = '\0';
+            *psk_keySz = MAX_PSK_KEY_LEN;
 
-            /* Check if the targetKdf matches the KDF of the ciphersuite */
-            if (SuiteMac(suite) == targetKdf) {
-                id[idSz] = '\0';
-                *psk_keySz = MAX_PSK_KEY_LEN;
+            /* Look for an external PSK for that identity and context. */
+            ret = ssl->options.server_psk_importer_cb((WOLFSSL*)ssl,
+                (const char*)idStr, ctx, ctxSz, psk_key, psk_keySz);
+            XFREE(idStr, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
 
-                /* Look for an external PSK for that identity and context. */
-                ret = ssl->options.server_psk_importer_cb((WOLFSSL*)ssl,
-                    (const char*)id, ctx, ctxSz, psk_key, psk_keySz);
+            if (ret == 0 && *psk_keySz > 0 && *psk_keySz <= MAX_PSK_KEY_LEN) {
+                /* Not yet set on the server-side */
+                psk->hmac = targetKdf;
 
-                if (ret == 0 && *psk_keySz > 0 &&
-                                                *psk_keySz <= MAX_PSK_KEY_LEN) {
-                    /* Not yet set on the server-side */
-                    psk->hmac = targetKdf;
+                /* Derive the actual imported PSK */
+                ret = DeriveImportedPreSharedKey((WOLFSSL*)ssl, psk);
+                if (ret == 0) {
+                    *found = 1;
 
-                    /* Derive the actual imported PSK */
-                    ret = DeriveImportedPreSharedKey((WOLFSSL*)ssl, psk);
-                    if (ret == 0) {
-                        *found = 1;
+                    cipherSuite0 = suite[0];
+                    cipherSuite = suite[1];
 
-                        cipherSuite0 = suite[0];
-                        cipherSuite = suite[1];
-
-                        /* Set flag in the PSK object to indicate that this
-                         * one is imported. We use that flag to select the
-                         * proper derive method for the binder key. */
-                        psk->imported = 1;
-                    }
+                    /* Set flag in the PSK object to indicate that this
+                     * one is imported. We use that flag to select the
+                     * proper derive method for the binder key. */
+                    psk->imported = 1;
                 }
             }
         }

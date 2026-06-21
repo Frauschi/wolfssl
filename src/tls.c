@@ -12623,7 +12623,6 @@ int TLSX_PreSharedKey_Use(TLSX** extensions, const byte* identity, word16 len,
 #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
 /* Create an ImportedIdentity object based on RFC 9258.
  *
- * ssl      The SSL/TLS object.
  * id       The external identity.
  * id_len   Length of the external identity.
  * ctx      The optional external context.
@@ -12700,6 +12699,20 @@ int TLSX_PreSharedKey_CreateImportedIdentity(const byte* id, word16 id_len,
     return ret;
 }
 
+/* Parse an ImportedIdentity object received on the wire (RFC 9258).
+ *
+ * input    The serialized ImportedIdentity. The returned id/ctx pointers
+ *          alias into this buffer; the caller must not modify it.
+ * length   Length of the serialized ImportedIdentity.
+ * id       On exit, points to the external identity within input.
+ * id_len   On exit, length of the external identity (always non-zero).
+ * ctx      On exit, points to the optional context within input, or NULL.
+ * ctx_len  On exit, length of the optional context (may be zero).
+ * hkdf     On exit, the HMAC algorithm matching target_kdf.
+ * protocol On exit, the parsed target_protocol.
+ *
+ * Returns 0 on success and other values indicate failure.
+ */
 int TLSX_PreSharedKey_ParseImportedIdentity(byte* input, word16 length,
         byte** id, word16* id_len, byte** ctx, word16* ctx_len,
         byte* hkdf, ProtocolVersion* protocol)
@@ -12714,19 +12727,19 @@ int TLSX_PreSharedKey_ParseImportedIdentity(byte* input, word16 length,
     if (input == NULL || length < (4 * OPAQUE16_LEN))
         return BAD_FUNC_ARG;
 
-    /* Get identity len */
+    /* Get identity len. RFC 9258 defines external_identity<1..2^16-1>, so an
+     * empty identity is invalid and must be rejected (a zero-length identity
+     * would otherwise leave *id NULL for callers to dereference). */
     ato16(input + idx, id_len);
     idx += OPAQUE16_LEN;
+    if (*id_len == 0)
+        return BAD_FUNC_ARG;
     if (*id_len > length - idx - (3 * OPAQUE16_LEN))
         return BUFFER_E;
 
     /* Get identity */
-    if (*id_len > 0) {
-        *id = input + idx;
-        idx += *id_len;
-    }
-    else
-        *id = NULL;
+    *id = input + idx;
+    idx += *id_len;
 
     /* Get context len */
     ato16(input + idx, ctx_len);
@@ -16632,7 +16645,12 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
                 int i;
                 word32 identitySz = 0;
                 word32 ctxSz = MAX_PSK_CTX_LEN;
-                ssl->arrays->psk_keySz = MAX_PSK_KEY_LEN;
+                byte* importedIdentity = NULL;
+                /* Track which target KDFs already produced an identity so a
+                 * single KDF is not emitted more than once (RFC 9258 derives
+                 * one IPSK per (protocol, KDF), independent of cipher suite).
+                 * Index 0 = HKDF_SHA256, index 1 = HKDF_SHA384. */
+                byte seenKdf[2];
             #ifndef WOLFSSL_SMALL_STACK
                 byte ctx[MAX_PSK_CTX_LEN];
             #else
@@ -16641,6 +16659,8 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
                 if (ctx == NULL)
                     return MEMORY_ERROR;
             #endif
+                ssl->arrays->psk_keySz = MAX_PSK_KEY_LEN;
+                XMEMSET(seenKdf, 0, sizeof(seenKdf));
 
                 /* Get the external PSK data (identity, optional context and
                  * the actual key) by executing the user callback. */
@@ -16648,30 +16668,26 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
                         ssl->arrays->client_identity, MAX_PSK_ID_LEN, ctx,
                         &ctxSz, ssl->arrays->psk_key, &ssl->arrays->psk_keySz);
                 if (ret != 0) {
-                #ifdef WOLFSSL_SMALL_STACK
-                    XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
-                #endif
-                    return PSK_KEY_ERROR;
+                    ret = PSK_KEY_ERROR;
+                    goto importer_cleanup;
                 }
 
                 identitySz = XSTRLEN(ssl->arrays->client_identity);
                 if (identitySz > MAX_PSK_ID_LEN ||
                     ctxSz > MAX_PSK_CTX_LEN ||
                     ssl->arrays->psk_keySz > MAX_PSK_KEY_LEN) {
-                #ifdef WOLFSSL_SMALL_STACK
-                    XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
-                #endif
-                    return PSK_KEY_ERROR;
+                    ret = PSK_KEY_ERROR;
+                    goto importer_cleanup;
                 }
 
                 if (ssl->arrays->psk_keySz > 0 && identitySz > 0) {
                     const Suites* suites = WOLFSSL_SUITES(ssl);
 
                     for (i = 0; i < suites->suiteSz; i += 2) {
-                        byte* importedIdentity = NULL;
                         word16 importedIdentitySz = 0;
                         byte cipherSuite0 = suites->suites[i + 0];
                         byte cipherSuite = suites->suites[i + 1];
+                        byte suiteMac;
                         PreSharedKey* psk = NULL;
 
                     #ifdef HAVE_NULL_CIPHER
@@ -16698,58 +16714,57 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
                         if (cipherSuite0 != TLS13_BYTE)
                             continue;
 
+                        /* RFC 9258 only defines the HKDF_SHA256 and
+                         * HKDF_SHA384 target KDFs. Skip suites with any other
+                         * MAC, and skip a KDF already handled. */
+                        suiteMac = SuiteMac(suites->suites + i);
+                        if (suiteMac == sha256_mac) {
+                            if (seenKdf[0])
+                                continue;
+                            seenKdf[0] = 1;
+                        }
+                        else if (suiteMac == sha384_mac) {
+                            if (seenKdf[1])
+                                continue;
+                            seenKdf[1] = 1;
+                        }
+                        else {
+                            continue;
+                        }
+
                         /* Get length of imported identity */
                         ret = TLSX_PreSharedKey_CreateImportedIdentity(
-                                (byte*)ssl->arrays->client_identity, identitySz,
-                                ctx, ctxSz,
-                                SuiteMac(WOLFSSL_SUITES(ssl)->suites + i),
-                                ssl->version, NULL, &importedIdentitySz);
-                        if (ret != 0) {
-                        #ifdef WOLFSSL_SMALL_STACK
-                            XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
-                        #endif
-                            return ret;
-                        }
+                                (byte*)ssl->arrays->client_identity,
+                                (word16)identitySz, ctx, (word16)ctxSz,
+                                suiteMac, ssl->version, NULL,
+                                &importedIdentitySz);
+                        if (ret != 0)
+                            goto importer_cleanup;
 
                         importedIdentity = (byte*)XMALLOC(importedIdentitySz,
                                                           ssl->heap,
                                                           DYNAMIC_TYPE_TLSX);
                         if (importedIdentity == NULL) {
-                        #ifdef WOLFSSL_SMALL_STACK
-                            XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
-                        #endif
-                            return MEMORY_ERROR;
+                            ret = MEMORY_ERROR;
+                            goto importer_cleanup;
                         }
 
                         /* Generate the actual imported identity */
                         ret = TLSX_PreSharedKey_CreateImportedIdentity(
-                                (byte*)ssl->arrays->client_identity, identitySz,
-                                ctx, ctxSz,
-                                SuiteMac(WOLFSSL_SUITES(ssl)->suites + i),
-                                ssl->version, importedIdentity,
+                                (byte*)ssl->arrays->client_identity,
+                                (word16)identitySz, ctx, (word16)ctxSz,
+                                suiteMac, ssl->version, importedIdentity,
                                 &importedIdentitySz);
-                        if (ret != 0) {
-                        #ifdef WOLFSSL_SMALL_STACK
-                            XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
-                        #endif
-                            XFREE(importedIdentity, ssl->heap,
-                                  DYNAMIC_TYPE_TLSX);
-                            return ret;
-                        }
+                        if (ret != 0)
+                            goto importer_cleanup;
 
                         /* Store the PSK */
                         ret = TLSX_PreSharedKey_Use(&ssl->extensions,
                                 importedIdentity, importedIdentitySz,
-                                0, SuiteMac(WOLFSSL_SUITES(ssl)->suites + i),
-                                cipherSuite0, cipherSuite, 0, &psk, ssl->heap);
-                        if (ret != 0) {
-                        #ifdef WOLFSSL_SMALL_STACK
-                            XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
-                        #endif
-                            XFREE(importedIdentity, ssl->heap,
-                                  DYNAMIC_TYPE_TLSX);
-                            return ret;
-                        }
+                                0, suiteMac, cipherSuite0, cipherSuite, 0, &psk,
+                                ssl->heap);
+                        if (ret != 0)
+                            goto importer_cleanup;
 
                         /* Set flag in the PSK object to indicate that this
                          * one is imported. We use that flag to select the
@@ -16757,12 +16772,18 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
                         psk->imported = 1;
 
                         XFREE(importedIdentity, ssl->heap, DYNAMIC_TYPE_TLSX);
+                        importedIdentity = NULL;
                         usingPSK = 1;
                     }
                 }
+                ret = 0;
+            importer_cleanup:
+                XFREE(importedIdentity, ssl->heap, DYNAMIC_TYPE_TLSX);
             #ifdef WOLFSSL_SMALL_STACK
                 XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
             #endif
+                if (ret != 0)
+                    return ret;
             }
             else
         #endif /* WOLFSSL_EXTERNAL_PSK_IMPORTER */

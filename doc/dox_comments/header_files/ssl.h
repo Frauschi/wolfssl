@@ -15224,6 +15224,135 @@ void wolfSSL_set_psk_server_tls13_callback(WOLFSSL* ssl,
 /*!
     \ingroup Setup
 
+    \brief This function sets, on the WOLFSSL_CTX, the client side callback used
+    to import an external Pre-Shared Key (PSK) for TLS v1.3 connections per
+    RFC 9258. The callback returns the external identity, an optional context
+    and the external PSK; wolfSSL derives the ImportedIdentity and the imported
+    PSK used in the handshake. Requires WOLFSSL_EXTERNAL_PSK_IMPORTER.
+
+    \param [in,out] ctx a pointer to a WOLFSSL_CTX structure.
+    \param [in] cb a client PSK importer callback.
+
+    _Example_
+    \code
+    WOLFSSL_CTX* ctx;
+    ...
+    wolfSSL_CTX_set_psk_client_importer_callback(ctx, my_psk_importer_cb);
+    \endcode
+
+    \sa wolfSSL_set_psk_client_importer_callback
+    \sa wolfSSL_CTX_set_psk_server_importer_callback
+    \sa wolfSSL_external_psk_pre_extracted
+*/
+void wolfSSL_CTX_set_psk_client_importer_callback(WOLFSSL_CTX* ctx,
+    wc_psk_client_importer_callback cb);
+
+/*!
+    \ingroup Setup
+
+    \brief This function sets, on the WOLFSSL object, the client side callback
+    used to import an external Pre-Shared Key (PSK) for TLS v1.3 connections per
+    RFC 9258. Requires WOLFSSL_EXTERNAL_PSK_IMPORTER.
+
+    \param [in,out] ssl a pointer to a WOLFSSL structure, created using
+    wolfSSL_new().
+    \param [in] cb a client PSK importer callback.
+
+    _Example_
+    \code
+    WOLFSSL* ssl;
+    ...
+    wolfSSL_set_psk_client_importer_callback(ssl, my_psk_importer_cb);
+    \endcode
+
+    \sa wolfSSL_CTX_set_psk_client_importer_callback
+    \sa wolfSSL_set_psk_server_importer_callback
+    \sa wolfSSL_external_psk_pre_extracted
+*/
+void wolfSSL_set_psk_client_importer_callback(WOLFSSL* ssl,
+    wc_psk_client_importer_callback cb);
+
+/*!
+    \ingroup Setup
+
+    \brief This function sets, on the WOLFSSL_CTX, the server side callback used
+    to import an external Pre-Shared Key (PSK) for TLS v1.3 connections per
+    RFC 9258. Given a received external identity and optional context, the
+    callback returns the matching external PSK. Requires
+    WOLFSSL_EXTERNAL_PSK_IMPORTER.
+
+    \param [in,out] ctx a pointer to a WOLFSSL_CTX structure.
+    \param [in] cb a server PSK importer callback.
+
+    _Example_
+    \code
+    WOLFSSL_CTX* ctx;
+    ...
+    wolfSSL_CTX_set_psk_server_importer_callback(ctx, my_psk_importer_cb);
+    \endcode
+
+    \sa wolfSSL_set_psk_server_importer_callback
+    \sa wolfSSL_CTX_set_psk_client_importer_callback
+    \sa wolfSSL_external_psk_pre_extracted
+*/
+void wolfSSL_CTX_set_psk_server_importer_callback(WOLFSSL_CTX* ctx,
+    wc_psk_server_importer_callback cb);
+
+/*!
+    \ingroup Setup
+
+    \brief This function sets, on the WOLFSSL object, the server side callback
+    used to import an external Pre-Shared Key (PSK) for TLS v1.3 connections per
+    RFC 9258. Requires WOLFSSL_EXTERNAL_PSK_IMPORTER.
+
+    \param [in,out] ssl a pointer to a WOLFSSL structure, created using
+    wolfSSL_new().
+    \param [in] cb a server PSK importer callback.
+
+    _Example_
+    \code
+    WOLFSSL* ssl;
+    ...
+    wolfSSL_set_psk_server_importer_callback(ssl, my_psk_importer_cb);
+    \endcode
+
+    \sa wolfSSL_CTX_set_psk_server_importer_callback
+    \sa wolfSSL_set_psk_client_importer_callback
+    \sa wolfSSL_external_psk_pre_extracted
+*/
+void wolfSSL_set_psk_server_importer_callback(WOLFSSL* ssl,
+    wc_psk_server_importer_callback cb);
+
+/*!
+    \ingroup Setup
+
+    \brief This function marks whether the external PSK supplied by the importer
+    callback is already a pre-extracted pseudorandom key. When enabled, the
+    imported-PSK derivation skips the HKDF-Extract step (RFC 9258, Section 3.1).
+    Both peers must agree on this setting. Requires WOLFSSL_EXTERNAL_PSK_IMPORTER.
+
+    \return 0 on success.
+    \return BAD_FUNC_ARG when ssl is NULL.
+
+    \param [in,out] ssl a pointer to a WOLFSSL structure, created using
+    wolfSSL_new().
+    \param [in] opt non-zero to treat the external PSK as pre-extracted.
+
+    _Example_
+    \code
+    WOLFSSL* ssl;
+    ...
+    wolfSSL_external_psk_pre_extracted(ssl, 1);
+    \endcode
+
+    \sa wolfSSL_set_psk_client_importer_callback
+    \sa wolfSSL_set_psk_server_importer_callback
+*/
+int wolfSSL_external_psk_pre_extracted(WOLFSSL* ssl, int opt);
+
+/*!
+    \ingroup Setup
+
     \brief Enable or disable TLS 1.3 certificate authentication with external
     PSK (RFC8773bis) on a context.
 
