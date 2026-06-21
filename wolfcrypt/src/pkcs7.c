@@ -2735,8 +2735,11 @@ static int wc_PKCS7_BuildDigestInfo(wc_PKCS7* pkcs7, byte* flatSignedAttribs,
  * right-sized esd->encContentDigest buffer; the only ML-DSA-specific code is
  * the small set of helpers below (message construction, key level mapping,
  * sign and verify), which the shared encode/verify dispatchers call. Adding a
- * future "pure" PQC scheme (SLH-DSA, FN-DSA) is a matter of extending these
- * helpers, not the core control flow.
+ * future "pure" PQC scheme (SLH-DSA, FN-DSA) means providing equivalent
+ * helpers and adding the OID to the per-algorithm switch sites
+ * (wc_PKCS7_GetSignSize, wc_PKCS7_SignedDataGetEncAlgoId,
+ * wc_PKCS7_SetPublicKeyOID, wc_PKCS7_CheckPublicKeyDer and the sign/verify
+ * dispatchers) rather than reworking the encode/decode control flow.
  * ========================================================================== */
 
 /* Map a public key OID to the corresponding ML-DSA parameter level.
@@ -3352,6 +3355,7 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
     int idx = 0, ret = 0;
     int digEncAlgoId, digEncAlgoType;
     int keyIdSize;
+    int signNow = 0;
     byte* flatSignedAttribs = NULL;
     word32 flatSignedAttribsSz = 0;
 
@@ -3601,42 +3605,52 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
             esd->signedAttribSetSz = 0;
         }
 
-        /* Allocate the single signature buffer, sized to this algorithm's
-         * maximum signature length. wc_PKCS7_GetSignSize covers RSA, RSA-PSS,
-         * ECDSA and ML-DSA, so every algorithm signs into the same buffer and
-         * signature storage is not special-cased by type. */
-        ret = wc_PKCS7_GetSignSize(pkcs7);
-        if (ret < 0) {
-            idx = ret;
-            goto out;
-        }
-        esd->encContentDigest = (byte*)XMALLOC((word32)ret, pkcs7->heap,
-                                               DYNAMIC_TYPE_TMP_BUFFER);
-        if (esd->encContentDigest == NULL) {
-            idx = MEMORY_E;
-            goto out;
-        }
-        esd->encContentDigestBufSz = (word32)ret;
-
-        /* ECDSA produces a variable-length signature and must be signed now to
-         * learn the exact size. RSA, RSA-PSS and fixed-size PQC signatures
-         * (e.g. ML-DSA) have a deterministic size equal to the reserved length,
-         * so they reserve here and sign once, on the final pass below, over the
-         * finalized signed attributes.
+        /* Size and allocate the single signature buffer (one storage path for
+         * every algorithm). Deterministic-size algorithms (RSA, RSA-PSS, and
+         * ML-DSA, when no caller hash is supplied) get their exact size from
+         * wc_PKCS7_GetSignSize() so the SignerInfo lengths can be reserved
+         * before the final signing pass, and the buffer is right-sized.
+         *
+         * ECDSA, and any caller-supplied-hash case, instead sign immediately
+         * and only learn the size afterwards; they allocate the historical
+         * maximum (MAX_ENCRYPTED_KEY_SZ) so no extra key import is needed just
+         * to size the buffer, and record the real length once signed.
          *
          * INVARIANT: for the reserve path the reserved length MUST equal the
          * length the final signing pass produces, since the SignerInfo/SEQUENCE
          * lengths are derived from it (enforced after the final signing pass). */
-        if (pkcs7->publicKeyOID != ECDSAk && hashBuf == NULL) {
+        signNow = (pkcs7->publicKeyOID == ECDSAk) || (hashBuf != NULL);
+
+        if (!signNow) {
+            ret = wc_PKCS7_GetSignSize(pkcs7);
+            if (ret <= 0) {
+                /* GetSignSize returns 0 for an unsupported signer key type */
+                idx = (ret < 0) ? ret : BAD_FUNC_ARG;
+                goto out;
+            }
+            esd->encContentDigestBufSz = (word32)ret;
+        }
+        else {
+            esd->encContentDigestBufSz = MAX_ENCRYPTED_KEY_SZ;
+        }
+
+        esd->encContentDigest = (byte*)XMALLOC(esd->encContentDigestBufSz,
+                                        pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        if (esd->encContentDigest == NULL) {
+            idx = MEMORY_E;
+            goto out;
+        }
+
+        if (!signNow) {
             esd->encContentDigestSz = esd->encContentDigestBufSz;
         }
         else {
             ret = wc_PKCS7_SignedDataBuildSignature(pkcs7, flatSignedAttribs,
                                             flatSignedAttribsSz, esd);
-        }
-        if (ret < 0) {
-            idx = ret;
-            goto out;
+            if (ret < 0) {
+                idx = ret;
+                goto out;
+            }
         }
 
         signerInfoSz += flatSignedAttribsSz + esd->signedAttribSetSz;
