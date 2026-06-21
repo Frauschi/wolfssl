@@ -4504,17 +4504,16 @@ static int SetupPskKey(WOLFSSL* ssl, PreSharedKey* psk, int clientHello)
     #endif /* OPENSSL_EXTRA */
     #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
         if (ssl->options.client_psk_importer_cb != NULL) {
-            word32 identitySz = 0;
+            word32 identitySz = MAX_PSK_ID_LEN;
             ssl->arrays->psk_keySz = MAX_PSK_KEY_LEN;
 
-            /* Lookup key again for next identity. */
+            /* Lookup key again for next identity. The context is not needed
+             * here, so its buffer and length are passed as NULL. */
             ret = ssl->options.client_psk_importer_cb(ssl,
-                        ssl->arrays->client_identity, MAX_PSK_ID_LEN, NULL,
+                        (byte*)ssl->arrays->client_identity, &identitySz, NULL,
                         NULL, ssl->arrays->psk_key, &ssl->arrays->psk_keySz);
             if (ret != 0)
                 return PSK_KEY_ERROR;
-
-            identitySz = XSTRLEN(ssl->arrays->client_identity);
 
             if (identitySz > MAX_PSK_ID_LEN ||
                 ssl->arrays->psk_keySz > MAX_PSK_KEY_LEN)
@@ -6570,20 +6569,13 @@ int FindPskSuite(const WOLFSSL* ssl, PreSharedKey* psk, byte* psk_key,
             SuiteMac(suite) == targetKdf &&
             targetProtocol.major == ssl->version.major &&
             targetProtocol.minor == ssl->version.minor) {
-            /* The importer callback expects a NUL-terminated identity. Copy
-             * it out instead of mutating the received message buffer. */
-            char* idStr = (char*)XMALLOC((word32)idSz + 1, ssl->heap,
-                                         DYNAMIC_TYPE_TMP_BUFFER);
-            if (idStr == NULL)
-                return MEMORY_ERROR;
-            XMEMCPY(idStr, id, idSz);
-            idStr[idSz] = '\0';
             *psk_keySz = MAX_PSK_KEY_LEN;
 
-            /* Look for an external PSK for that identity and context. */
+            /* Look for an external PSK for that identity and context. The
+             * identity and context are passed as opaque (ptr,len) pairs that
+             * alias into the received message; no copy/termination required. */
             ret = ssl->options.server_psk_importer_cb((WOLFSSL*)ssl,
-                (const char*)idStr, ctx, ctxSz, psk_key, psk_keySz);
-            XFREE(idStr, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                id, idSz, ctx, ctxSz, psk_key, psk_keySz);
 
             if (ret == 0 && *psk_keySz > 0 && *psk_keySz <= MAX_PSK_KEY_LEN) {
                 /* Not yet set on the server-side */

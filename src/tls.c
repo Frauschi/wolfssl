@@ -16643,7 +16643,9 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
         #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
             if (ssl->options.client_psk_importer_cb != NULL) {
                 int i;
-                word32 identitySz = 0;
+                /* On entry these hold the buffer capacities; the callback
+                 * overwrites them with the actual opaque lengths. */
+                word32 identitySz = MAX_PSK_ID_LEN;
                 word32 ctxSz = MAX_PSK_CTX_LEN;
                 byte* importedIdentity = NULL;
                 /* Track which target KDFs already produced an identity so a
@@ -16663,16 +16665,16 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
                 XMEMSET(seenKdf, 0, sizeof(seenKdf));
 
                 /* Get the external PSK data (identity, optional context and
-                 * the actual key) by executing the user callback. */
+                 * the actual key) by executing the user callback. The identity
+                 * is an opaque, length-delimited blob (RFC 9258). */
                 ret = ssl->options.client_psk_importer_cb(ssl,
-                        ssl->arrays->client_identity, MAX_PSK_ID_LEN, ctx,
+                        (byte*)ssl->arrays->client_identity, &identitySz, ctx,
                         &ctxSz, ssl->arrays->psk_key, &ssl->arrays->psk_keySz);
                 if (ret != 0) {
                     ret = PSK_KEY_ERROR;
                     goto importer_cleanup;
                 }
 
-                identitySz = XSTRLEN(ssl->arrays->client_identity);
                 if (identitySz > MAX_PSK_ID_LEN ||
                     ctxSz > MAX_PSK_CTX_LEN ||
                     ssl->arrays->psk_keySz > MAX_PSK_KEY_LEN) {

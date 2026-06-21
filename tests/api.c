@@ -30415,14 +30415,17 @@ static int test_psk_importer_use_context = 0;
 /* When set, the server returns a different EPSK so the binder must not match. */
 static int test_psk_importer_server_wrong_key = 0;
 
-static int test_psk_importer_client_cb(WOLFSSL* ssl, char* id, word32 idMax,
-        unsigned char* ctx, word32* ctxSz, unsigned char* key, word32* keySz)
+static int test_psk_importer_client_cb(WOLFSSL* ssl, unsigned char* id,
+        word32* idSz, unsigned char* ctx, word32* ctxSz, unsigned char* key,
+        word32* keySz)
 {
+    word32 idLen = (word32)XSTRLEN(test_psk_importer_identity);
     (void)ssl;
 
-    if (XSTRLEN(test_psk_importer_identity) + 1 > idMax)
+    if (idLen > *idSz)
         return -1;
-    XSTRNCPY(id, test_psk_importer_identity, idMax);
+    XMEMCPY(id, test_psk_importer_identity, idLen);
+    *idSz = idLen;
 
     if (ctx != NULL && ctxSz != NULL) {
         if (test_psk_importer_use_context) {
@@ -30445,14 +30448,16 @@ static int test_psk_importer_client_cb(WOLFSSL* ssl, char* id, word32 idMax,
     return 0;
 }
 
-static int test_psk_importer_server_cb(WOLFSSL* ssl, const char* id,
-        const unsigned char* ctx, word32 ctxSz, unsigned char* key,
-        word32* keySz)
+static int test_psk_importer_server_cb(WOLFSSL* ssl, const unsigned char* id,
+        word32 idSz, const unsigned char* ctx, word32 ctxSz,
+        unsigned char* key, word32* keySz)
 {
+    word32 idLen = (word32)XSTRLEN(test_psk_importer_identity);
     (void)ssl;
 
-    /* Match the received external identity. */
-    if (id == NULL || XSTRCMP(id, test_psk_importer_identity) != 0)
+    /* Match the received external identity (opaque, length-delimited). */
+    if (id == NULL || idSz != idLen ||
+            XMEMCMP(id, test_psk_importer_identity, idLen) != 0)
         return -1;
 
     /* Match the optional context exactly as advertised by the client. */

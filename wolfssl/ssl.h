@@ -3282,8 +3282,12 @@ enum { /* ssl Constants */
         wc_psk_client_tls13_callback cb);
 
     #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
-    typedef int (*wc_psk_client_importer_callback)(WOLFSSL* ssl, char*,
-        word32, unsigned char*, word32*, unsigned char*, word32*);
+    /* On entry each *Sz holds the buffer capacity; on exit the actual length.
+     * identity, context and key are opaque byte buffers (RFC 9258). */
+    typedef int (*wc_psk_client_importer_callback)(WOLFSSL* ssl,
+        unsigned char* identity, word32* identitySz,
+        unsigned char* context, word32* contextSz,
+        unsigned char* key, word32* keySz);
     WOLFSSL_API void wolfSSL_CTX_set_psk_client_importer_callback(WOLFSSL_CTX* ctx,
         wc_psk_client_importer_callback cb);
     WOLFSSL_API void wolfSSL_set_psk_client_importer_callback(WOLFSSL* ssl,
@@ -3312,8 +3316,13 @@ enum { /* ssl Constants */
         wc_psk_server_tls13_callback cb);
 
     #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
-    typedef int (*wc_psk_server_importer_callback)(WOLFSSL* ssl, const char*,
-        const unsigned char*, word32, unsigned char*, word32*);
+    /* identity and context are opaque (ptr,len) pairs as received on the wire;
+     * on entry *keySz holds the key buffer capacity, on exit the actual key
+     * length (RFC 9258). */
+    typedef int (*wc_psk_server_importer_callback)(WOLFSSL* ssl,
+        const unsigned char* identity, word32 identitySz,
+        const unsigned char* context, word32 contextSz,
+        unsigned char* key, word32* keySz);
     WOLFSSL_API void wolfSSL_CTX_set_psk_server_importer_callback(WOLFSSL_CTX* ctx,
         wc_psk_server_importer_callback cb);
     WOLFSSL_API void wolfSSL_set_psk_server_importer_callback(WOLFSSL* ssl,

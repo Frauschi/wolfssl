@@ -15228,7 +15228,10 @@ void wolfSSL_set_psk_server_tls13_callback(WOLFSSL* ssl,
     to import an external Pre-Shared Key (PSK) for TLS v1.3 connections per
     RFC 9258. The callback returns the external identity, an optional context
     and the external PSK; wolfSSL derives the ImportedIdentity and the imported
-    PSK used in the handshake. Requires WOLFSSL_EXTERNAL_PSK_IMPORTER.
+    PSK used in the handshake. The identity, context and key are opaque byte
+    buffers: on entry each length argument holds the buffer capacity and the
+    callback overwrites it with the actual length. Requires
+    WOLFSSL_EXTERNAL_PSK_IMPORTER.
 
     \param [in,out] ctx a pointer to a WOLFSSL_CTX structure.
     \param [in] cb a client PSK importer callback.
@@ -15277,9 +15280,9 @@ void wolfSSL_set_psk_client_importer_callback(WOLFSSL* ssl,
 
     \brief This function sets, on the WOLFSSL_CTX, the server side callback used
     to import an external Pre-Shared Key (PSK) for TLS v1.3 connections per
-    RFC 9258. Given a received external identity and optional context, the
-    callback returns the matching external PSK. Requires
-    WOLFSSL_EXTERNAL_PSK_IMPORTER.
+    RFC 9258. Given a received external identity and optional context (each an
+    opaque buffer with an explicit length), the callback returns the matching
+    external PSK. Requires WOLFSSL_EXTERNAL_PSK_IMPORTER.
 
     \param [in,out] ctx a pointer to a WOLFSSL_CTX structure.
     \param [in] cb a server PSK importer callback.
