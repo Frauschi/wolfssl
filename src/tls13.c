@@ -1228,8 +1228,10 @@ static int DeriveImportedPreSharedKey(WOLFSSL* ssl, PreSharedKey* psk,
     word32      idx = 0;
 #ifdef WOLFSSL_SMALL_STACK
     byte*       hkdfLabel = NULL;
+    wc_HashAlg* hashAlg = NULL;
 #else
     byte        hkdfLabel[MAX_TLS13_HKDF_LABEL_SZ];
+    wc_HashAlg  hashAlg[1];
 #endif
 
     WOLFSSL_MSG("Derive Imported Pre-shared Key");
@@ -1246,9 +1248,26 @@ static int DeriveImportedPreSharedKey(WOLFSSL* ssl, PreSharedKey* psk,
     if (hashSz <= 0 || hashSz > (int)sizeof(hash))
         return BAD_FUNC_ARG;
 
-    /* Create the hash of the ImportedIdentity */
-    ret = wc_Hash((enum wc_HashType)importerHash, psk->identity,
-                  psk->identityLen, hash, (word32)hashSz);
+#ifdef WOLFSSL_SMALL_STACK
+    hashAlg = (wc_HashAlg*)XMALLOC(sizeof(wc_HashAlg), ssl->heap,
+                                   DYNAMIC_TYPE_HASHES);
+    if (hashAlg == NULL)
+        return MEMORY_E;
+#endif
+
+    /* Create the hash of the ImportedIdentity, offloading to devId if set. */
+    ret = wc_HashInit_ex(hashAlg, (enum wc_HashType)importerHash, ssl->heap,
+                         ssl->devId);
+    if (ret == 0) {
+        ret = wc_HashUpdate(hashAlg, (enum wc_HashType)importerHash,
+                            psk->identity, psk->identityLen);
+        if (ret == 0)
+            ret = wc_HashFinal(hashAlg, (enum wc_HashType)importerHash, hash);
+        wc_HashFree(hashAlg, (enum wc_HashType)importerHash);
+    }
+#ifdef WOLFSSL_SMALL_STACK
+    XFREE(hashAlg, ssl->heap, DYNAMIC_TYPE_HASHES);
+#endif
     if (ret != 0)
         return ret;
 
