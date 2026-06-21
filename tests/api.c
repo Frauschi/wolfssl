@@ -30414,10 +30414,13 @@ static const char  test_psk_importer_context[] = "RFC 9258 test context";
 static int test_psk_importer_use_context = 0;
 /* When set, the server returns a different EPSK so the binder must not match. */
 static int test_psk_importer_server_wrong_key = 0;
+/* Hash associated with the EPSK that both callbacks advertise (default SHA-256
+ * per RFC 9258; set to e.g. WC_SHA384 to exercise a non-default importer). */
+static int test_psk_importer_hash = WC_SHA256;
 
 static int test_psk_importer_client_cb(WOLFSSL* ssl, unsigned char* id,
         word32* idSz, unsigned char* ctx, word32* ctxSz, unsigned char* key,
-        word32* keySz)
+        word32* keySz, int* hashAlgo)
 {
     word32 idLen = (word32)XSTRLEN(test_psk_importer_identity);
     (void)ssl;
@@ -30445,12 +30448,16 @@ static int test_psk_importer_client_cb(WOLFSSL* ssl, unsigned char* id,
     XMEMCPY(key, test_psk_importer_epsk, sizeof(test_psk_importer_epsk));
     *keySz = (word32)sizeof(test_psk_importer_epsk);
 
+    /* hashAlgo arrives pre-set to WC_SHA256; only override when testing a
+     * non-default EPSK hash. */
+    *hashAlgo = test_psk_importer_hash;
+
     return 0;
 }
 
 static int test_psk_importer_server_cb(WOLFSSL* ssl, const unsigned char* id,
         word32 idSz, const unsigned char* ctx, word32 ctxSz,
-        unsigned char* key, word32* keySz)
+        unsigned char* key, word32* keySz, int* hashAlgo)
 {
     word32 idLen = (word32)XSTRLEN(test_psk_importer_identity);
     (void)ssl;
@@ -30470,6 +30477,9 @@ static int test_psk_importer_server_cb(WOLFSSL* ssl, const unsigned char* id,
     else if (ctxSz != 0) {
         return -1;
     }
+
+    /* Advertise the same EPSK hash as the client (default SHA-256). */
+    *hashAlgo = test_psk_importer_hash;
 
     if ((word32)sizeof(test_psk_importer_epsk) > *keySz)
         return -1;
@@ -30542,6 +30552,7 @@ static int test_tls13_external_psk_importer(void)
     EXPECT_DECLS;
 
     test_psk_importer_server_wrong_key = 0;
+    test_psk_importer_hash = WC_SHA256;
 
     /* HKDF_SHA256 target_kdf, without and with an optional context. */
     ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
@@ -30555,6 +30566,16 @@ static int test_tls13_external_psk_importer(void)
     /* HKDF_SHA384 target_kdf exercises the L = 48 derived-PSK length. */
     ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES256-GCM-SHA384",
         0x1302, 1, 0, 0), TEST_SUCCESS);
+#endif
+
+#if defined(WOLFSSL_SHA384)
+    /* EPSK associated with SHA-384 (non-default importer hash), used with a
+     * SHA-256 target_kdf: exercises an importer hash that differs from the
+     * target KDF (RFC 9258 Section 3.1). */
+    test_psk_importer_hash = WC_SHA384;
+    ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
+        0x1301, 1, 0, 0), TEST_SUCCESS);
+    test_psk_importer_hash = WC_SHA256;
 #endif
 
     /* Negative: server derives a different imported PSK -> binder mismatch

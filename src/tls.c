@@ -16647,6 +16647,10 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
                  * overwrites them with the actual opaque lengths. */
                 word32 identitySz = MAX_PSK_ID_LEN;
                 word32 ctxSz = MAX_PSK_CTX_LEN;
+                /* EPSK hash (RFC 9258 default SHA-256). Only the identity is
+                 * built here; the actual import derivation, which uses this
+                 * hash, happens later in SetupPskKey(). */
+                int importerHash = WC_SHA256;
                 byte* importedIdentity = NULL;
                 /* Track which target KDFs already produced an identity so a
                  * single KDF is not emitted more than once (RFC 9258 derives
@@ -16669,7 +16673,8 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
                  * is an opaque, length-delimited blob (RFC 9258). */
                 ret = ssl->options.client_psk_importer_cb(ssl,
                         (byte*)ssl->arrays->client_identity, &identitySz, ctx,
-                        &ctxSz, ssl->arrays->psk_key, &ssl->arrays->psk_keySz);
+                        &ctxSz, ssl->arrays->psk_key, &ssl->arrays->psk_keySz,
+                        &importerHash);
                 if (ret != 0) {
                     ret = PSK_KEY_ERROR;
                     goto importer_cleanup;

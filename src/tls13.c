@@ -1214,23 +1214,22 @@ static const byte derivedPskLabel[DERIVED_PSK_LABEL_SZ + 1] =
  *
  * ssl  The SSL/TLS object.
  */
-static int DeriveImportedPreSharedKey(WOLFSSL* ssl, PreSharedKey* psk)
+static int DeriveImportedPreSharedKey(WOLFSSL* ssl, PreSharedKey* psk,
+        int importerHash)
 {
     int         ret;
     const byte* protocol;
     word32      protocolLen;
     word32      outputLen;
-    word32      hashSz = 0;
-    byte        hash[WC_SHA256_DIGEST_SIZE];
-    byte        prk[WC_SHA256_DIGEST_SIZE];
+    int         hashSz = 0;
+    byte        hash[WC_MAX_DIGEST_SIZE];
+    byte        prk[WC_MAX_DIGEST_SIZE];
     byte        okm[MAX_PSK_KEY_LEN];
     word32      idx = 0;
 #ifdef WOLFSSL_SMALL_STACK
     byte*       hkdfLabel = NULL;
-    wc_Sha256*  sha256 = NULL;
 #else
     byte        hkdfLabel[MAX_TLS13_HKDF_LABEL_SZ];
-    wc_Sha256   sha256[1];
 #endif
 
     WOLFSSL_MSG("Derive Imported Pre-shared Key");
@@ -1238,34 +1237,20 @@ static int DeriveImportedPreSharedKey(WOLFSSL* ssl, PreSharedKey* psk)
         return BAD_FUNC_ARG;
     }
 
-    /* Currently, SHA-256 is used as the underlying hash function for the HKDF
-     * operations below, following RFC 9258. In the future, the callback
-     * interface could be expanded to let the user provide a different hash
-     * algorithm. */
-
-#ifdef WOLFSSL_SMALL_STACK
-    sha256 = (wc_Sha256*)XMALLOC(sizeof(wc_Sha256), ssl->heap,
-                                 DYNAMIC_TYPE_HASH_TMP);
-    if (sha256 == NULL) {
-        return MEMORY_E;
-    }
-#endif
+    /* The hash function used for the import (Hash(ImportedIdentity) and the
+     * HKDF below) is the one associated with the external PSK, defaulting to
+     * SHA-256 per RFC 9258. It is independent of the target_kdf, which only
+     * determines the imported-PSK output length L. Validate that the digest
+     * fits our buffers and is a supported hash. */
+    hashSz = wc_HashGetDigestSize((enum wc_HashType)importerHash);
+    if (hashSz <= 0 || hashSz > (int)sizeof(hash))
+        return BAD_FUNC_ARG;
 
     /* Create the hash of the ImportedIdentity */
-    ret = wc_InitSha256_ex(sha256, ssl->heap, ssl->devId);
-    if (ret == 0) {
-            ret = wc_Sha256Update(sha256, psk->identity, psk->identityLen);
-        if (ret == 0)
-            ret = wc_Sha256Final(sha256, hash);
-        wc_Sha256Free(sha256);
-    }
-#ifdef WOLFSSL_SMALL_STACK
-    XFREE(sha256, ssl->heap, DYNAMIC_TYPE_HASH_TMP);
-#endif
+    ret = wc_Hash((enum wc_HashType)importerHash, psk->identity,
+                  psk->identityLen, hash, (word32)hashSz);
     if (ret != 0)
         return ret;
-
-    hashSz = WC_SHA256_DIGEST_SIZE;
 
     switch (ssl->version.minor) {
         case TLSv1_3_MINOR:
@@ -1345,7 +1330,7 @@ static int DeriveImportedPreSharedKey(WOLFSSL* ssl, PreSharedKey* psk)
             /* The external PSK is already a pseudorandom key (the result of an
              * earlier HKDF-Extract), so derive ipskx directly with an
              * HKDF-Expand-Label. */
-            ret = wc_HKDF_Expand_ex(WC_SHA256, ssl->arrays->psk_key,
+            ret = wc_HKDF_Expand_ex(importerHash, ssl->arrays->psk_key,
                     ssl->arrays->psk_keySz, hkdfLabel, idx, okm, outputLen,
                     ssl->heap, ssl->devId);
         }
@@ -1353,16 +1338,16 @@ static int DeriveImportedPreSharedKey(WOLFSSL* ssl, PreSharedKey* psk)
             /* epskx = HKDF-Extract(0, epsk) */
         #if !defined(HAVE_FIPS) || \
             (defined(FIPS_VERSION_GE) && FIPS_VERSION_GE(6,0))
-            ret = wc_HKDF_Extract_ex(WC_SHA256, NULL, 0, ssl->arrays->psk_key,
+            ret = wc_HKDF_Extract_ex(importerHash, NULL, 0, ssl->arrays->psk_key,
                     ssl->arrays->psk_keySz, prk, ssl->heap, ssl->devId);
         #else
-            ret = wc_HKDF_Extract(WC_SHA256, NULL, 0, ssl->arrays->psk_key,
+            ret = wc_HKDF_Extract(importerHash, NULL, 0, ssl->arrays->psk_key,
                     ssl->arrays->psk_keySz, prk);
         #endif
             if (ret == 0) {
                 /* ipskx = HKDF-Expand-Label(epskx, "derived psk",
                  *                           Hash(ImportedIdentity), L) */
-                ret = wc_HKDF_Expand_ex(WC_SHA256, prk, WC_SHA256_DIGEST_SIZE,
+                ret = wc_HKDF_Expand_ex(importerHash, prk, (word32)hashSz,
                         hkdfLabel, idx, okm, outputLen, ssl->heap, ssl->devId);
             }
         }
@@ -4505,13 +4490,16 @@ static int SetupPskKey(WOLFSSL* ssl, PreSharedKey* psk, int clientHello)
     #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
         if (ssl->options.client_psk_importer_cb != NULL) {
             word32 identitySz = MAX_PSK_ID_LEN;
+            /* Hash associated with the EPSK; defaults to SHA-256 (RFC 9258). */
+            int importerHash = WC_SHA256;
             ssl->arrays->psk_keySz = MAX_PSK_KEY_LEN;
 
             /* Lookup key again for next identity. The context is not needed
              * here, so its buffer and length are passed as NULL. */
             ret = ssl->options.client_psk_importer_cb(ssl,
                         (byte*)ssl->arrays->client_identity, &identitySz, NULL,
-                        NULL, ssl->arrays->psk_key, &ssl->arrays->psk_keySz);
+                        NULL, ssl->arrays->psk_key, &ssl->arrays->psk_keySz,
+                        &importerHash);
             if (ret != 0)
                 return PSK_KEY_ERROR;
 
@@ -4541,7 +4529,7 @@ static int SetupPskKey(WOLFSSL* ssl, PreSharedKey* psk, int clientHello)
             }
 
             /* Derive the imported PSK */
-            ret = DeriveImportedPreSharedKey(ssl, psk);
+            ret = DeriveImportedPreSharedKey(ssl, psk, importerHash);
             if (ret != 0)
                 return ret;
         }
@@ -6556,6 +6544,8 @@ int FindPskSuite(const WOLFSSL* ssl, PreSharedKey* psk, byte* psk_key,
         word16 ctxSz = 0;
         ProtocolVersion targetProtocol;
         byte targetKdf = 0;
+        /* Hash associated with the EPSK; defaults to SHA-256 (RFC 9258). */
+        int importerHash = WC_SHA256;
 
         XMEMSET(&targetProtocol, 0, sizeof(targetProtocol));
 
@@ -6575,14 +6565,15 @@ int FindPskSuite(const WOLFSSL* ssl, PreSharedKey* psk, byte* psk_key,
              * identity and context are passed as opaque (ptr,len) pairs that
              * alias into the received message; no copy/termination required. */
             ret = ssl->options.server_psk_importer_cb((WOLFSSL*)ssl,
-                id, idSz, ctx, ctxSz, psk_key, psk_keySz);
+                id, idSz, ctx, ctxSz, psk_key, psk_keySz, &importerHash);
 
             if (ret == 0 && *psk_keySz > 0 && *psk_keySz <= MAX_PSK_KEY_LEN) {
                 /* Not yet set on the server-side */
                 psk->hmac = targetKdf;
 
                 /* Derive the actual imported PSK */
-                ret = DeriveImportedPreSharedKey((WOLFSSL*)ssl, psk);
+                ret = DeriveImportedPreSharedKey((WOLFSSL*)ssl, psk,
+                                                 importerHash);
                 if (ret == 0) {
                     *found = 1;
 
