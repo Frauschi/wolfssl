@@ -30702,7 +30702,26 @@ static const byte test_kat_ipsk3[] = {
 };
 #endif /* WOLFSSL_SHA384 */
 
-static int test_tls13_psk_importer_kat_one(const byte* ctx, word16 ctxLen,
+/* V4: cross-implementation vector. The external_identity (0xCAFECAFE), context
+ * (0xDEADBEEF) and the expected ImportedIdentity below are exactly those used
+ * by GnuTLS's own test, tests/psk-importer.c (GnuTLS >= 3.8.1), confirming our
+ * ImportedIdentity serialization matches an independent RFC 9258
+ * implementation. The ipskx value is the independently computed expectation. */
+static const byte test_kat_gnutls_id[]   = { 0xca, 0xfe, 0xca, 0xfe };
+static const byte test_kat_gnutls_ctx[]  = { 0xde, 0xad, 0xbe, 0xef };
+static const byte test_kat_gnutls_epsk[] = { 0xde, 0xad, 0xbe, 0xef };
+static const byte test_kat_gnutls_ii[]   = {
+    0x00, 0x04, 0xca, 0xfe, 0xca, 0xfe, 0x00, 0x04, 0xde, 0xad, 0xbe, 0xef,
+    0x03, 0x04, 0x00, 0x01
+};
+static const byte test_kat_gnutls_ipsk[] = {
+    0x77, 0x49, 0xf3, 0x1b, 0x70, 0xcf, 0xec, 0x8f, 0x97, 0x83, 0x41, 0x3f,
+    0x71, 0xe7, 0x15, 0xfa, 0x61, 0x73, 0xa9, 0xa5, 0x20, 0xd6, 0x0b, 0x85,
+    0x06, 0x6d, 0xe2, 0x92, 0x22, 0xb3, 0x79, 0xff
+};
+
+static int test_tls13_psk_importer_kat_one(const byte* id, word16 idLen,
+        const byte* ctx, word16 ctxLen, const byte* epsk, word32 epskSz,
         byte targetKdfMac, int importerHash, const byte* expII, word16 expIISz,
         const byte* expIpsk, word32 expIpskSz)
 {
@@ -30717,16 +30736,14 @@ static int test_tls13_psk_importer_kat_one(const byte* ctx, word16 ctxLen,
     pv.minor = TLSv1_3_MINOR;
 
     /* ImportedIdentity serialization matches the independent vector. */
-    ExpectIntEQ(TLSX_PreSharedKey_CreateImportedIdentity(test_kat_id,
-        (word16)XSTRLEN((const char*)test_kat_id), ctx, ctxLen, targetKdfMac,
-        pv, ii, &iiSz), 0);
+    ExpectIntEQ(TLSX_PreSharedKey_CreateImportedIdentity(id, idLen, ctx, ctxLen,
+        targetKdfMac, pv, ii, &iiSz), 0);
     ExpectIntEQ((int)iiSz, (int)expIISz);
     ExpectIntEQ(XMEMCMP(ii, expII, expIISz), 0);
 
     /* Derived imported PSK (ipskx) matches the independent vector. */
-    ExpectIntEQ(DeriveImportedPsk(test_kat_epsk, (word32)sizeof(test_kat_epsk),
-        expII, expIISz, importerHash, targetKdfMac, TLSv1_3_MINOR, 0, out,
-        &outSz, NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(DeriveImportedPsk(epsk, epskSz, expII, expIISz, importerHash,
+        targetKdfMac, TLSv1_3_MINOR, 0, out, &outSz, NULL, INVALID_DEVID), 0);
     ExpectIntEQ((int)outSz, (int)expIpskSz);
     ExpectIntEQ(XMEMCMP(out, expIpsk, expIpskSz), 0);
 
@@ -30736,20 +30753,33 @@ static int test_tls13_psk_importer_kat_one(const byte* ctx, word16 ctxLen,
 static int test_tls13_external_psk_importer_kat(void)
 {
     EXPECT_DECLS;
+    word16 idLen = (word16)XSTRLEN((const char*)test_kat_id);
 
-    ExpectIntEQ(test_tls13_psk_importer_kat_one(NULL, 0, sha256_mac, WC_SHA256,
+    ExpectIntEQ(test_tls13_psk_importer_kat_one(test_kat_id, idLen, NULL, 0,
+        test_kat_epsk, (word32)sizeof(test_kat_epsk), sha256_mac, WC_SHA256,
         test_kat_ii1, (word16)sizeof(test_kat_ii1),
         test_kat_ipsk1, (word32)sizeof(test_kat_ipsk1)), TEST_SUCCESS);
 #if defined(WOLFSSL_SHA384)
-    ExpectIntEQ(test_tls13_psk_importer_kat_one(test_kat_ctx,
-        (word16)(sizeof(test_kat_ctx) - 1), sha384_mac, WC_SHA256,
+    ExpectIntEQ(test_tls13_psk_importer_kat_one(test_kat_id, idLen,
+        test_kat_ctx, (word16)(sizeof(test_kat_ctx) - 1),
+        test_kat_epsk, (word32)sizeof(test_kat_epsk), sha384_mac, WC_SHA256,
         test_kat_ii2, (word16)sizeof(test_kat_ii2),
         test_kat_ipsk2, (word32)sizeof(test_kat_ipsk2)), TEST_SUCCESS);
-    ExpectIntEQ(test_tls13_psk_importer_kat_one(test_kat_ctx,
-        (word16)(sizeof(test_kat_ctx) - 1), sha256_mac, WC_SHA384,
+    ExpectIntEQ(test_tls13_psk_importer_kat_one(test_kat_id, idLen,
+        test_kat_ctx, (word16)(sizeof(test_kat_ctx) - 1),
+        test_kat_epsk, (word32)sizeof(test_kat_epsk), sha256_mac, WC_SHA384,
         test_kat_ii3, (word16)sizeof(test_kat_ii3),
         test_kat_ipsk3, (word32)sizeof(test_kat_ipsk3)), TEST_SUCCESS);
 #endif
+
+    /* Cross-checked against GnuTLS tests/psk-importer.c. */
+    ExpectIntEQ(test_tls13_psk_importer_kat_one(test_kat_gnutls_id,
+        (word16)sizeof(test_kat_gnutls_id), test_kat_gnutls_ctx,
+        (word16)sizeof(test_kat_gnutls_ctx), test_kat_gnutls_epsk,
+        (word32)sizeof(test_kat_gnutls_epsk), sha256_mac, WC_SHA256,
+        test_kat_gnutls_ii, (word16)sizeof(test_kat_gnutls_ii),
+        test_kat_gnutls_ipsk, (word32)sizeof(test_kat_gnutls_ipsk)),
+        TEST_SUCCESS);
 
     return EXPECT_RESULT();
 }
