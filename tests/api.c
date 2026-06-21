@@ -30496,7 +30496,7 @@ static int test_psk_importer_server_cb(WOLFSSL* ssl, const unsigned char* id,
 /* Run a single TLS 1.3 handshake that authenticates with an imported external
  * PSK (RFC 9258), restricted to the given cipher suite. */
 static int test_tls13_external_psk_importer_one(const char* cipher,
-        int expectedSuite, int useContext, int preExtracted, int expectFail)
+        int expectedSuite, int useContext, int expectFail)
 {
     EXPECT_DECLS;
     WOLFSSL_CTX *ctx_c = NULL, *ctx_s = NULL;
@@ -30518,11 +30518,6 @@ static int test_tls13_external_psk_importer_one(const char* cipher,
         test_psk_importer_client_cb);
     wolfSSL_set_psk_server_importer_callback(ssl_s,
         test_psk_importer_server_cb);
-
-    if (preExtracted) {
-        ExpectIntEQ(wolfSSL_external_psk_pre_extracted(ssl_c, 1), 0);
-        ExpectIntEQ(wolfSSL_external_psk_pre_extracted(ssl_s, 1), 0);
-    }
 
     /* Restrict both sides to the suite under test (importer callback setup
      * rebuilds the suite list, so set the cipher list afterwards). */
@@ -30556,16 +30551,13 @@ static int test_tls13_external_psk_importer(void)
 
     /* HKDF_SHA256 target_kdf, without and with an optional context. */
     ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
-        0x1301, 0, 0, 0), TEST_SUCCESS);
+        0x1301, 0, 0), TEST_SUCCESS);
     ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
-        0x1301, 1, 0, 0), TEST_SUCCESS);
-    /* Pre-extracted EPSK (HKDF-Extract is skipped during import). */
-    ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
-        0x1301, 1, 1, 0), TEST_SUCCESS);
+        0x1301, 1, 0), TEST_SUCCESS);
 #if defined(WOLFSSL_SHA384) && defined(WOLFSSL_AES_256)
     /* HKDF_SHA384 target_kdf exercises the L = 48 derived-PSK length. */
     ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES256-GCM-SHA384",
-        0x1302, 1, 0, 0), TEST_SUCCESS);
+        0x1302, 1, 0), TEST_SUCCESS);
 #endif
 
 #if defined(WOLFSSL_SHA384)
@@ -30574,7 +30566,7 @@ static int test_tls13_external_psk_importer(void)
      * target KDF (RFC 9258 Section 3.1). */
     test_psk_importer_hash = WC_SHA384;
     ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
-        0x1301, 1, 0, 0), TEST_SUCCESS);
+        0x1301, 1, 0), TEST_SUCCESS);
     test_psk_importer_hash = WC_SHA256;
 #endif
 
@@ -30582,7 +30574,7 @@ static int test_tls13_external_psk_importer(void)
      * -> handshake must fail. */
     test_psk_importer_server_wrong_key = 1;
     ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
-        0x1301, 1, 0, 1), TEST_SUCCESS);
+        0x1301, 1, 1), TEST_SUCCESS);
     test_psk_importer_server_wrong_key = 0;
 
     return EXPECT_RESULT();
@@ -30733,7 +30725,7 @@ static int test_tls13_psk_importer_kat_one(const byte* ctx, word16 ctxLen,
 
     /* Derived imported PSK (ipskx) matches the independent vector. */
     ExpectIntEQ(DeriveImportedPsk(test_kat_epsk, (word32)sizeof(test_kat_epsk),
-        0, expII, expIISz, importerHash, targetKdfMac, TLSv1_3_MINOR, 0, out,
+        expII, expIISz, importerHash, targetKdfMac, TLSv1_3_MINOR, 0, out,
         &outSz, NULL, INVALID_DEVID), 0);
     ExpectIntEQ((int)outSz, (int)expIpskSz);
     ExpectIntEQ(XMEMCMP(out, expIpsk, expIpskSz), 0);

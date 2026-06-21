@@ -15251,7 +15251,6 @@ void wolfSSL_set_psk_server_tls13_callback(WOLFSSL* ssl,
 
     \sa wolfSSL_set_psk_client_importer_callback
     \sa wolfSSL_CTX_set_psk_server_importer_callback
-    \sa wolfSSL_external_psk_pre_extracted
 */
 void wolfSSL_CTX_set_psk_client_importer_callback(WOLFSSL_CTX* ctx,
     wc_psk_client_importer_callback cb);
@@ -15276,7 +15275,6 @@ void wolfSSL_CTX_set_psk_client_importer_callback(WOLFSSL_CTX* ctx,
 
     \sa wolfSSL_CTX_set_psk_client_importer_callback
     \sa wolfSSL_set_psk_server_importer_callback
-    \sa wolfSSL_external_psk_pre_extracted
 */
 void wolfSSL_set_psk_client_importer_callback(WOLFSSL* ssl,
     wc_psk_client_importer_callback cb);
@@ -15307,7 +15305,6 @@ void wolfSSL_set_psk_client_importer_callback(WOLFSSL* ssl,
 
     \sa wolfSSL_set_psk_server_importer_callback
     \sa wolfSSL_CTX_set_psk_client_importer_callback
-    \sa wolfSSL_external_psk_pre_extracted
 */
 void wolfSSL_CTX_set_psk_server_importer_callback(WOLFSSL_CTX* ctx,
     wc_psk_server_importer_callback cb);
@@ -15332,37 +15329,9 @@ void wolfSSL_CTX_set_psk_server_importer_callback(WOLFSSL_CTX* ctx,
 
     \sa wolfSSL_CTX_set_psk_server_importer_callback
     \sa wolfSSL_set_psk_client_importer_callback
-    \sa wolfSSL_external_psk_pre_extracted
 */
 void wolfSSL_set_psk_server_importer_callback(WOLFSSL* ssl,
     wc_psk_server_importer_callback cb);
-
-/*!
-    \ingroup Setup
-
-    \brief This function marks whether the external PSK supplied by the importer
-    callback is already a pre-extracted pseudorandom key. When enabled, the
-    imported-PSK derivation skips the HKDF-Extract step (RFC 9258, Section 3.1).
-    Both peers must agree on this setting. Requires WOLFSSL_EXTERNAL_PSK_IMPORTER.
-
-    \return 0 on success.
-    \return BAD_FUNC_ARG when ssl is NULL.
-
-    \param [in,out] ssl a pointer to a WOLFSSL structure, created using
-    wolfSSL_new().
-    \param [in] opt non-zero to treat the external PSK as pre-extracted.
-
-    _Example_
-    \code
-    WOLFSSL* ssl;
-    ...
-    wolfSSL_external_psk_pre_extracted(ssl, 1);
-    \endcode
-
-    \sa wolfSSL_set_psk_client_importer_callback
-    \sa wolfSSL_set_psk_server_importer_callback
-*/
-int wolfSSL_external_psk_pre_extracted(WOLFSSL* ssl, int opt);
 
 /*!
     \ingroup Setup

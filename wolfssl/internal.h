@@ -3874,10 +3874,9 @@ WOLFSSL_LOCAL int TLSX_PreSharedKey_ParseImportedIdentity(byte* input,
         word16 length, byte** id, word16* id_len, byte** ctx,word16* ctx_len,
         byte* hkdf, ProtocolVersion* protocol);
 WOLFSSL_LOCAL int DeriveImportedPsk(const byte* epsk, word32 epskSz,
-        int preExtracted, const byte* importedIdentity,
-        word32 importedIdentitySz, int importerHash, byte targetKdfMac,
-        byte protocolMinor, int isDtls, byte* out, word32* outSz,
-        void* heap, int devId);
+        const byte* importedIdentity, word32 importedIdentitySz,
+        int importerHash, byte targetKdfMac, byte protocolMinor, int isDtls,
+        byte* out, word32* outSz, void* heap, int devId);
 #endif
 #endif /* HAVE_SESSION_TICKET || !NO_PSK */
 
@@ -5417,9 +5416,6 @@ typedef struct Arrays {
     char            client_identity[MAX_PSK_ID_LEN + NULL_TERM_LEN];
     char            server_hint[MAX_PSK_ID_LEN + NULL_TERM_LEN];
     byte            psk_key[MAX_PSK_KEY_LEN];
-#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER)
-    byte            psk_externalKeyPreExtracted:1;
-#endif /* WOLFSSL_TLS13 && WOLFSSL_EXTERNAL_PSK_IMPORTER */
 #endif /* HAVE_SESSION_TICKET || !NO_PSK */
     byte            clientRandom[RAN_LEN];
 #if defined(WOLFSSL_TLS13) && defined(HAVE_ECH)

@@ -3355,10 +3355,6 @@ enum { /* ssl Constants */
 #ifdef WOLFSSL_TLS13
     WOLFSSL_API const char* wolfSSL_get_cipher_name_by_hash(WOLFSSL* ssl,
         const char* hash);
-
-    #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
-    WOLFSSL_API int wolfSSL_external_psk_pre_extracted(WOLFSSL* ssl, int opt);
-    #endif
 #endif
 #endif /* NO_PSK */
 

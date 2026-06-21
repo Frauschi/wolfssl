@@ -1213,8 +1213,7 @@ static const byte derivedPskLabel[DERIVED_PSK_LABEL_SZ + 1] =
  * (RFC 9258, Section 3.1). This core routine is independent of WOLFSSL state so
  * it can be exercised directly with known-answer test vectors.
  *
- *   epsk/epskSz        External PSK base key (or a pre-extracted PRK).
- *   preExtracted       Non-zero if epsk is already a PRK (skip HKDF-Extract).
+ *   epsk/epskSz        External PSK base key.
  *   importedIdentity   Serialized ImportedIdentity (hashed as the context).
  *   importedIdentitySz Length of importedIdentity.
  *   importerHash       Hash associated with the EPSK (e.g. WC_SHA256), used for
@@ -1231,10 +1230,9 @@ static const byte derivedPskLabel[DERIVED_PSK_LABEL_SZ + 1] =
  * Returns 0 on success, otherwise a negative error.
  */
 WOLFSSL_LOCAL int DeriveImportedPsk(const byte* epsk, word32 epskSz,
-        int preExtracted, const byte* importedIdentity,
-        word32 importedIdentitySz, int importerHash, byte targetKdfMac,
-        byte protocolMinor, int isDtls, byte* out, word32* outSz,
-        void* heap, int devId)
+        const byte* importedIdentity, word32 importedIdentitySz,
+        int importerHash, byte targetKdfMac, byte protocolMinor, int isDtls,
+        byte* out, word32* outSz, void* heap, int devId)
 {
     int         ret;
     const byte* protocol;
@@ -1357,28 +1355,19 @@ WOLFSSL_LOCAL int DeriveImportedPsk(const byte* epsk, word32 epskSz,
         /* okm holds ipskx; prk holds epskx. Both are dedicated buffers so the
          * HKDF input may safely alias the output buffer. */
         PRIVATE_KEY_UNLOCK();
-        if (preExtracted) {
-            /* The external PSK is already a pseudorandom key (the result of an
-             * earlier HKDF-Extract), so derive ipskx directly with an
-             * HKDF-Expand-Label. */
-            ret = wc_HKDF_Expand_ex(importerHash, epsk, epskSz, hkdfLabel, idx,
-                    okm, outputLen, heap, devId);
-        }
-        else {
-            /* epskx = HKDF-Extract(0, epsk) */
-        #if !defined(HAVE_FIPS) || \
-            (defined(FIPS_VERSION_GE) && FIPS_VERSION_GE(6,0))
-            ret = wc_HKDF_Extract_ex(importerHash, NULL, 0, epsk, epskSz, prk,
-                    heap, devId);
-        #else
-            ret = wc_HKDF_Extract(importerHash, NULL, 0, epsk, epskSz, prk);
-        #endif
-            if (ret == 0) {
-                /* ipskx = HKDF-Expand-Label(epskx, "derived psk",
-                 *                           Hash(ImportedIdentity), L) */
-                ret = wc_HKDF_Expand_ex(importerHash, prk, (word32)hashSz,
-                        hkdfLabel, idx, okm, outputLen, heap, devId);
-            }
+        /* epskx = HKDF-Extract(0, epsk) */
+    #if !defined(HAVE_FIPS) || \
+        (defined(FIPS_VERSION_GE) && FIPS_VERSION_GE(6,0))
+        ret = wc_HKDF_Extract_ex(importerHash, NULL, 0, epsk, epskSz, prk,
+                heap, devId);
+    #else
+        ret = wc_HKDF_Extract(importerHash, NULL, 0, epsk, epskSz, prk);
+    #endif
+        if (ret == 0) {
+            /* ipskx = HKDF-Expand-Label(epskx, "derived psk",
+             *                           Hash(ImportedIdentity), L) */
+            ret = wc_HKDF_Expand_ex(importerHash, prk, (word32)hashSz,
+                    hkdfLabel, idx, okm, outputLen, heap, devId);
         }
         PRIVATE_KEY_LOCK();
 
@@ -1424,10 +1413,9 @@ static int DeriveImportedPreSharedKey(WOLFSSL* ssl, PreSharedKey* psk,
 
     keySz = ssl->arrays->psk_keySz;
     ret = DeriveImportedPsk(ssl->arrays->psk_key, ssl->arrays->psk_keySz,
-            ssl->arrays->psk_externalKeyPreExtracted, psk->identity,
-            psk->identityLen, importerHash, psk->hmac, ssl->version.minor,
-            ssl->options.dtls, ssl->arrays->psk_key, &keySz, ssl->heap,
-            ssl->devId);
+            psk->identity, psk->identityLen, importerHash, psk->hmac,
+            ssl->version.minor, ssl->options.dtls, ssl->arrays->psk_key, &keySz,
+            ssl->heap, ssl->devId);
     if (ret == 0)
         ssl->arrays->psk_keySz = keySz;
 
@@ -15833,29 +15821,6 @@ const char* wolfSSL_get_cipher_name_by_hash(WOLFSSL* ssl, const char* hash)
     }
     return name;
 }
-
-#if defined(WOLFSSL_EXTERNAL_PSK_IMPORTER)
-/* Mark whether the external PSK provided by the importer callback is already a
- * pre-extracted pseudorandom key. When set, the imported-PSK derivation skips
- * the HKDF-Extract step (RFC 9258, Section 3.1).
- *
- * ssl  The SSL/TLS object.
- * opt  Non-zero to treat the external PSK as pre-extracted.
- * returns BAD_FUNC_ARG when ssl is NULL and 0 on success.
- */
-int wolfSSL_external_psk_pre_extracted(WOLFSSL* ssl, int opt)
-{
-    if (ssl == NULL)
-        return BAD_FUNC_ARG;
-
-    if (opt)
-        ssl->arrays->psk_externalKeyPreExtracted = 1;
-    else
-        ssl->arrays->psk_externalKeyPreExtracted = 0;
-
-    return 0;
-}
-#endif /* WOLFSSL_EXTERNAL_PSK_IMPORTER */
 #endif /* !NO_PSK */
 
 
