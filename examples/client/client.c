@@ -1466,6 +1466,10 @@ static const char* client_usage_msg[][81] = {
     !defined(NO_PSK)
         "--psk-with-certs  Use TLS 1.3 PSK with certificates\n",        /* 74 */
 #endif
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
+    !defined(NO_PSK)
+        "--psk-importer  Import an external PSK per RFC 9258\n",
+#endif
 #ifdef HAVE_RPK
         "--rpk  Use RPK for the defined certificates\n", /* 75 */
 #endif
@@ -1736,6 +1740,10 @@ static const char* client_usage_msg[][81] = {
     !defined(NO_PSK)
         "--psk-with-certs  Use TLS 1.3 PSK with certificates\n",        /* 74 */
 #endif
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
+    !defined(NO_PSK)
+        "--psk-importer  Import an external PSK per RFC 9258\n",
+#endif
 #ifdef HAVE_RPK
         "--rpk  Use RPK for the defined certificates\n", /* 75 */
 #endif
@@ -1989,6 +1997,10 @@ static void Usage(void)
     !defined(NO_PSK)
     printf("%s", msg[++msgid]); /* --psk-with-certs */
 #endif
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
+    !defined(NO_PSK)
+    printf("%s", msg[++msgid]); /* --psk-importer */
+#endif
 #ifdef HAVE_RPK
     printf("%s", msg[++msgid]); /* --rpk */
 #endif
@@ -2193,6 +2205,10 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     !defined(NO_PSK)
         { "psk-with-certs", 0, 272 },
 #endif
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
+    !defined(NO_PSK)
+        { "psk-importer", 0, 273 },
+#endif
         { 0, 0, 0 }
     };
 #endif
@@ -2201,6 +2217,7 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     int    usePsk   = 0;
     int    opensslPsk = 0;
     int    usePskWithCerts = 0;
+    int    usePskImporter = 0;
     int    useAnon  = 0;
     int    sendGET  = 0;
     int    benchmark = 0;
@@ -2441,6 +2458,7 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     (void)opensslPsk;
     (void)fileFormat;
     (void)usePskWithCerts;
+    (void)usePskImporter;
     StackTrap();
 
     /* Reinitialize the global myVerifyAction. */
@@ -3103,6 +3121,15 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
                 break;
 #endif
 
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
+    !defined(NO_PSK)
+            case 273:
+                /* Import an external PSK per RFC 9258. */
+                usePskImporter = 1;
+                usePsk = 1;
+                break;
+#endif
+
             default:
                 Usage();
                 XEXIT_T(MY_EX_USAGE);
@@ -3518,6 +3545,15 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 #ifndef NO_PSK
         const char *defaultCipherList = cipherList;
 
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER)
+        if (usePskImporter) {
+            /* RFC 9258 external PSK importer (TLS 1.3 only). */
+            wolfSSL_CTX_set_psk_client_importer_callback(ctx,
+                my_psk_client_importer_cb);
+        }
+        else
+#endif
+        {
         wolfSSL_CTX_set_psk_client_callback(ctx, my_psk_client_cb);
 #ifdef WOLFSSL_TLS13
     #if !defined(WOLFSSL_PSK_TLS13_CB) && !defined(WOLFSSL_PSK_ONE_ID)
@@ -3538,7 +3574,8 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
             }
         }
 #endif
-#endif
+#endif /* WOLFSSL_TLS13 */
+        } /* end of non-importer PSK setup */
         if (defaultCipherList == NULL) {
         #if defined(HAVE_AESGCM) && !defined(NO_DH)
             #ifdef WOLFSSL_TLS13

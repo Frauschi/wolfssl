@@ -2099,6 +2099,75 @@ static WC_INLINE unsigned int my_psk_server_tls13_cb(WOLFSSL* ssl,
 
     return ret;
 }
+
+#ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
+/* Example RFC 9258 external PSK importer callbacks. Both sides use the same
+ * external identity (kIdentityStr), no context, the default SHA-256 importer
+ * hash, and the fixed 32-byte external PSK below. Configure an interop peer
+ * (e.g. GnuTLS >= 3.8.1) with matching values. */
+static WC_INLINE void my_psk_importer_fill_key(unsigned char* key)
+{
+    int i;
+    int b = 0x01;
+    for (i = 0; i < 32; i++, b += 0x22) {
+        if (b >= 0x100)
+            b = 0x01;
+        key[i] = (unsigned char)b;
+    }
+}
+
+static WC_INLINE int my_psk_client_importer_cb(WOLFSSL* ssl,
+        unsigned char* identity, word32* identitySz, unsigned char* context,
+        word32* contextSz, unsigned char* key, word32* keySz, int* hashAlgo)
+{
+    word32 idLen = (word32)XSTRLEN(kIdentityStr);
+
+    (void)ssl;
+    (void)hashAlgo; /* leave the default WC_SHA256 importer hash */
+
+    if (idLen > *identitySz)
+        return -1;
+    XMEMCPY(identity, kIdentityStr, idLen);
+    *identitySz = idLen;
+
+    /* No optional context in this example. */
+    if (context != NULL && contextSz != NULL)
+        *contextSz = 0;
+
+    if (32 > *keySz)
+        return -1;
+    my_psk_importer_fill_key(key);
+    *keySz = 32;
+
+    return 0;
+}
+
+static WC_INLINE int my_psk_server_importer_cb(WOLFSSL* ssl,
+        const unsigned char* identity, word32 identitySz,
+        const unsigned char* context, word32 contextSz, unsigned char* key,
+        word32* keySz, int* hashAlgo)
+{
+    word32 idLen = (word32)XSTRLEN(kIdentityStr);
+
+    (void)ssl;
+    (void)context;
+    (void)hashAlgo; /* leave the default WC_SHA256 importer hash */
+
+    if (identity == NULL || identitySz != idLen ||
+            XMEMCMP(identity, kIdentityStr, idLen) != 0)
+        return -1;
+    /* This example advertises no context. */
+    if (contextSz != 0)
+        return -1;
+
+    if (32 > *keySz)
+        return -1;
+    my_psk_importer_fill_key(key);
+    *keySz = 32;
+
+    return 0;
+}
+#endif /* WOLFSSL_EXTERNAL_PSK_IMPORTER */
 #endif
 
 #ifdef OPENSSL_EXTRA
