@@ -3873,6 +3873,11 @@ WOLFSSL_LOCAL int TLSX_PreSharedKey_CreateImportedIdentity(const byte* id,
 WOLFSSL_LOCAL int TLSX_PreSharedKey_ParseImportedIdentity(byte* input,
         word16 length, byte** id, word16* id_len, byte** ctx,word16* ctx_len,
         byte* hkdf, ProtocolVersion* protocol);
+WOLFSSL_LOCAL int DeriveImportedPsk(const byte* epsk, word32 epskSz,
+        int preExtracted, const byte* importedIdentity,
+        word32 importedIdentitySz, int importerHash, byte targetKdfMac,
+        byte protocolMinor, int isDtls, byte* out, word32* outSz,
+        void* heap, int devId);
 #endif
 #endif /* HAVE_SESSION_TICKET || !NO_PSK */
 

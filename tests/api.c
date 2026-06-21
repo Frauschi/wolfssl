@@ -30654,12 +30654,123 @@ static int test_tls13_external_psk_importer_parse(void)
 
     return EXPECT_RESULT();
 }
+
+/* Known-answer vectors for the imported-PSK derivation, computed independently
+ * of wolfSSL (Python hashlib/hmac) from RFC 9258 Section 3.1. A symmetric
+ * derivation bug would still let the handshake tests pass, so these pin the
+ * exact ImportedIdentity serialization and ipskx output.
+ *
+ * Inputs: external_identity = "9258 Client_identity", epsk = 16 x 0x0b,
+ *         target_protocol = TLS 1.3 (0x0304). */
+static const byte test_kat_id[] = "9258 Client_identity"; /* 20 bytes, no NUL */
+static const byte test_kat_ctx[] = "RFC 9258 test context"; /* 21 bytes */
+static const byte test_kat_epsk[16] = {
+    0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+    0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b
+};
+
+/* V1: no context, target_kdf = HKDF_SHA256 (L=32), importer hash SHA-256. */
+static const byte test_kat_ii1[] = {
+    0x00, 0x14, 0x39, 0x32, 0x35, 0x38, 0x20, 0x43, 0x6c, 0x69, 0x65, 0x6e,
+    0x74, 0x5f, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x00, 0x00,
+    0x03, 0x04, 0x00, 0x01
+};
+static const byte test_kat_ipsk1[] = {
+    0x03, 0xa2, 0x4c, 0xc5, 0xe7, 0x8a, 0xeb, 0xb0, 0x03, 0x22, 0x7b, 0x99,
+    0x98, 0x3a, 0x66, 0x9c, 0x35, 0xa5, 0x98, 0x93, 0xb6, 0xd0, 0x57, 0x70,
+    0x8d, 0xe3, 0x50, 0x50, 0x58, 0x1b, 0x59, 0xfe
+};
+#if defined(WOLFSSL_SHA384)
+/* V2: with context, target_kdf = HKDF_SHA384 (L=48), importer hash SHA-256. */
+static const byte test_kat_ii2[] = {
+    0x00, 0x14, 0x39, 0x32, 0x35, 0x38, 0x20, 0x43, 0x6c, 0x69, 0x65, 0x6e,
+    0x74, 0x5f, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x00, 0x15,
+    0x52, 0x46, 0x43, 0x20, 0x39, 0x32, 0x35, 0x38, 0x20, 0x74, 0x65, 0x73,
+    0x74, 0x20, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x03, 0x04, 0x00,
+    0x02
+};
+static const byte test_kat_ipsk2[] = {
+    0x89, 0x27, 0x92, 0x54, 0xf5, 0x07, 0xa5, 0x5d, 0xeb, 0xff, 0x72, 0x4a,
+    0xc1, 0xee, 0x14, 0x2a, 0x1f, 0x2d, 0xe7, 0x6d, 0x54, 0x18, 0xd7, 0x12,
+    0xb4, 0xe9, 0x83, 0xdc, 0x4e, 0xd0, 0x71, 0x4e, 0x5b, 0x70, 0xa4, 0x77,
+    0x78, 0x65, 0x09, 0x0c, 0x2e, 0x02, 0x61, 0x43, 0x6e, 0x2d, 0x75, 0x95
+};
+/* V3: with context, target_kdf = HKDF_SHA256 (L=32), importer hash SHA-384. */
+static const byte test_kat_ii3[] = {
+    0x00, 0x14, 0x39, 0x32, 0x35, 0x38, 0x20, 0x43, 0x6c, 0x69, 0x65, 0x6e,
+    0x74, 0x5f, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x00, 0x15,
+    0x52, 0x46, 0x43, 0x20, 0x39, 0x32, 0x35, 0x38, 0x20, 0x74, 0x65, 0x73,
+    0x74, 0x20, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x03, 0x04, 0x00,
+    0x01
+};
+static const byte test_kat_ipsk3[] = {
+    0xf2, 0x32, 0xfc, 0xfe, 0xdc, 0x36, 0x8b, 0xda, 0xf6, 0xbc, 0x4c, 0xcf,
+    0xff, 0x4e, 0x60, 0xee, 0x2c, 0xa0, 0xd2, 0x81, 0x0a, 0x3d, 0x8c, 0x17,
+    0xba, 0x4e, 0xac, 0x25, 0x13, 0x18, 0x7d, 0xd8
+};
+#endif /* WOLFSSL_SHA384 */
+
+static int test_tls13_psk_importer_kat_one(const byte* ctx, word16 ctxLen,
+        byte targetKdfMac, int importerHash, const byte* expII, word16 expIISz,
+        const byte* expIpsk, word32 expIpskSz)
+{
+    EXPECT_DECLS;
+    byte   ii[128];
+    word16 iiSz = (word16)sizeof(ii);
+    byte   out[MAX_PSK_KEY_LEN];
+    word32 outSz = 0;
+    ProtocolVersion pv;
+
+    pv.major = SSLv3_MAJOR;
+    pv.minor = TLSv1_3_MINOR;
+
+    /* ImportedIdentity serialization matches the independent vector. */
+    ExpectIntEQ(TLSX_PreSharedKey_CreateImportedIdentity(test_kat_id,
+        (word16)XSTRLEN((const char*)test_kat_id), ctx, ctxLen, targetKdfMac,
+        pv, ii, &iiSz), 0);
+    ExpectIntEQ((int)iiSz, (int)expIISz);
+    ExpectIntEQ(XMEMCMP(ii, expII, expIISz), 0);
+
+    /* Derived imported PSK (ipskx) matches the independent vector. */
+    ExpectIntEQ(DeriveImportedPsk(test_kat_epsk, (word32)sizeof(test_kat_epsk),
+        0, expII, expIISz, importerHash, targetKdfMac, TLSv1_3_MINOR, 0, out,
+        &outSz, NULL, INVALID_DEVID), 0);
+    ExpectIntEQ((int)outSz, (int)expIpskSz);
+    ExpectIntEQ(XMEMCMP(out, expIpsk, expIpskSz), 0);
+
+    return EXPECT_RESULT();
+}
+
+static int test_tls13_external_psk_importer_kat(void)
+{
+    EXPECT_DECLS;
+
+    ExpectIntEQ(test_tls13_psk_importer_kat_one(NULL, 0, sha256_mac, WC_SHA256,
+        test_kat_ii1, (word16)sizeof(test_kat_ii1),
+        test_kat_ipsk1, (word32)sizeof(test_kat_ipsk1)), TEST_SUCCESS);
+#if defined(WOLFSSL_SHA384)
+    ExpectIntEQ(test_tls13_psk_importer_kat_one(test_kat_ctx,
+        (word16)(sizeof(test_kat_ctx) - 1), sha384_mac, WC_SHA256,
+        test_kat_ii2, (word16)sizeof(test_kat_ii2),
+        test_kat_ipsk2, (word32)sizeof(test_kat_ipsk2)), TEST_SUCCESS);
+    ExpectIntEQ(test_tls13_psk_importer_kat_one(test_kat_ctx,
+        (word16)(sizeof(test_kat_ctx) - 1), sha256_mac, WC_SHA384,
+        test_kat_ii3, (word16)sizeof(test_kat_ii3),
+        test_kat_ipsk3, (word32)sizeof(test_kat_ipsk3)), TEST_SUCCESS);
+#endif
+
+    return EXPECT_RESULT();
+}
 #else
 static int test_tls13_external_psk_importer(void)
 {
     return TEST_SKIPPED;
 }
 static int test_tls13_external_psk_importer_parse(void)
+{
+    return TEST_SKIPPED;
+}
+static int test_tls13_external_psk_importer_kat(void)
 {
     return TEST_SKIPPED;
 }
@@ -35798,6 +35909,7 @@ TEST_CASE testCases[] = {
     TEST_DECL(test_prioritize_psk),
     TEST_DECL(test_tls13_external_psk_importer),
     TEST_DECL(test_tls13_external_psk_importer_parse),
+    TEST_DECL(test_tls13_external_psk_importer_kat),
 
     /* Can't memory test as client/server hangs. */
     TEST_DECL(test_wc_CryptoCb),

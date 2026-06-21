@@ -3283,10 +3283,13 @@ enum { /* ssl Constants */
 
     #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
     /* On entry each *Sz holds the buffer capacity; on exit the actual length.
-     * identity, context and key are opaque byte buffers (RFC 9258).
+     * identity, context and key are opaque byte buffers (RFC 9258); identity is
+     * capped at MAX_PSK_ID_LEN and context at MAX_PSK_CTX_LEN.
      * hashAlgo is the hash function associated with the external PSK: it is
      * pre-initialized to WC_SHA256 (the RFC 9258 default) and only needs to be
-     * changed if the EPSK is associated with a different hash. */
+     * changed if the EPSK is associated with a different hash.
+     * The callback must be deterministic: it is invoked more than once per
+     * connection and must return the same values each time. */
     typedef int (*wc_psk_client_importer_callback)(WOLFSSL* ssl,
         unsigned char* identity, word32* identitySz,
         unsigned char* context, word32* contextSz,
@@ -3323,7 +3326,9 @@ enum { /* ssl Constants */
      * on entry *keySz holds the key buffer capacity, on exit the actual key
      * length (RFC 9258). hashAlgo is the hash associated with the external PSK,
      * pre-initialized to WC_SHA256; change it only for an EPSK associated with
-     * a different hash. */
+     * a different hash. The callback must be deterministic: it may be invoked
+     * more than once per connection and must return the same values each
+     * time. */
     typedef int (*wc_psk_server_importer_callback)(WOLFSSL* ssl,
         const unsigned char* identity, word32 identitySz,
         const unsigned char* context, word32 contextSz,
