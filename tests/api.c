@@ -30398,6 +30398,156 @@ static int test_prioritize_psk(void)
 }
 #endif
 
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
+    !defined(NO_PSK) && !defined(WOLFSSL_PSK_ONE_ID) && \
+    defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && \
+    defined(HAVE_AESGCM) && !defined(NO_SHA256) && defined(WOLFSSL_AES_128)
+/* Shared external PSK (EPSK) and ImportedIdentity inputs used by both the
+ * client and server importer callbacks (RFC 9258). */
+static const char  test_psk_importer_identity[] = "9258 Client_identity";
+static const unsigned char test_psk_importer_epsk[] = {
+    0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+    0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b
+};
+static const char  test_psk_importer_context[] = "RFC 9258 test context";
+/* Toggle whether the EPSK carries an optional context. */
+static int test_psk_importer_use_context = 0;
+
+static int test_psk_importer_client_cb(WOLFSSL* ssl, char* id, word32 idMax,
+        unsigned char* ctx, word32* ctxSz, unsigned char* key, word32* keySz)
+{
+    (void)ssl;
+
+    if (XSTRLEN(test_psk_importer_identity) + 1 > idMax)
+        return -1;
+    XSTRNCPY(id, test_psk_importer_identity, idMax);
+
+    if (ctx != NULL && ctxSz != NULL) {
+        if (test_psk_importer_use_context) {
+            word32 ctxLen = (word32)XSTRLEN(test_psk_importer_context);
+            if (ctxLen > *ctxSz)
+                return -1;
+            XMEMCPY(ctx, test_psk_importer_context, ctxLen);
+            *ctxSz = ctxLen;
+        }
+        else {
+            *ctxSz = 0;
+        }
+    }
+
+    if ((word32)sizeof(test_psk_importer_epsk) > *keySz)
+        return -1;
+    XMEMCPY(key, test_psk_importer_epsk, sizeof(test_psk_importer_epsk));
+    *keySz = (word32)sizeof(test_psk_importer_epsk);
+
+    return 0;
+}
+
+static int test_psk_importer_server_cb(WOLFSSL* ssl, const char* id,
+        const unsigned char* ctx, word32 ctxSz, unsigned char* key,
+        word32* keySz)
+{
+    (void)ssl;
+
+    /* Match the received external identity. */
+    if (id == NULL || XSTRCMP(id, test_psk_importer_identity) != 0)
+        return -1;
+
+    /* Match the optional context exactly as advertised by the client. */
+    if (test_psk_importer_use_context) {
+        word32 ctxLen = (word32)XSTRLEN(test_psk_importer_context);
+        if (ctxSz != ctxLen || ctx == NULL ||
+                XMEMCMP(ctx, test_psk_importer_context, ctxLen) != 0)
+            return -1;
+    }
+    else if (ctxSz != 0) {
+        return -1;
+    }
+
+    if ((word32)sizeof(test_psk_importer_epsk) > *keySz)
+        return -1;
+    XMEMCPY(key, test_psk_importer_epsk, sizeof(test_psk_importer_epsk));
+    *keySz = (word32)sizeof(test_psk_importer_epsk);
+
+    return 0;
+}
+
+/* Run a single TLS 1.3 handshake that authenticates with an imported external
+ * PSK (RFC 9258), restricted to the given cipher suite. */
+static int test_tls13_external_psk_importer_one(const char* cipher,
+        int expectedSuite, int useContext, int preExtracted)
+{
+    EXPECT_DECLS;
+    WOLFSSL_CTX *ctx_c = NULL, *ctx_s = NULL;
+    WOLFSSL     *ssl_c = NULL, *ssl_s = NULL;
+    struct test_memio_ctx test_ctx;
+
+    test_psk_importer_use_context = useContext;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+
+    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfTLSv1_3_client_method, wolfTLSv1_3_server_method), 0);
+
+    /* PSK authenticates the peers; no certificate is required. */
+    wolfSSL_set_verify(ssl_c, WOLFSSL_VERIFY_NONE, NULL);
+    wolfSSL_set_verify(ssl_s, WOLFSSL_VERIFY_NONE, NULL);
+
+    wolfSSL_set_psk_client_importer_callback(ssl_c,
+        test_psk_importer_client_cb);
+    wolfSSL_set_psk_server_importer_callback(ssl_s,
+        test_psk_importer_server_cb);
+
+    if (preExtracted) {
+        ExpectIntEQ(wolfSSL_external_psk_pre_extracted(ssl_c, 1), 0);
+        ExpectIntEQ(wolfSSL_external_psk_pre_extracted(ssl_s, 1), 0);
+    }
+
+    /* Restrict both sides to the suite under test (importer callback setup
+     * rebuilds the suite list, so set the cipher list afterwards). */
+    ExpectIntEQ(wolfSSL_set_cipher_list(ssl_c, cipher), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_set_cipher_list(ssl_s, cipher), WOLFSSL_SUCCESS);
+
+    ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
+
+    ExpectIntEQ(wolfSSL_get_current_cipher_suite(ssl_c), expectedSuite);
+    ExpectIntEQ(wolfSSL_get_current_cipher_suite(ssl_s), expectedSuite);
+
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
+
+    return EXPECT_RESULT();
+}
+
+static int test_tls13_external_psk_importer(void)
+{
+    EXPECT_DECLS;
+
+    /* HKDF_SHA256 target_kdf, without and with an optional context. */
+    ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
+        0x1301, 0, 0), TEST_SUCCESS);
+    ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
+        0x1301, 1, 0), TEST_SUCCESS);
+    /* Pre-extracted EPSK (HKDF-Extract is skipped during import). */
+    ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES128-GCM-SHA256",
+        0x1301, 1, 1), TEST_SUCCESS);
+#if defined(WOLFSSL_SHA384) && defined(WOLFSSL_AES_256)
+    /* HKDF_SHA384 target_kdf exercises the L = 48 derived-PSK length. */
+    ExpectIntEQ(test_tls13_external_psk_importer_one("TLS13-AES256-GCM-SHA384",
+        0x1302, 1, 0), TEST_SUCCESS);
+#endif
+
+    return EXPECT_RESULT();
+}
+#else
+static int test_tls13_external_psk_importer(void)
+{
+    return TEST_SKIPPED;
+}
+#endif
+
 #if defined(WOLFSSL_TLS13) && defined(OPENSSL_EXTRA) && \
     defined(HAVE_SSL_MEMIO_TESTS_DEPENDENCIES) && defined(HAVE_AESGCM) && \
     !defined(NO_SHA256) && defined(WOLFSSL_AES_128) && \
@@ -35529,6 +35679,7 @@ TEST_CASE testCases[] = {
     TEST_DECL(test_ticket_and_psk_mixing),
     /* Can't memory test as client/server Asserts in thread. */
     TEST_DECL(test_prioritize_psk),
+    TEST_DECL(test_tls13_external_psk_importer),
 
     /* Can't memory test as client/server hangs. */
     TEST_DECL(test_wc_CryptoCb),

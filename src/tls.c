@@ -12620,6 +12620,146 @@ int TLSX_PreSharedKey_Use(TLSX** extensions, const byte* identity, word16 len,
     return 0;
 }
 
+#ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
+/* Create an ImportedIdentity object based on RFC 9258.
+ *
+ * ssl      The SSL/TLS object.
+ * id       The external identity.
+ * id_len   Length of the external identity.
+ * ctx      The optional external context.
+ * ctx_len  Length of the external context.
+ * hmac     The underlying HMAC algorithm to be used for the TLS HKDF.
+ * protocol The protocol version to be used for the connection.
+ * output   The buffer to write the ImportedIdentity object into.
+ * out_len  On entry, size of the output buffer.
+ *          On exit, the number of bytes written into the buffer.
+ *
+ * When output is NULL and out_len is not NULL, the function will store the
+ * size of the buffer needed to write the ImportedIdentity object.
+ * Returns 0 on success and other values indicate failure.
+ */
+int TLSX_PreSharedKey_CreateImportedIdentity(const byte* id, word16 id_len,
+        const byte* ctx, word16 ctx_len, byte hmac, ProtocolVersion protocol,
+        byte* output, word16* out_len)
+{
+    int ret = 0;
+    word16 idx = 0;
+
+    if ((output == NULL && out_len == NULL) || id == NULL || id_len == 0 ||
+        !IsAtLeastTLSv1_3(protocol))
+        return BAD_FUNC_ARG;
+
+    if (output == NULL && out_len != NULL) {
+        /* Calculate the size of the ImportedIdentity object. Identity
+         * and context are both prefixed with their length as 16-bit.
+         * 'target_protocol' and 'target_kdf' are both 16-bit integers.
+         */
+        *out_len = OPAQUE16_LEN + id_len + OPAQUE16_LEN + ctx_len +
+                   OPAQUE16_LEN + OPAQUE16_LEN;
+        return 0;
+    }
+
+    /* Check if output buffer is big enough */
+    if (*out_len < (OPAQUE16_LEN + id_len + OPAQUE16_LEN + ctx_len +
+                    OPAQUE16_LEN + OPAQUE16_LEN))
+        return BUFFER_E;
+
+    /* Write identity */
+    c16toa(id_len, output + idx);
+    idx += OPAQUE16_LEN;
+    XMEMCPY(output + idx, id, id_len);
+    idx += id_len;
+
+    /* Write context */
+    if (ctx != NULL && ctx_len > 0) {
+        c16toa(ctx_len, output + idx);
+        idx += OPAQUE16_LEN;
+        XMEMCPY(output + idx, ctx, ctx_len);
+        idx += ctx_len;
+    } else {
+        c16toa(0, output + idx);
+        idx += OPAQUE16_LEN;
+    }
+
+    /* Write target_protocol */
+    output[idx++] = protocol.major;
+    output[idx++] = protocol.minor;
+
+    /* Write target_kdf */
+    if (hmac == sha256_mac) {
+        output[idx++] = 0x00;
+        output[idx++] = 0x01;
+    } else if (hmac == sha384_mac) {
+        output[idx++] = 0x00;
+        output[idx++] = 0x02;
+    } else
+        return BAD_FUNC_ARG;
+
+    *out_len = idx;
+
+    return ret;
+}
+
+int TLSX_PreSharedKey_ParseImportedIdentity(byte* input, word16 length,
+        byte** id, word16* id_len, byte** ctx, word16* ctx_len,
+        byte* hkdf, ProtocolVersion* protocol)
+{
+    int ret = 0;
+    word16 idx = 0;
+    word16 target_kdf = 0;
+
+    /* Validate input. The minimum length is 4 times a 16-bit integer for
+     * the two length fields (id and ctx), the hkdf and the protocol version.
+     */
+    if (input == NULL || length < (4 * OPAQUE16_LEN))
+        return BAD_FUNC_ARG;
+
+    /* Get identity len */
+    ato16(input + idx, id_len);
+    idx += OPAQUE16_LEN;
+    if (*id_len > length - idx - (3 * OPAQUE16_LEN))
+        return BUFFER_E;
+
+    /* Get identity */
+    if (*id_len > 0) {
+        *id = input + idx;
+        idx += *id_len;
+    }
+    else
+        *id = NULL;
+
+    /* Get context len */
+    ato16(input + idx, ctx_len);
+    idx += OPAQUE16_LEN;
+    if (*ctx_len > length - idx - (2 * OPAQUE16_LEN))
+        return BUFFER_E;
+
+    /* Get context */
+    if (*ctx_len > 0) {
+        *ctx = input + idx;
+        idx += *ctx_len;
+    }
+    else
+        *ctx = NULL;
+
+    /* Get target_protocol */
+    protocol->major = input[idx++];
+    protocol->minor = input[idx++];
+
+    /* Get target_kdf */
+    ato16(input + idx, &target_kdf);
+    idx += OPAQUE16_LEN;
+    if (target_kdf == 0x0001)
+        *hkdf = sha256_mac;
+    else if (target_kdf == 0x0002)
+        *hkdf = sha384_mac;
+    else
+        return BAD_FUNC_ARG;
+
+    return ret;
+}
+#endif /* WOLFSSL_EXTERNAL_PSK_IMPORTER */
+
 #define PSK_FREE_ALL  TLSX_PreSharedKey_FreeAll
 #define PSK_GET_SIZE  TLSX_PreSharedKey_GetSize
 #define PSK_WRITE     TLSX_PreSharedKey_Write
@@ -16487,6 +16627,145 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
         #endif
     #ifndef NO_PSK
         #ifndef WOLFSSL_PSK_ONE_ID
+        #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
+            if (ssl->options.client_psk_importer_cb != NULL) {
+                int i;
+                word32 identitySz = 0;
+                word32 ctxSz = MAX_PSK_CTX_LEN;
+                ssl->arrays->psk_keySz = MAX_PSK_KEY_LEN;
+            #ifndef WOLFSSL_SMALL_STACK
+                byte ctx[MAX_PSK_CTX_LEN];
+            #else
+                byte* ctx = (byte*)XMALLOC(MAX_PSK_CTX_LEN, ssl->heap,
+                                           DYNAMIC_TYPE_TMP_BUFFER);
+                if (ctx == NULL)
+                    return MEMORY_ERROR;
+            #endif
+
+                /* Get the external PSK data (identity, optional context and
+                 * the actual key) by executing the user callback. */
+                ret = ssl->options.client_psk_importer_cb(ssl,
+                        ssl->arrays->client_identity, MAX_PSK_ID_LEN, ctx,
+                        &ctxSz, ssl->arrays->psk_key, &ssl->arrays->psk_keySz);
+                if (ret != 0) {
+                #ifdef WOLFSSL_SMALL_STACK
+                    XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                #endif
+                    return PSK_KEY_ERROR;
+                }
+
+                identitySz = XSTRLEN(ssl->arrays->client_identity);
+                if (identitySz > MAX_PSK_ID_LEN ||
+                    ctxSz > MAX_PSK_CTX_LEN ||
+                    ssl->arrays->psk_keySz > MAX_PSK_KEY_LEN) {
+                #ifdef WOLFSSL_SMALL_STACK
+                    XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                #endif
+                    return PSK_KEY_ERROR;
+                }
+
+                if (ssl->arrays->psk_keySz > 0 && identitySz > 0) {
+                    const Suites* suites = WOLFSSL_SUITES(ssl);
+
+                    for (i = 0; i < suites->suiteSz; i += 2) {
+                        byte* importedIdentity = NULL;
+                        word16 importedIdentitySz = 0;
+                        byte cipherSuite0 = suites->suites[i + 0];
+                        byte cipherSuite = suites->suites[i + 1];
+                        PreSharedKey* psk = NULL;
+
+                    #ifdef HAVE_NULL_CIPHER
+                        if (cipherSuite0 == ECC_BYTE ||
+                            cipherSuite0 == ECDHE_PSK_BYTE) {
+                            if (cipherSuite != TLS_SHA256_SHA256 &&
+                                cipherSuite != TLS_SHA384_SHA384) {
+                                continue;
+                            }
+                        }
+                        else
+                    #endif
+                    #if (defined(WOLFSSL_SM4_GCM) || \
+                                                  defined(WOLFSSL_SM4_CCM)) && \
+                        defined(WOLFSSL_SM3)
+                        if (cipherSuite0 == CIPHER_BYTE) {
+                            if ((cipherSuite != TLS_SM4_GCM_SM3) &&
+                                (cipherSuite != TLS_SM4_CCM_SM3)) {
+                                continue;
+                            }
+                        }
+                        else
+                    #endif
+                        if (cipherSuite0 != TLS13_BYTE)
+                            continue;
+
+                        /* Get length of imported identity */
+                        ret = TLSX_PreSharedKey_CreateImportedIdentity(
+                                (byte*)ssl->arrays->client_identity, identitySz,
+                                ctx, ctxSz,
+                                SuiteMac(WOLFSSL_SUITES(ssl)->suites + i),
+                                ssl->version, NULL, &importedIdentitySz);
+                        if (ret != 0) {
+                        #ifdef WOLFSSL_SMALL_STACK
+                            XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                        #endif
+                            return ret;
+                        }
+
+                        importedIdentity = (byte*)XMALLOC(importedIdentitySz,
+                                                          ssl->heap,
+                                                          DYNAMIC_TYPE_TLSX);
+                        if (importedIdentity == NULL) {
+                        #ifdef WOLFSSL_SMALL_STACK
+                            XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                        #endif
+                            return MEMORY_ERROR;
+                        }
+
+                        /* Generate the actual imported identity */
+                        ret = TLSX_PreSharedKey_CreateImportedIdentity(
+                                (byte*)ssl->arrays->client_identity, identitySz,
+                                ctx, ctxSz,
+                                SuiteMac(WOLFSSL_SUITES(ssl)->suites + i),
+                                ssl->version, importedIdentity,
+                                &importedIdentitySz);
+                        if (ret != 0) {
+                        #ifdef WOLFSSL_SMALL_STACK
+                            XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                        #endif
+                            XFREE(importedIdentity, ssl->heap,
+                                  DYNAMIC_TYPE_TLSX);
+                            return ret;
+                        }
+
+                        /* Store the PSK */
+                        ret = TLSX_PreSharedKey_Use(&ssl->extensions,
+                                importedIdentity, importedIdentitySz,
+                                0, SuiteMac(WOLFSSL_SUITES(ssl)->suites + i),
+                                cipherSuite0, cipherSuite, 0, &psk, ssl->heap);
+                        if (ret != 0) {
+                        #ifdef WOLFSSL_SMALL_STACK
+                            XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                        #endif
+                            XFREE(importedIdentity, ssl->heap,
+                                  DYNAMIC_TYPE_TLSX);
+                            return ret;
+                        }
+
+                        /* Set flag in the PSK object to indicate that this
+                         * one is imported. We use that flag to select the
+                         * proper derive method for the binder key. */
+                        psk->imported = 1;
+
+                        XFREE(importedIdentity, ssl->heap, DYNAMIC_TYPE_TLSX);
+                        usingPSK = 1;
+                    }
+                }
+            #ifdef WOLFSSL_SMALL_STACK
+                XFREE(ctx, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+            #endif
+            }
+            else
+        #endif /* WOLFSSL_EXTERNAL_PSK_IMPORTER */
             if (ssl->options.client_psk_cs_cb != NULL) {
                 int i;
                 const Suites* suites = WOLFSSL_SUITES(ssl);
@@ -16554,7 +16833,7 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
                 usingPSK = 1;
             }
             else
-        #endif
+        #endif /* WOLFSSL_PSK_ONE_ID */
             if (ssl->options.client_psk_cb != NULL ||
                 ssl->options.client_psk_tls13_cb != NULL) {
                 /* Default cipher suite. */

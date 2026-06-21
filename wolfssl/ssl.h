@@ -3280,6 +3280,15 @@ enum { /* ssl Constants */
         wc_psk_client_tls13_callback cb);
     WOLFSSL_API void wolfSSL_set_psk_client_tls13_callback(WOLFSSL* ssl,
         wc_psk_client_tls13_callback cb);
+
+    #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
+    typedef int (*wc_psk_client_importer_callback)(WOLFSSL* ssl, char*,
+        word32, unsigned char*, word32*, unsigned char*, word32*);
+    WOLFSSL_API void wolfSSL_CTX_set_psk_client_importer_callback(WOLFSSL_CTX* ctx,
+        wc_psk_client_importer_callback cb);
+    WOLFSSL_API void wolfSSL_set_psk_client_importer_callback(WOLFSSL* ssl,
+        wc_psk_client_importer_callback cb);
+    #endif
 #endif
 
     WOLFSSL_API const char* wolfSSL_get_psk_identity_hint(const WOLFSSL* ssl);
@@ -3301,6 +3310,15 @@ enum { /* ssl Constants */
         wc_psk_server_tls13_callback cb);
     WOLFSSL_API void wolfSSL_set_psk_server_tls13_callback(WOLFSSL* ssl,
         wc_psk_server_tls13_callback cb);
+
+    #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
+    typedef int (*wc_psk_server_importer_callback)(WOLFSSL* ssl, const char*,
+        const unsigned char*, word32, unsigned char*, word32*);
+    WOLFSSL_API void wolfSSL_CTX_set_psk_server_importer_callback(WOLFSSL_CTX* ctx,
+        wc_psk_server_importer_callback cb);
+    WOLFSSL_API void wolfSSL_set_psk_server_importer_callback(WOLFSSL* ssl,
+        wc_psk_server_importer_callback cb);
+    #endif
 #endif
 #if defined(WOLFSSL_TLS13) && defined(WOLFSSL_CERT_WITH_EXTERN_PSK)
     WOLFSSL_API int wolfSSL_CTX_set_cert_with_extern_psk(WOLFSSL_CTX* ctx,
@@ -3318,6 +3336,10 @@ enum { /* ssl Constants */
 #ifdef WOLFSSL_TLS13
     WOLFSSL_API const char* wolfSSL_get_cipher_name_by_hash(WOLFSSL* ssl,
         const char* hash);
+
+    #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
+    WOLFSSL_API int wolfSSL_external_psk_pre_extracted(WOLFSSL* ssl, int opt);
+    #endif
 #endif
 #endif /* NO_PSK */
 

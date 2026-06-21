@@ -7234,7 +7234,11 @@ int SetSSL_CTX(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup)
     ssl->options.client_psk_cs_cb    = ctx->client_psk_cs_cb;
     ssl->options.client_psk_tls13_cb = ctx->client_psk_tls13_cb;
     ssl->options.server_psk_tls13_cb = ctx->server_psk_tls13_cb;
+#ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
+    ssl->options.client_psk_importer_cb = ctx->client_psk_importer_cb;
+    ssl->options.server_psk_importer_cb = ctx->server_psk_importer_cb;
 #endif
+#endif /* WOLFSSL_TLS13 */
 #endif /* NO_PSK */
 #ifdef WOLFSSL_EARLY_DATA
     if (ssl->options.side == WOLFSSL_SERVER_END)
