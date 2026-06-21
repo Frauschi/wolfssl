@@ -1681,14 +1681,14 @@ typedef struct ESD {
                         byte digEncAlgoId[MAX_ALGO_SZ];
 #endif
                         byte signedAttribSet[MAX_SET_SZ];
-                            /* Working attribute array. signedAttribs points at
-                             * the inline buffer for the common case (no heap
-                             * use, important for no-malloc/static-memory builds)
-                             * and is redirected to a heap allocation only when
-                             * the attribute count exceeds MAX_SIGNED_ATTRIBS_SZ.
-                             * signedAttribsCap holds the usable entry count. */
-                            EncodedAttrib signedAttribsInline[MAX_SIGNED_ATTRIBS_SZ];
-                            EncodedAttrib* signedAttribs;
+                        /* Working attribute array. signedAttribs points at the
+                         * inline buffer for the common case (no heap use,
+                         * important for no-malloc/static-memory builds) and is
+                         * redirected to a heap allocation only when the
+                         * attribute count exceeds MAX_SIGNED_ATTRIBS_SZ.
+                         * signedAttribsCap holds the usable entry count. */
+                        EncodedAttrib signedAttribsInline[MAX_SIGNED_ATTRIBS_SZ];
+                        EncodedAttrib* signedAttribs;
                         byte signerDigest[MAX_OCTET_STR_SZ];
     word32 signedAttribsCap;
     word32 innerOctetsSz, innerContSeqSz, contentInfoSeqSz;

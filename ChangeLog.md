@@ -2,31 +2,6 @@
 
 ## Enhancements
 
-* **PKCS#7 server-side encode helpers**: Added
-  `wc_PKCS7_EncodeCertsOnlySignedData()` to emit a degenerate, certs-only
-  CMS/PKCS#7 SignedData (no signer, no signed attributes, no eContent) around
-  the certificate(s) loaded into the PKCS7 structure; useful for EST `/cacerts`
-  and SCEP GetCACert responses. The SignedData signer-attribute working array
-  is now allocated at encode time, sized to the actual attribute count, instead
-  of a fixed array bounded by `MAX_SIGNED_ATTRIBS_SZ`; this removes the prior
-  cap (so profiles such as SCEP CertRep (RFC 8894) can carry their full set of
-  signed attributes) and adds no fixed per-structure footprint.
-  `MAX_SIGNED_ATTRIBS_SZ` is retained for source compatibility but no longer
-  bounds the attribute count. Documented the stable shape of
-  `PKCS7DecodedAttrib.value` (the contents of the `SET OF AttributeValue`, with
-  the outer SET tag stripped) and added `wc_PKCS7_GetSignedAttribValue()` to
-  fetch the first AttributeValue TLV by OID without copying. The
-  decoded-attribute value shape is documentation of existing behavior and does
-  not change it.
-
-* **PKCS#7 multi-certificate decode fix (non-streaming)**: Fixed the additional
-  -certificate loop in `wc_PKCS7_VerifySignedData` to bound against the absolute
-  end of the certificate set rather than its relative length. In `NO_PKCS7_STREAM`
-  builds this previously stopped short and dropped trailing certificates (and,
-  with a large eContent preceding the certificate set, could drop all but the
-  first certificate, causing signature verification to fail when the signer
-  certificate was among those dropped). Streaming builds were unaffected.
-
 * **Behavioral change (RSA-PSS trailerField enforcement)**: `DecodeRsaPssParams`
   (and its public wrapper `wc_DecodeRsaPssParams`) now enforces RFC 8017 A.2.3,
   which mandates `trailerField == trailerFieldBC(1)`.  In the default build
