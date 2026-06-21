@@ -75,10 +75,7 @@
 #endif
 #if defined(WOLFSSL_HAVE_MLDSA) && !defined(WOLFSSL_MLDSA_NO_ASN1)
     #include <wolfssl/wolfcrypt/wc_mldsa.h>
-    /* ML-DSA (and, going forward, other "pure" PQC signature schemes) can be
-     * used to sign CMS/PKCS#7 SignedData per RFC 9882. Such algorithms sign the
-     * complete message rather than a pre-computed digest, so they take a
-     * dedicated path through the SignedData sign/verify dispatchers below. */
+    /* gates the ML-DSA SignedData support; see the design note below. */
     #define WC_PKCS7_HAVE_MLDSA
 #endif
 #ifdef HAVE_LIBZ
@@ -1046,23 +1043,6 @@ static int wc_PKCS7_RecipientListVersionsAllZero(wc_PKCS7* pkcs7)
 static int wc_PKCS7_MlDsaLevelFromOID(word32 publicKeyOID, byte* level);
 #endif
 
-/* wc_OidGetHash() extended with the SHAKE128/SHAKE256 digest OIDs. CMS
- * implementations may use a SHAKE message digest with ML-DSA (RFC 9882); the
- * generic hash wrapper squeezes SHAKE's default fixed output length. Kept
- * local to PKCS#7 so the global OID->hash-type mapping is left unchanged. */
-static enum wc_HashType wc_PKCS7_OidGetHash(int oid)
-{
-#if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE256)
-    if (oid == SHAKE256h)
-        return WC_HASH_TYPE_SHAKE256;
-#endif
-#if defined(WOLFSSL_SHA3) && defined(WOLFSSL_SHAKE128)
-    if (oid == SHAKE128h)
-        return WC_HASH_TYPE_SHAKE128;
-#endif
-    return wc_OidGetHash(oid);
-}
-
 /* Returns whether the parameters field of a CMS structural digest
  * AlgorithmIdentifier (SignedData.digestAlgorithms / SignerInfo.digestAlgorithm)
  * should be omitted (absent) rather than encoded as NULL.
@@ -1327,28 +1307,18 @@ int wc_PKCS7_InitWithCert(wc_PKCS7* pkcs7, byte* derCert, word32 derCertSz)
             return ASN_PARSE_E;
         }
 
-#ifdef WC_PKCS7_HAVE_MLDSA
-        if (dCert->keyOID == ML_DSA_44k || dCert->keyOID == ML_DSA_65k ||
-                dCert->keyOID == ML_DSA_87k) {
-            /* ML-DSA public keys are large and are never read back from
-             * pkcs7->publicKey (verification re-parses the key from the signer
-             * certificate). Skip storing it to keep the wc_PKCS7 structure
-             * small: only the RSA/ECC raw-sign callback paths consume
-             * publicKey, and they are guarded by publicKeySz > 0. */
-            pkcs7->publicKeySz = 0;
-        }
-        else
-#endif
-        {
-            if (dCert->pubKeySize > sizeof(pkcs7->publicKey)) {
-                WOLFSSL_MSG("Invalid size in certificate");
-                FreeDecodedCert(dCert);
-                WC_FREE_VAR_EX(dCert, pkcs7->heap, DYNAMIC_TYPE_DCERT);
-                return ASN_PARSE_E;
-            }
-
+        /* Cache the signer public key only when it fits the fixed buffer. It
+         * is consumed solely by the RSA/ECC raw-sign callback paths (guarded by
+         * publicKeySz > 0); larger keys, such as PQC keys whose SPKI exceeds
+         * the buffer, are not cached and callers that need them re-parse from
+         * the certificate. This is independent of key type, so it also covers
+         * any future PQC raw-sign callbacks. */
+        if (dCert->pubKeySize <= sizeof(pkcs7->publicKey)) {
             XMEMCPY(pkcs7->publicKey, dCert->publicKey, dCert->pubKeySize);
             pkcs7->publicKeySz = dCert->pubKeySize;
+        }
+        else {
+            pkcs7->publicKeySz = 0;
         }
         pkcs7->publicKeyOID = dCert->keyOID;
         /* Do not derive publicKeyOID from cert signatureOID: the cert's
@@ -1689,14 +1659,15 @@ typedef struct ESD {
     byte contentDigest[WC_MAX_DIGEST_SIZE + 2]; /* content only + ASN.1 heading */
     WC_BITFIELD contentDigestSet:1;
     byte contentAttribsDigest[WC_MAX_DIGEST_SIZE];
-    byte encContentDigest[MAX_ENCRYPTED_KEY_SZ];
-#ifdef WC_PKCS7_HAVE_MLDSA
-    /* Heap buffer holding a "pure" PQC signature (e.g. ML-DSA), which is far
-     * larger than the fixed encContentDigest[] used for RSA/ECDSA. When set,
-     * this buffer (of encContentDigestSz octets) carries the signature instead
-     * of encContentDigest[]. Freed in the encode cleanup path. */
-    byte* pqcSig;
-#endif
+    /* Signature buffer, heap allocated and right-sized to the signature
+     * algorithm before signing (the size is obtained from
+     * wc_PKCS7_GetSignSize). A single allocation serves every algorithm
+     * (RSA/ECDSA/RSA-PSS/ML-DSA), so signature storage is not special-cased by
+     * type. encContentDigestSz is the actual signature length and
+     * encContentDigestBufSz is the allocated capacity. Freed in the encode
+     * cleanup path. */
+    byte*  encContentDigest;
+    word32 encContentDigestBufSz;
 
     byte outerSeq[MAX_SEQ_SZ];
         byte outerContent[MAX_EXP_SZ];
@@ -2063,7 +2034,7 @@ static int wc_PKCS7_RsaSign(wc_PKCS7* pkcs7, byte* in, word32 inSz, ESD* esd)
     #endif
             {
                 ret = wc_RsaSSL_Sign(in, inSz, esd->encContentDigest,
-                                     sizeof(esd->encContentDigest),
+                                     esd->encContentDigestBufSz,
                                      privKey, pkcs7->rng);
             }
     #ifdef WOLFSSL_ASYNC_CRYPT
@@ -2146,7 +2117,7 @@ static int wc_PKCS7_EcdsaSign(wc_PKCS7* pkcs7, byte* in, word32 inSz, ESD* esd)
 
     ret = wc_PKCS7_ImportECC(pkcs7, privKey);
     if (ret == 0) {
-        outSz = sizeof(esd->encContentDigest);
+        outSz = esd->encContentDigestBufSz;
     #ifdef WOLFSSL_ASYNC_CRYPT
         do {
             ret = wc_AsyncWait(ret, &privKey->asyncDev,
@@ -2250,7 +2221,7 @@ static int wc_PKCS7_RsaPssSign(wc_PKCS7* pkcs7, byte* digest, word32 digestSz,
 
     ret = wc_PKCS7_ImportRSA(pkcs7, privKey);
     if (ret == 0) {
-        outSz = sizeof(esd->encContentDigest);
+        outSz = esd->encContentDigestBufSz;
 #ifdef WOLFSSL_ASYNC_CRYPT
         do {
             ret = wc_AsyncWait(ret, &privKey->asyncDev,
@@ -2263,7 +2234,7 @@ static int wc_PKCS7_RsaPssSign(wc_PKCS7* pkcs7, byte* digest, word32 digestSz,
                  * most interoperable choice and matches OpenSSL's default.
                  * Must agree with the saltLen encoded in
                  * SignerInfo.signatureAlgorithm params above. */
-                int saltLen = wc_HashGetDigestSize(wc_PKCS7_OidGetHash(pkcs7->hashOID));
+                int saltLen = wc_HashGetDigestSize(wc_OidGetHash(pkcs7->hashOID));
                 if (saltLen < 0) {
                     ret = saltLen;
                 }
@@ -2752,14 +2723,28 @@ static int wc_PKCS7_BuildDigestInfo(wc_PKCS7* pkcs7, byte* flatSignedAttribs,
 
 
 #ifdef WC_PKCS7_HAVE_MLDSA
+/* ============================================================================
+ * ML-DSA (FIPS 204) SignedData support, per RFC 9882.
+ *
+ * Unlike RSA/ECDSA, ML-DSA is used in CMS "pure" mode: the signature is
+ * computed over the complete message (the DER SET OF signed attributes, or the
+ * eContent when none are present) rather than a pre-computed digest, with an
+ * empty context string and absent signatureAlgorithm parameters.
+ *
+ * The signature itself is stored like every other algorithm's, in the single
+ * right-sized esd->encContentDigest buffer; the only ML-DSA-specific code is
+ * the small set of helpers below (message construction, key level mapping,
+ * sign and verify), which the shared encode/verify dispatchers call. Adding a
+ * future "pure" PQC scheme (SLH-DSA, FN-DSA) is a matter of extending these
+ * helpers, not the core control flow.
+ * ========================================================================== */
+
 /* Map a public key OID to the corresponding ML-DSA parameter level.
  * Returns 0 and sets *level on success, BAD_FUNC_ARG otherwise.
  *
  * Only the FIPS 204 final ML-DSA OIDs are handled; the pre-standard draft
  * Dilithium OIDs (DILITHIUM_LEVEL2k/3k/5k) are intentionally not supported
- * for CMS, as RFC 9882 is defined over final ML-DSA. Future "pure" PQC
- * schemes (e.g. SLH-DSA, FN-DSA) are added via this and the small per-
- * algorithm sign/verify helpers, not the core encode/decode control flow. */
+ * for CMS, as RFC 9882 is defined over final ML-DSA. */
 static int wc_PKCS7_MlDsaLevelFromOID(word32 publicKeyOID, byte* level)
 {
     switch (publicKeyOID) {
@@ -2837,8 +2822,9 @@ static int wc_PKCS7_BuildPureSigMessage(wc_PKCS7* pkcs7, const byte* attribs,
 
 #if !defined(WOLFSSL_MLDSA_NO_SIGN) && defined(WOLFSSL_MLDSA_PRIVATE_KEY)
 /* Sign the supplied message with the ML-DSA private key in pkcs7->privateKey,
- * storing the resulting signature in a heap buffer referenced by esd->pqcSig.
- * Uses pure ML-DSA with an empty context string, per RFC 9882.
+ * writing the signature into the shared esd->encContentDigest buffer (which the
+ * caller has sized to the signature length). Uses pure ML-DSA with an empty
+ * context string, per RFC 9882.
  *
  * Returns the signature length on success, negative on error. */
 static int wc_PKCS7_MlDsaSign(wc_PKCS7* pkcs7, const byte* msg, word32 msgSz,
@@ -2851,6 +2837,7 @@ static int wc_PKCS7_MlDsaSign(wc_PKCS7* pkcs7, const byte* msg, word32 msgSz,
     wc_MlDsaKey* key;
 
     if (pkcs7 == NULL || esd == NULL || msg == NULL ||
+            esd->encContentDigest == NULL ||
             pkcs7->privateKey == NULL || pkcs7->privateKeySz == 0) {
         return BAD_FUNC_ARG;
     }
@@ -2875,33 +2862,9 @@ static int wc_PKCS7_MlDsaSign(wc_PKCS7* pkcs7, const byte* msg, word32 msgSz,
                                            pkcs7->privateKeySz, &idx);
     }
     if (ret == 0) {
-        ret = wc_MlDsaKey_SigSize(key);
-        if (ret > 0) {
-            sigSz = (word32)ret;
-            ret = 0;
-        }
-        else if (ret == 0) {
-            ret = BAD_FUNC_ARG;
-        }
-    }
-
-    if (ret == 0) {
-        /* A second signing pass occurs during encode (size then final); free
-         * any signature from a previous pass before allocating a new one. */
-        if (esd->pqcSig != NULL) {
-            XFREE(esd->pqcSig, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
-            esd->pqcSig = NULL;
-        }
-        esd->pqcSig = (byte*)XMALLOC(sigSz, pkcs7->heap,
-                                     DYNAMIC_TYPE_TMP_BUFFER);
-        if (esd->pqcSig == NULL) {
-            ret = MEMORY_E;
-        }
-    }
-
-    if (ret == 0) {
         /* RFC 9882: pure ML-DSA with an empty context string. */
-        ret = wc_MlDsaKey_SignCtx(key, NULL, 0, esd->pqcSig, &sigSz,
+        sigSz = esd->encContentDigestBufSz;
+        ret = wc_MlDsaKey_SignCtx(key, NULL, 0, esd->encContentDigest, &sigSz,
                                   msg, msgSz, pkcs7->rng);
     }
 
@@ -2910,11 +2873,6 @@ static int wc_PKCS7_MlDsaSign(wc_PKCS7* pkcs7, const byte* msg, word32 msgSz,
 
     if (ret == 0) {
         return (int)sigSz;
-    }
-
-    if (esd->pqcSig != NULL) {
-        XFREE(esd->pqcSig, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
-        esd->pqcSig = NULL;
     }
     return ret;
 }
@@ -2986,7 +2944,7 @@ static int wc_PKCS7_SignedDataBuildSignature(wc_PKCS7* pkcs7,
                 /* user signing plain digest, build DigestInfo themselves */
                 ret = pkcs7->rsaSignRawDigestCb(pkcs7,
                            esd->contentAttribsDigest, hashSz,
-                           esd->encContentDigest, sizeof(esd->encContentDigest),
+                           esd->encContentDigest, esd->encContentDigestBufSz,
                            pkcs7->privateKey, pkcs7->privateKeySz, pkcs7->devId,
                            hashOID);
                 break;
@@ -3010,11 +2968,11 @@ static int wc_PKCS7_SignedDataBuildSignature(wc_PKCS7* pkcs7,
                 /* user signing plain digest */
                 ret = pkcs7->eccSignRawDigestCb(pkcs7,
                            esd->contentAttribsDigest, hashSz,
-                           esd->encContentDigest, sizeof(esd->encContentDigest),
+                           esd->encContentDigest, esd->encContentDigestBufSz,
                            pkcs7->privateKey, pkcs7->privateKeySz, pkcs7->devId,
                            eccHashOID);
                 /* validate return value doesn't exceed buffer size */
-                if (ret > 0 && (word32)ret > sizeof(esd->encContentDigest)) {
+                if (ret > 0 && (word32)ret > esd->encContentDigestBufSz) {
                     ret = BUFFER_E;
                 }
                 break;
@@ -3489,7 +3447,7 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
     signedDataOidSz = (word32)ret;
 
     if (pkcs7->sidType != DEGENERATE_SID) {
-        esd->hashType = wc_PKCS7_OidGetHash(pkcs7->hashOID);
+        esd->hashType = wc_OidGetHash(pkcs7->hashOID);
         if (hashBuf != NULL &&
                 wc_HashGetDigestSize(esd->hashType) != (int)hashSz) {
             WOLFSSL_MSG("hashSz did not match hashOID");
@@ -3592,7 +3550,7 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
              * defaults.  The decoder (pssSaltLen) handles arbitrary values
              * from external blobs.  A future pkcs7->pssSaltLen override for
              * encode could be added here if custom salt lengths are needed. */
-            int saltLen = wc_HashGetDigestSize(wc_PKCS7_OidGetHash(pkcs7->hashOID));
+            int saltLen = wc_HashGetDigestSize(wc_OidGetHash(pkcs7->hashOID));
             if (saltLen < 0) {
                 idx = saltLen;
                 goto out;
@@ -3643,19 +3601,34 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
             esd->signedAttribSetSz = 0;
         }
 
+        /* Allocate the single signature buffer, sized to this algorithm's
+         * maximum signature length. wc_PKCS7_GetSignSize covers RSA, RSA-PSS,
+         * ECDSA and ML-DSA, so every algorithm signs into the same buffer and
+         * signature storage is not special-cased by type. */
+        ret = wc_PKCS7_GetSignSize(pkcs7);
+        if (ret < 0) {
+            idx = ret;
+            goto out;
+        }
+        esd->encContentDigest = (byte*)XMALLOC((word32)ret, pkcs7->heap,
+                                               DYNAMIC_TYPE_TMP_BUFFER);
+        if (esd->encContentDigest == NULL) {
+            idx = MEMORY_E;
+            goto out;
+        }
+        esd->encContentDigestBufSz = (word32)ret;
+
         /* ECDSA produces a variable-length signature and must be signed now to
          * learn the exact size. RSA, RSA-PSS and fixed-size PQC signatures
-         * (e.g. ML-DSA) have a deterministic size, so only reserve space here
-         * and sign once, on the final pass below, over the finalized attrs.
+         * (e.g. ML-DSA) have a deterministic size equal to the reserved length,
+         * so they reserve here and sign once, on the final pass below, over the
+         * finalized signed attributes.
          *
-         * INVARIANT: for algorithms on this path the size reserved here
-         * (wc_PKCS7_GetSignSize) MUST equal the length the final signing pass
-         * produces, since the SignerInfo/SEQUENCE lengths are computed from it.
-         * This holds for RSA (modulus size) and ML-DSA (fixed per-level size);
-         * a variable-length signature algorithm must NOT use this branch. */
+         * INVARIANT: for the reserve path the reserved length MUST equal the
+         * length the final signing pass produces, since the SignerInfo/SEQUENCE
+         * lengths are derived from it (enforced after the final signing pass). */
         if (pkcs7->publicKeyOID != ECDSAk && hashBuf == NULL) {
-            ret = wc_PKCS7_GetSignSize(pkcs7);
-            esd->encContentDigestSz = (word32)ret;
+            esd->encContentDigestSz = esd->encContentDigestBufSz;
         }
         else {
             ret = wc_PKCS7_SignedDataBuildSignature(pkcs7, flatSignedAttribs,
@@ -4029,18 +4002,8 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
                 esd->signerDigest, esd->signerDigestSz);
     idx += (int)esd->signerDigestSz;
 
-    {
-        /* "Pure" PQC signatures (e.g. ML-DSA) are too large for the fixed
-         * encContentDigest[] buffer and live in esd->pqcSig instead. */
-        byte* sigOut = esd->encContentDigest;
-#ifdef WC_PKCS7_HAVE_MLDSA
-        if (esd->pqcSig != NULL) {
-            sigOut = esd->pqcSig;
-        }
-#endif
-        wc_PKCS7_WriteOut(pkcs7, (output2)? (output2 + idx) : NULL,
-                    sigOut, esd->encContentDigestSz);
-    }
+    wc_PKCS7_WriteOut(pkcs7, (output2)? (output2 + idx) : NULL,
+                esd->encContentDigest, esd->encContentDigestSz);
     idx += (int)esd->encContentDigestSz;
 
 #ifdef ASN_BER_TO_DER
@@ -4075,19 +4038,18 @@ static int PKCS7_EncodeSigned(wc_PKCS7* pkcs7,
 
     XFREE(flatSignedAttribs, pkcs7->heap, DYNAMIC_TYPE_PKCS7);
 
-#ifdef WC_PKCS7_HAVE_MLDSA
-    /* esd is a stack object unless WOLFSSL_SMALL_STACK, where it is heap
-     * allocated and may be NULL if an early allocation failed. */
+    /* free the heap-allocated signature buffer. esd is a stack object unless
+     * WOLFSSL_SMALL_STACK, where it is heap allocated and may be NULL if an
+     * early allocation failed. */
 #ifdef WOLFSSL_SMALL_STACK
-    if (esd != NULL && esd->pqcSig != NULL)
+    if (esd != NULL && esd->encContentDigest != NULL)
 #else
-    if (esd->pqcSig != NULL)
+    if (esd->encContentDigest != NULL)
 #endif
     {
-        XFREE(esd->pqcSig, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
-        esd->pqcSig = NULL;
+        XFREE(esd->encContentDigest, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        esd->encContentDigest = NULL;
     }
-#endif
     WC_FREE_VAR_EX(esd, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
     WC_FREE_VAR_EX(signedDataOid, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
 
@@ -4273,7 +4235,7 @@ int wc_PKCS7_EncodeSignedData(wc_PKCS7* pkcs7, byte* output, word32 outputSz)
                         return MEMORY_E);
 
         /* get hash type and size, validate hashOID */
-        hashType = wc_PKCS7_OidGetHash(pkcs7->hashOID);
+        hashType = wc_OidGetHash(pkcs7->hashOID);
         hashSz = wc_HashGetDigestSize(hashType);
         if (hashSz < 0) {
             WC_FREE_VAR_EX(hash, pkcs7->heap, DYNAMIC_TYPE_HASHES);
@@ -5013,7 +4975,7 @@ static int wc_PKCS7_RsaPssVerify(wc_PKCS7* pkcs7, byte* sig, int sigSz,
     if (pkcs7->pssParamsPresent)
         hashType = (enum wc_HashType)pkcs7->pssHashType;
     else
-        hashType = wc_PKCS7_OidGetHash(pkcs7->hashOID);
+        hashType = wc_OidGetHash(pkcs7->hashOID);
     hashDigSz = wc_HashGetDigestSize(hashType);
     if (hashDigSz < 0)
         return ASN_PARSE_E;
@@ -5481,7 +5443,7 @@ static int wc_PKCS7_BuildSignedDataDigest(wc_PKCS7* pkcs7, byte* signedAttrib,
         return BAD_FUNC_ARG;
     }
 
-    hashType = wc_PKCS7_OidGetHash(pkcs7->hashOID);
+    hashType = wc_OidGetHash(pkcs7->hashOID);
     ret = wc_HashGetDigestSize(hashType);
     if (ret < 0)
         return ret;
@@ -5633,7 +5595,7 @@ static int wc_PKCS7_VerifyContentMessageDigest(wc_PKCS7* pkcs7,
         return ASN_PARSE_E;
 
     /* get hash type and size */
-    hashType = wc_PKCS7_OidGetHash(pkcs7->hashOID);
+    hashType = wc_OidGetHash(pkcs7->hashOID);
     if (hashType == WC_HASH_TYPE_NONE) {
         WOLFSSL_MSG("Error getting hash type for PKCS7 content verification");
         return BAD_FUNC_ARG;
@@ -6804,7 +6766,7 @@ static int PKCS7_VerifySignedData(wc_PKCS7* pkcs7, const byte* hashBuf,
 
                 pkcs7->hashOID = (int)hashOID;
                 /* get hash type */
-                hashType = wc_PKCS7_OidGetHash(pkcs7->hashOID);
+                hashType = wc_OidGetHash(pkcs7->hashOID);
 
                 if (hashType == WC_HASH_TYPE_NONE) {
                     WOLFSSL_MSG("Error getting hash type for PKCS7 content"
