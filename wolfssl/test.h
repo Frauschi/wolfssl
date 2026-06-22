@@ -2102,9 +2102,11 @@ static WC_INLINE unsigned int my_psk_server_tls13_cb(WOLFSSL* ssl,
 
 #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
 /* Example RFC 9258 external PSK importer callbacks. Both sides use the same
- * external identity (kIdentityStr), no context, the default SHA-256 importer
- * hash, and the fixed 32-byte external PSK below. Configure an interop peer
- * (e.g. GnuTLS >= 3.8.1) with matching values. */
+ * external identity (kIdentityStr), an example context string, the default
+ * SHA-256 importer hash, and the fixed 32-byte external PSK below. Configure an
+ * interop peer (e.g. GnuTLS >= 3.8.1) with matching values. */
+static const char* kImporterContextStr = "wolfSSL importer example context";
+
 static WC_INLINE void my_psk_importer_fill_key(unsigned char* key)
 {
     int i;
@@ -2121,6 +2123,7 @@ static WC_INLINE int my_psk_client_importer_cb(WOLFSSL* ssl,
         word32* contextSz, unsigned char* key, word32* keySz, int* hashAlgo)
 {
     word32 idLen = (word32)XSTRLEN(kIdentityStr);
+    word32 ctxLen = (word32)XSTRLEN(kImporterContextStr);
 
     (void)ssl;
     (void)hashAlgo; /* leave the default WC_SHA256 importer hash */
@@ -2130,9 +2133,13 @@ static WC_INLINE int my_psk_client_importer_cb(WOLFSSL* ssl,
     XMEMCPY(identity, kIdentityStr, idLen);
     *identitySz = idLen;
 
-    /* No optional context in this example. */
-    if (context != NULL && contextSz != NULL)
-        *contextSz = 0;
+    /* Provide an example (non-empty) optional context. */
+    if (context != NULL && contextSz != NULL) {
+        if (ctxLen > *contextSz)
+            return -1;
+        XMEMCPY(context, kImporterContextStr, ctxLen);
+        *contextSz = ctxLen;
+    }
 
     if (32 > *keySz)
         return -1;
@@ -2148,16 +2155,17 @@ static WC_INLINE int my_psk_server_importer_cb(WOLFSSL* ssl,
         word32* keySz, int* hashAlgo)
 {
     word32 idLen = (word32)XSTRLEN(kIdentityStr);
+    word32 ctxLen = (word32)XSTRLEN(kImporterContextStr);
 
     (void)ssl;
-    (void)context;
     (void)hashAlgo; /* leave the default WC_SHA256 importer hash */
 
     if (identity == NULL || identitySz != idLen ||
             XMEMCMP(identity, kIdentityStr, idLen) != 0)
         return -1;
-    /* This example advertises no context. */
-    if (contextSz != 0)
+    /* Verify the example context advertised by the client. */
+    if (contextSz != ctxLen || context == NULL ||
+            XMEMCMP(context, kImporterContextStr, ctxLen) != 0)
         return -1;
 
     if (32 > *keySz)
