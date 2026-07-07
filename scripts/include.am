@@ -98,6 +98,7 @@ if !BUILD_IPV6
 dist_noinst_SCRIPTS+= scripts/external.test
 dist_noinst_SCRIPTS+= scripts/google.test
 dist_noinst_SCRIPTS+= scripts/openssl.test
+EXTRA_DIST+= scripts/slhdsa-oqs-interop.sh
 
 if BUILD_OCSP
 dist_noinst_SCRIPTS+= scripts/ocsp.test
