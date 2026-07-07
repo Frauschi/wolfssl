@@ -182,7 +182,8 @@ static const byte
 
 #ifndef NO_CERTS
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(HAVE_ED25519) || \
-    defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA)
+    defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA) || \
+    defined(WOLFSSL_HAVE_SLHDSA)
 
 static WC_INLINE int GetMsgHash(WOLFSSL* ssl, byte* hash);
 
@@ -8685,7 +8686,8 @@ static int SendTls13CertificateRequest(WOLFSSL* ssl, byte* reqCtx,
 #ifndef NO_CERTS
 #if (!defined(NO_WOLFSSL_SERVER) || !defined(WOLFSSL_NO_CLIENT_AUTH)) && \
     (!defined(NO_RSA) || defined(HAVE_ECC) || defined(HAVE_ED25519) || \
-     defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA))
+     defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA) || \
+     defined(WOLFSSL_HAVE_SLHDSA))
 /* Encode the signature algorithm into buffer.
  *
  * hashalgo  The hash algorithm.
@@ -8784,6 +8786,58 @@ static WC_INLINE void EncodeSigAlg(const WOLFSSL * ssl, byte hashAlgo,
             output[1] = MLDSA_87_SA_MINOR;
             break;
 #endif
+#ifdef WOLFSSL_HAVE_SLHDSA
+    #ifdef WOLFSSL_SLHDSA_SHA2
+        case slhdsa_sha2_128s_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHA2_128S_SA_MINOR;
+            break;
+        case slhdsa_sha2_128f_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHA2_128F_SA_MINOR;
+            break;
+        case slhdsa_sha2_192s_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHA2_192S_SA_MINOR;
+            break;
+        case slhdsa_sha2_192f_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHA2_192F_SA_MINOR;
+            break;
+        case slhdsa_sha2_256s_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHA2_256S_SA_MINOR;
+            break;
+        case slhdsa_sha2_256f_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHA2_256F_SA_MINOR;
+            break;
+    #endif /* WOLFSSL_SLHDSA_SHA2 */
+        case slhdsa_shake_128s_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_128S_SA_MINOR;
+            break;
+        case slhdsa_shake_128f_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_128F_SA_MINOR;
+            break;
+        case slhdsa_shake_192s_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_192S_SA_MINOR;
+            break;
+        case slhdsa_shake_192f_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_192F_SA_MINOR;
+            break;
+        case slhdsa_shake_256s_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_256S_SA_MINOR;
+            break;
+        case slhdsa_shake_256f_sa_algo:
+            output[0] = SLHDSA_SA_MAJOR;
+            output[1] = SLHDSA_SHAKE_256F_SA_MINOR;
+            break;
+#endif /* WOLFSSL_HAVE_SLHDSA */
         default:
             break;
     }
@@ -8791,7 +8845,8 @@ static WC_INLINE void EncodeSigAlg(const WOLFSSL * ssl, byte hashAlgo,
 #endif
 
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(HAVE_ED25519) || \
-    defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA)
+    defined(HAVE_ED448) || defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA) || \
+    defined(WOLFSSL_HAVE_SLHDSA)
 #ifdef WOLFSSL_DUAL_ALG_CERTS
 /* These match up with what the OQS team has defined. */
 #define HYBRID_SA_MAJOR 0xFE
@@ -8984,27 +9039,40 @@ static WC_INLINE int DecodeTls13SigAlg(byte* input, byte* hashAlgo,
                 ret = INVALID_PARAMETER;
             break;
 #endif /* HAVE_FALCON */
-#if defined(WOLFSSL_HAVE_MLDSA)
+#if defined(WOLFSSL_HAVE_MLDSA) || defined(WOLFSSL_HAVE_SLHDSA)
+        /* ML-DSA and SLH-DSA share the same major byte (0x09); their minor
+         * bytes are disjoint (ML-DSA 0x04-0x06, SLH-DSA 0x11-0x1C). */
         case MLDSA_SA_MAJOR:
+            ret = INVALID_PARAMETER;
+    #if defined(WOLFSSL_HAVE_MLDSA)
             if (input[1] == MLDSA_44_SA_MINOR) {
                 *hsType = mldsa_44_sa_algo;
                 /* Hash performed as part of sign/verify operation. */
                 *hashAlgo = sha512_mac;
+                ret = 0;
             } else if (input[1] == MLDSA_65_SA_MINOR) {
                 *hsType = mldsa_65_sa_algo;
-                /* Hash performed as part of sign/verify operation. */
                 *hashAlgo = sha512_mac;
+                ret = 0;
             } else if (input[1] == MLDSA_87_SA_MINOR) {
                 *hsType = mldsa_87_sa_algo;
-                /* Hash performed as part of sign/verify operation. */
                 *hashAlgo = sha512_mac;
+                ret = 0;
             }
-            else
-            {
-                ret = INVALID_PARAMETER;
+    #endif /* WOLFSSL_HAVE_MLDSA */
+    #if defined(WOLFSSL_HAVE_SLHDSA)
+            if (ret != 0) {
+                byte slhType = SlhDsaSigMinorToType(input[1]);
+                if (slhType != invalid_sa_algo) {
+                    *hsType = slhType;
+                    /* Hash performed as part of sign/verify operation. */
+                    *hashAlgo = sha512_mac;
+                    ret = 0;
+                }
             }
+    #endif /* WOLFSSL_HAVE_SLHDSA */
             break;
-#endif /* WOLFSSL_HAVE_MLDSA */
+#endif /* WOLFSSL_HAVE_MLDSA || WOLFSSL_HAVE_SLHDSA */
         default:
             *hashAlgo = input[0];
             *hsType   = input[1];
@@ -10208,6 +10276,11 @@ static int SendTls13CertificateVerify(WOLFSSL* ssl)
                 args->sigAlgo = ssl->buffers.keyType;
             }
         #endif /* WOLFSSL_HAVE_MLDSA */
+        #if defined(WOLFSSL_HAVE_SLHDSA)
+            else if (ssl->hsType == DYNAMIC_TYPE_SLHDSA) {
+                args->sigAlgo = ssl->buffers.keyType;
+            }
+        #endif /* WOLFSSL_HAVE_SLHDSA */
             else {
                 ERROR_OUT(ALGO_ID_E, exit_scv);
             }
@@ -10374,6 +10447,15 @@ static int SendTls13CertificateVerify(WOLFSSL* ssl)
                 args->sigLen = MLDSA_MAX_SIG_SIZE;
             }
         #endif /* WOLFSSL_HAVE_MLDSA */
+        #if defined(WOLFSSL_HAVE_SLHDSA)
+            if (ssl->hsType == DYNAMIC_TYPE_SLHDSA) {
+                int slhSigSz = wc_SlhDsaKey_SigSize((SlhDsaKey*)ssl->hsKey);
+                if (slhSigSz <= 0) {
+                    ERROR_OUT(ALGO_ID_E, exit_scv);
+                }
+                args->sigLen = (word16)slhSigSz;
+            }
+        #endif /* WOLFSSL_HAVE_SLHDSA */
 
         #ifdef WOLFSSL_DUAL_ALG_CERTS
             if (ssl->sigSpec != NULL &&
@@ -10497,6 +10579,15 @@ static int SendTls13CertificateVerify(WOLFSSL* ssl)
                 args->length = (word16)args->sigLen;
             }
         #endif /* WOLFSSL_HAVE_MLDSA */
+        #if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY)
+            if (ssl->hsType == DYNAMIC_TYPE_SLHDSA) {
+                /* Pure SLH-DSA with empty context, per draft-reddy-tls-slhdsa. */
+                ret = wc_SlhDsaKey_Sign((SlhDsaKey*)ssl->hsKey, NULL, 0,
+                                        args->sigData, args->sigDataSz,
+                                        sigOut, &args->sigLen, ssl->rng);
+                args->length = (word16)args->sigLen;
+            }
+        #endif /* WOLFSSL_HAVE_SLHDSA */
         #if !defined(NO_RSA) && !defined(WOLFSSL_RSA_PUBLIC_ONLY) && \
             !defined(WOLFSSL_RSA_VERIFY_ONLY)
             if (ssl->hsType == DYNAMIC_TYPE_RSA) {
@@ -10741,38 +10832,142 @@ static int SendTls13CertificateVerify(WOLFSSL* ssl)
             }
 #endif /* WOLFSSL_DTLS13 */
 
-            /* This message is always encrypted. */
-            ret = BuildTls13Message(ssl, args->output,
-                                    WC_MAX_CERT_VERIFY_SZ + MAX_MSG_EXTRA,
-                                    args->output + RECORD_HEADER_SZ,
-                                    args->sendSz - RECORD_HEADER_SZ, handshake,
-                                    1, 0, 0);
+        {
+            /* Body of the handshake message: [sigAlg(2) | sigLen(2) | sig].
+             * This currently sits at args->verify in the output buffer. */
+            word32 msgSz = (word32)args->length + HASH_SIG_SIZE + VERIFY_HEADER;
+            word32 maxFrag = (word32)wolfssl_local_GetMaxPlaintextSize(ssl);
 
-            if (ret < 0) {
-                goto exit_scv;
+            if (HANDSHAKE_HEADER_SZ + msgSz <= maxFrag) {
+                /* Fits in a single record: the common path used by RSA, ECC,
+                 * EdDSA and ML-DSA is left byte-for-byte unchanged. */
+
+                /* This message is always encrypted. */
+                ret = BuildTls13Message(ssl, args->output,
+                                        WC_MAX_CERT_VERIFY_SZ + MAX_MSG_EXTRA,
+                                        args->output + RECORD_HEADER_SZ,
+                                        args->sendSz - RECORD_HEADER_SZ,
+                                        handshake, 1, 0, 0);
+
+                if (ret < 0) {
+                    goto exit_scv;
+                }
+                else {
+                    args->sendSz = ret;
+                    ret = 0;
+                }
+
+            #if defined(WOLFSSL_CALLBACKS) || defined(OPENSSL_EXTRA)
+                if (ssl->hsInfoOn)
+                    AddPacketName(ssl, "CertificateVerify");
+                if (ssl->toInfoOn) {
+                    ret = AddPacketInfo(ssl, "CertificateVerify", handshake,
+                                args->output, args->sendSz, WRITE_PROTO, 0,
+                                ssl->heap);
+                    if (ret != 0)
+                        goto exit_scv;
+                }
+            #endif
+
+                ssl->buffers.outputBuffer.length += (word32)args->sendSz;
             }
             else {
-                args->sendSz = ret;
-                ret = 0;
-            }
+                /* Signature does not fit in a single TLS record (e.g. SLH-DSA,
+                 * whose signatures range up to ~50KB). Fragment the handshake
+                 * message across multiple encrypted records. Only the first
+                 * fragment carries the 4-byte handshake header; the transcript
+                 * hash is maintained correctly because BuildTls13Message hashes
+                 * each fragment's plaintext in order. */
+                byte*  frag;
+                word32 offset = 0;
 
-        #if defined(WOLFSSL_CALLBACKS) || defined(OPENSSL_EXTRA)
-            if (ssl->hsInfoOn)
-                AddPacketName(ssl, "CertificateVerify");
-            if (ssl->toInfoOn) {
-                ret = AddPacketInfo(ssl, "CertificateVerify", handshake,
-                            args->output, args->sendSz, WRITE_PROTO, 0,
-                            ssl->heap);
+                if (maxFrag <= HANDSHAKE_HEADER_SZ) {
+                    ERROR_OUT(BUFFER_E, exit_scv);
+                }
+
+                /* Copy the assembled body out of the output buffer before we
+                 * begin overwriting it with per-record data. */
+                frag = (byte*)XMALLOC(msgSz, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                if (frag == NULL) {
+                    ERROR_OUT(MEMORY_E, exit_scv);
+                }
+                XMEMCPY(frag, args->verify, msgSz);
+
+                while (offset < msgSz && ret == 0) {
+                    byte*  output;
+                    word32 fragSz;
+                    word32 i = RECORD_HEADER_SZ;
+                    int    recSz;
+                    int    thisSendSz;
+
+                    if (offset == 0) {
+                        fragSz = maxFrag - HANDSHAKE_HEADER_SZ;
+                        if (fragSz > msgSz)
+                            fragSz = msgSz;
+                        thisSendSz = RECORD_HEADER_SZ + HANDSHAKE_HEADER_SZ +
+                                     (int)fragSz + MAX_MSG_EXTRA;
+                    }
+                    else {
+                        fragSz = msgSz - offset;
+                        if (fragSz > maxFrag)
+                            fragSz = maxFrag;
+                        thisSendSz = RECORD_HEADER_SZ + (int)fragSz +
+                                     MAX_MSG_EXTRA;
+                    }
+
+                    if ((ret = CheckAvailableSize(ssl, thisSendSz)) != 0) {
+                        XFREE(frag, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                        goto exit_scv;
+                    }
+                    output = GetOutputBuffer(ssl);
+
+                    if (offset == 0) {
+                        AddTls13FragHeaders(output, fragSz, 0, msgSz,
+                                            certificate_verify, ssl);
+                        i += HANDSHAKE_HEADER_SZ;
+                    }
+                    else {
+                        AddTls13RecordHeader(output, fragSz, handshake, ssl);
+                    }
+                    XMEMCPY(output + i, frag + offset, fragSz);
+                    i += fragSz;
+
+                    /* This message is always encrypted. */
+                    recSz = BuildTls13Message(ssl, output, thisSendSz,
+                                output + RECORD_HEADER_SZ,
+                                (int)(i - RECORD_HEADER_SZ), handshake, 1, 0, 0);
+                    if (recSz < 0) {
+                        ret = recSz;
+                        XFREE(frag, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                        goto exit_scv;
+                    }
+
+                #if defined(WOLFSSL_CALLBACKS) || defined(OPENSSL_EXTRA)
+                    if (ssl->hsInfoOn)
+                        AddPacketName(ssl, "CertificateVerify");
+                    if (ssl->toInfoOn) {
+                        ret = AddPacketInfo(ssl, "CertificateVerify", handshake,
+                                    output, recSz, WRITE_PROTO, 0, ssl->heap);
+                        if (ret != 0) {
+                            XFREE(frag, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
+                            goto exit_scv;
+                        }
+                    }
+                #endif
+
+                    ssl->buffers.outputBuffer.length += (word32)recSz;
+                    offset += fragSz;
+                }
+                XFREE(frag, ssl->heap, DYNAMIC_TYPE_TMP_BUFFER);
                 if (ret != 0)
                     goto exit_scv;
             }
-        #endif
 
-            ssl->buffers.outputBuffer.length += (word32)args->sendSz;
             ssl->options.buildingMsg = 0;
             if (!ssl->options.groupMessages)
                 ret = SendBuffered(ssl);
             break;
+        }
         }
         default:
             ret = INPUT_CASE_ERROR;
@@ -10992,6 +11187,41 @@ static int decodeMlDsaKey(WOLFSSL* ssl, int level)
 }
 #endif /* WOLFSSL_HAVE_MLDSA */
 
+#ifdef WOLFSSL_HAVE_SLHDSA
+/* ssl->peerCert->sapkiDer is the alternative public key. Hopefully it is an
+ * SLH-DSA public key. Convert it into a usable public key. */
+static int decodeSlhDsaKey(WOLFSSL* ssl, int param)
+{
+    int keyRet;
+    word32 tmpIdx = 0;
+
+    if (ssl->peerSlhDsaKeyPresent)
+        return INVALID_PARAMETER;
+
+    keyRet = AllocKey(ssl, DYNAMIC_TYPE_SLHDSA, (void**)&ssl->peerSlhDsaKey);
+    if (keyRet != 0)
+        return PEER_KEY_ERROR;
+
+    ssl->peerSlhDsaKeyPresent = 1;
+
+    /* AllocKey initialised the key with a placeholder parameter set; re-init
+     * with the parameter set negotiated in the CertificateVerify. */
+    wc_SlhDsaKey_Free(ssl->peerSlhDsaKey);
+    keyRet = wc_SlhDsaKey_Init(ssl->peerSlhDsaKey, param, ssl->heap,
+                               ssl->devId);
+    if (keyRet != 0)
+        return PEER_KEY_ERROR;
+
+    keyRet = wc_SlhDsaKey_PublicKeyDecode(ssl->peerCert.sapkiDer, &tmpIdx,
+                                          ssl->peerSlhDsaKey,
+                                          ssl->peerCert.sapkiLen);
+    if (keyRet != 0)
+        return PEER_KEY_ERROR;
+
+    return 0;
+}
+#endif /* WOLFSSL_HAVE_SLHDSA */
+
 #ifdef HAVE_FALCON
 /* ssl->peerCert->sapkiDer is the alternative public key. Hopefully it is a
  * falcon public key. Convert it into a usable public key. */
@@ -11207,6 +11437,22 @@ static int DoTls13CertificateVerify(WOLFSSL* ssl, byte* input,
                     ret = decodeMlDsaKey(ssl, WC_ML_DSA_87);
                     break;
             #endif
+            #ifdef WOLFSSL_HAVE_SLHDSA
+                case slhdsa_sha2_128s_sa_algo:
+                case slhdsa_sha2_128f_sa_algo:
+                case slhdsa_sha2_192s_sa_algo:
+                case slhdsa_sha2_192f_sa_algo:
+                case slhdsa_sha2_256s_sa_algo:
+                case slhdsa_sha2_256f_sa_algo:
+                case slhdsa_shake_128s_sa_algo:
+                case slhdsa_shake_128f_sa_algo:
+                case slhdsa_shake_192s_sa_algo:
+                case slhdsa_shake_192f_sa_algo:
+                case slhdsa_shake_256s_sa_algo:
+                case slhdsa_shake_256f_sa_algo:
+                    ret = decodeSlhDsaKey(ssl, SlhDsaTypeToParam(sa));
+                    break;
+            #endif
             #ifdef HAVE_FALCON
                 case falcon_level1_sa_algo:
                     ret = decodeFalconKey(ssl, 1);
@@ -11248,6 +11494,14 @@ static int DoTls13CertificateVerify(WOLFSSL* ssl, byte* input,
                         FreeKey(ssl, DYNAMIC_TYPE_MLDSA,
                                 (void**)&ssl->peerMlDsaKey);
                         ssl->peerMlDsaKeyPresent = 0;
+                    }
+                #endif
+                #ifdef WOLFSSL_HAVE_SLHDSA
+                    else if (ssl->peerSlhDsaKeyPresent &&
+                             !IsSlhDsaSigAlgo(sa)) {
+                        FreeKey(ssl, DYNAMIC_TYPE_SLHDSA,
+                                (void**)&ssl->peerSlhDsaKey);
+                        ssl->peerSlhDsaKeyPresent = 0;
                     }
                 #endif
                 #ifdef HAVE_FALCON
@@ -11324,6 +11578,13 @@ static int DoTls13CertificateVerify(WOLFSSL* ssl, byte* input,
                 WOLFSSL_MSG("Peer sent ML-DSA Level 5 sig");
                 validSigAlgo = (ssl->peerMlDsaKey != NULL) &&
                                ssl->peerMlDsaKeyPresent;
+            }
+        #endif
+        #ifdef WOLFSSL_HAVE_SLHDSA
+            if (IsSlhDsaSigAlgo(ssl->options.peerSigAlgo)) {
+                WOLFSSL_MSG("Peer sent SLH-DSA sig");
+                validSigAlgo = (ssl->peerSlhDsaKey != NULL) &&
+                               ssl->peerSlhDsaKeyPresent;
             }
         #endif
         #ifndef NO_RSA
@@ -11633,6 +11894,31 @@ static int DoTls13CertificateVerify(WOLFSSL* ssl, byte* input,
                 }
             }
         #endif /* WOLFSSL_HAVE_MLDSA */
+        #if defined(WOLFSSL_HAVE_SLHDSA)
+            if (IsSlhDsaSigAlgo(ssl->options.peerSigAlgo) &&
+                (ssl->peerSlhDsaKeyPresent)) {
+                WOLFSSL_MSG("Doing SLH-DSA peer cert verify");
+                /* Pure SLH-DSA with empty context, per draft-reddy-tls-slhdsa.
+                 * wc_SlhDsaKey_Verify returns 0 for a valid signature. */
+                ret = wc_SlhDsaKey_Verify(ssl->peerSlhDsaKey, NULL, 0,
+                                          args->sigData, args->sigDataSz,
+                                          sig, args->sigSz);
+
+                if (ret == 0) {
+                    /* CLIENT/SERVER: data verified with public key from
+                     * certificate. */
+                    ssl->options.peerAuthGood = 1;
+
+                    FreeKey(ssl, DYNAMIC_TYPE_SLHDSA,
+                            (void**)&ssl->peerSlhDsaKey);
+                    ssl->peerSlhDsaKeyPresent = 0;
+                }
+                else {
+                    WOLFSSL_MSG("SLH-DSA signature verification failed");
+                    ret = SIG_VERIFY_E;
+                }
+            }
+        #endif /* WOLFSSL_HAVE_SLHDSA */
 
             /* Check for error */
             if (ret != 0) {
@@ -14677,7 +14963,8 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
         case FIRST_REPLY_THIRD:
         #if (!defined(NO_CERTS) && (!defined(NO_RSA) || defined(HAVE_ECC) || \
              defined(HAVE_ED25519) || defined(HAVE_ED448) || \
-             defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA))) && \
+             defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA) || \
+             defined(WOLFSSL_HAVE_SLHDSA))) && \
              (!defined(NO_WOLFSSL_SERVER) || !defined(WOLFSSL_NO_CLIENT_AUTH))
             if (!ssl->options.resuming && ssl->options.sendVerify) {
                 ssl->error = SendTls13CertificateVerify(ssl);

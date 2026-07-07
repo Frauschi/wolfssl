@@ -567,6 +567,39 @@ enum SlhDsaParam {
 #endif
 };
 
+/* A parameter set that is guaranteed to be compiled in. Use as a placeholder
+ * for wc_SlhDsaKey_Init when the real parameter set is only known later (e.g.
+ * determined from a decoded key OID or a negotiated TLS signature scheme).
+ * The SHAKE family is disabled when only the SHA2 family is enabled, so the
+ * placeholder cannot be a fixed SHAKE value. */
+#if defined(WOLFSSL_SLHDSA_PARAM_128S)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHAKE128S
+#elif defined(WOLFSSL_SLHDSA_PARAM_128F)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHAKE128F
+#elif defined(WOLFSSL_SLHDSA_PARAM_192S)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHAKE192S
+#elif defined(WOLFSSL_SLHDSA_PARAM_192F)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHAKE192F
+#elif defined(WOLFSSL_SLHDSA_PARAM_256S)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHAKE256S
+#elif defined(WOLFSSL_SLHDSA_PARAM_256F)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHAKE256F
+#elif defined(WOLFSSL_SLHDSA_SHA2) && defined(WOLFSSL_SLHDSA_PARAM_SHA2_128S)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHA2_128S
+#elif defined(WOLFSSL_SLHDSA_SHA2) && defined(WOLFSSL_SLHDSA_PARAM_SHA2_128F)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHA2_128F
+#elif defined(WOLFSSL_SLHDSA_SHA2) && defined(WOLFSSL_SLHDSA_PARAM_SHA2_192S)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHA2_192S
+#elif defined(WOLFSSL_SLHDSA_SHA2) && defined(WOLFSSL_SLHDSA_PARAM_SHA2_192F)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHA2_192F
+#elif defined(WOLFSSL_SLHDSA_SHA2) && defined(WOLFSSL_SLHDSA_PARAM_SHA2_256S)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHA2_256S
+#elif defined(WOLFSSL_SLHDSA_SHA2) && defined(WOLFSSL_SLHDSA_PARAM_SHA2_256F)
+    #define WC_SLHDSA_DEFAULT_PARAM SLHDSA_SHA2_256F
+#else
+    #error "WOLFSSL_HAVE_SLHDSA requires at least one parameter set"
+#endif
+
 /* Helper macro to detect SHA2 parameter sets. */
 #ifdef WOLFSSL_SLHDSA_SHA2
     #define SLHDSA_IS_SHA2(p)   ((p) >= SLHDSA_SHA2_128S)

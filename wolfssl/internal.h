@@ -129,6 +129,9 @@
 #ifdef WOLFSSL_HAVE_MLDSA
     #include <wolfssl/wolfcrypt/wc_mldsa.h>
 #endif
+#ifdef WOLFSSL_HAVE_SLHDSA
+    #include <wolfssl/wolfcrypt/wc_slhdsa.h>
+#endif
 #ifdef HAVE_HKDF
     #include <wolfssl/wolfcrypt/kdf.h>
 #endif
@@ -1801,6 +1804,23 @@ enum Misc {
     MLDSA_87_SA_MAJOR = 0x09,
     MLDSA_87_SA_MINOR = 0x06,
 
+    /* These values for SLH-DSA correspond to the code points assigned in
+     * draft-reddy-tls-slhdsa (0x0911-0x091C) and match what oqs-provider uses.
+     * The major byte (0x09) is shared with ML-DSA. */
+    SLHDSA_SA_MAJOR              = 0x09,
+    SLHDSA_SHA2_128S_SA_MINOR   = 0x11,
+    SLHDSA_SHA2_128F_SA_MINOR   = 0x12,
+    SLHDSA_SHA2_192S_SA_MINOR   = 0x13,
+    SLHDSA_SHA2_192F_SA_MINOR   = 0x14,
+    SLHDSA_SHA2_256S_SA_MINOR   = 0x15,
+    SLHDSA_SHA2_256F_SA_MINOR   = 0x16,
+    SLHDSA_SHAKE_128S_SA_MINOR  = 0x17,
+    SLHDSA_SHAKE_128F_SA_MINOR  = 0x18,
+    SLHDSA_SHAKE_192S_SA_MINOR  = 0x19,
+    SLHDSA_SHAKE_192F_SA_MINOR  = 0x1A,
+    SLHDSA_SHAKE_256S_SA_MINOR  = 0x1B,
+    SLHDSA_SHAKE_256F_SA_MINOR  = 0x1C,
+
     MIN_RSA_SHA512_PSS_BITS = 512 * 2 + 8 * 8, /* Min key size */
     MIN_RSA_SHA384_PSS_BITS = 384 * 2 + 8 * 8, /* Min key size */
 
@@ -1981,7 +2001,8 @@ WOLFSSL_LOCAL int NamedGroupIsPqcHybrid(int group);
 #endif
 
 #ifndef MAX_X509_SIZE
-    #if defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA)
+    #if defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA) || \
+        defined(WOLFSSL_HAVE_SLHDSA)
         #define MAX_X509_SIZE   (8*1024) /* max static x509 buffer size; ML-DSA is big */
     #elif defined(WOLFSSL_HAPROXY)
         #define MAX_X509_SIZE   3072 /* max static x509 buffer size */
@@ -4012,6 +4033,7 @@ struct WOLFSSL_CTX {
     byte        haveECDSAsig:1;   /* server cert signed w/ ECDSA */
     byte        haveFalconSig:1;  /* server cert signed w/ Falcon */
     byte        haveMlDsaSig:1;   /* server cert signed w/ ML-DSA */
+    byte        haveSlhDsaSig:1;  /* server cert signed w/ SLH-DSA */
     byte        haveStaticECC:1;  /* static server ECC private key */
     byte        partialWrite:1;   /* only one msg per write call */
     byte        autoRetry:1;      /* retry read/write on a WANT_{READ|WRITE} */
@@ -4475,9 +4497,10 @@ enum KeyExchangeAlgorithm {
 #define SIG_FALCON      0x08
 #define SIG_MLDSA       0x10
 #define SIG_ANON        0x20
+#define SIG_SLHDSA      0x40
 /* SIG_ANON is omitted by default */
 #define SIG_ALL         (SIG_ECDSA | SIG_RSA | SIG_SM2 | SIG_FALCON | \
-                         SIG_MLDSA)
+                         SIG_MLDSA | SIG_SLHDSA)
 
 /* Supported Authentication Schemes */
 enum SignatureAlgorithm {
@@ -4497,6 +4520,18 @@ enum SignatureAlgorithm {
     sm2_sa_algo                  = 17,
     any_sa_algo                  = 18,
     ecc_brainpool_sa_algo        = 19,
+    slhdsa_sha2_128s_sa_algo     = 20,
+    slhdsa_sha2_128f_sa_algo     = 21,
+    slhdsa_sha2_192s_sa_algo     = 22,
+    slhdsa_sha2_192f_sa_algo     = 23,
+    slhdsa_sha2_256s_sa_algo     = 24,
+    slhdsa_sha2_256f_sa_algo     = 25,
+    slhdsa_shake_128s_sa_algo    = 26,
+    slhdsa_shake_128f_sa_algo    = 27,
+    slhdsa_shake_192s_sa_algo    = 28,
+    slhdsa_shake_192f_sa_algo    = 29,
+    slhdsa_shake_256s_sa_algo    = 30,
+    slhdsa_shake_256f_sa_algo    = 31,
     invalid_sa_algo              = 255
 };
 
@@ -5167,6 +5202,7 @@ struct Options {
     word16            haveStaticECC:1;    /* static server ECC private key */
     word16            haveFalconSig:1;    /* server Falcon signed cert */
     word16            haveMlDsaSig:1;     /* server ML-DSA signed cert */
+    word16            haveSlhDsaSig:1;    /* server SLH-DSA signed cert */
     word16            havePeerCert:1;     /* do we have peer's cert */
     word16            havePeerVerify:1;   /* and peer's cert verify */
     word16            usingPSK_cipher:1;  /* are using psk as cipher */
@@ -6313,6 +6349,10 @@ struct WOLFSSL {
     wc_MlDsaKey*    peerMlDsaKey;
     byte            peerMlDsaKeyPresent;
 #endif
+#ifdef WOLFSSL_HAVE_SLHDSA
+    SlhDsaKey*      peerSlhDsaKey;
+    byte            peerSlhDsaKeyPresent;
+#endif
 #ifdef HAVE_LIBZ
     z_stream        c_stream;           /* compression   stream */
     z_stream        d_stream;           /* decompression stream */
@@ -7195,6 +7235,12 @@ WOLFSSL_LOCAL int FindSuite(const Suites* suites, byte first, byte second);
 
 WOLFSSL_LOCAL void DecodeSigAlg(const byte* input, byte* hashAlgo,
         byte* hsType);
+#ifdef WOLFSSL_HAVE_SLHDSA
+WOLFSSL_LOCAL byte SlhDsaSigMinorToType(byte minor);
+WOLFSSL_LOCAL int SlhDsaTypeToParam(byte hsType);
+WOLFSSL_LOCAL int IsSlhDsaSigAlgo(byte hsType);
+WOLFSSL_LOCAL byte SlhDsaParamToType(int param);
+#endif
 WOLFSSL_LOCAL enum wc_HashType HashAlgoToType(int hashAlgo);
 
 #ifndef NO_CERTS

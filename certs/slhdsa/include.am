@@ -33,4 +33,9 @@ EXTRA_DIST += \
          certs/slhdsa/server-mldsa44-sha2.pem \
          certs/slhdsa/server-mldsa44-sha2.der \
          certs/slhdsa/client-mldsa44-sha2.pem \
-         certs/slhdsa/client-mldsa44-sha2.der
+         certs/slhdsa/client-mldsa44-sha2.der \
+         certs/slhdsa/gen-slhdsa-entity-cert.c \
+         certs/slhdsa/entity-slhdsa-shake-128f-priv.pem \
+         certs/slhdsa/entity-slhdsa-shake-128f-priv.der \
+         certs/slhdsa/entity-slhdsa-shake-128f.pem \
+         certs/slhdsa/entity-slhdsa-shake-128f.der

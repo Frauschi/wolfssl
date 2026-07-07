@@ -1349,6 +1349,21 @@ int SuiteTest(int argc, char** argv)
         goto exit;
     }
 #endif
+#if defined(WOLFSSL_HAVE_SLHDSA) && defined(WOLFSSL_SLHDSA_PARAM_128F) && \
+    defined(WOLFSSL_TLS13)
+    /* SLH-DSA entity (leaf) certificate used for the handshake signature in
+     * CertificateVerify. SLH-DSA-SHAKE-128f's ~17KB signature also exercises
+     * fragmented CertificateVerify send + reassembly. */
+    XSTRLCPY(argv0[1], "tests/test-tls13-slhdsa-entity.conf",
+             sizeof(argv0[1]));
+    printf("starting TLSv13 SLH-DSA entity-cert CertificateVerify tests\n");
+    test_harness(&args);
+    if (args.return_code != 0) {
+        printf("error from script %d\n", args.return_code);
+        args.return_code = EXIT_FAILURE;
+        goto exit;
+    }
+#endif
 #if defined(HAVE_ECC) && defined(WOLFSSL_SHA512) && \
     (defined(HAVE_ECC521) || defined(HAVE_ALL_CURVES))
     /* add P-521 certificate cipher suite tests */

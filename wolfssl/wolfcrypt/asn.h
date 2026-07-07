@@ -883,7 +883,12 @@ extern const WOLFSSL_ObjectInfo wolfssl_object_info[];
     #endif
 #endif
 
-#if defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA)
+#if defined(WOLFSSL_HAVE_SLHDSA)
+    /* SLH-DSA signatures are large (up to ~50KB for the 'f' parameter sets).
+     * This buffer must hold the full handshake signature before it is
+     * fragmented across TLS records in SendTls13CertificateVerify. */
+    #define WC_MAX_CERT_VERIFY_SZ (WC_SLHDSA_MAX_SIG_LEN + 1024)
+#elif defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA)
     #define WC_MAX_CERT_VERIFY_SZ 6000            /* For ML-DSA */
 #elif defined(WOLFSSL_CERT_EXT)
     #define WC_MAX_CERT_VERIFY_SZ 2048            /* For larger extensions */
