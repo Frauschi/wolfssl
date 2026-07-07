@@ -14531,9 +14531,11 @@ int CopyDecodedToX509(WOLFSSL_X509* x509, DecodedCert* dCert)
             ret = MEMORY_E;
     }
 #endif
-#if defined(HAVE_ECC) || defined(HAVE_ED25519) || defined(HAVE_ED448)
+#if defined(HAVE_ECC) || defined(HAVE_ED25519) || defined(HAVE_ED448) || \
+    defined(HAVE_FALCON) || defined(WOLFSSL_HAVE_MLDSA)
     x509->pkCurveOID = dCert->pkCurveOID;
-#endif /* HAVE_ECC || HAVE_CURVE25519 || HAVE_CURVE448 */
+#endif /* HAVE_ECC || HAVE_ED25519 || HAVE_ED448 || HAVE_FALCON ||
+        * WOLFSSL_HAVE_MLDSA */
 
 #ifdef WOLFSSL_DUAL_ALG_CERTS
     /* Copy over alternative sig and pubkey. In this case we will allocate new

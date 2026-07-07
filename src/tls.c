@@ -16642,7 +16642,9 @@ int TLSX_PopulateExtensions(WOLFSSL* ssl, byte isServer)
                     modes = 1 << PSK_KE;
                 }
             #if !defined(NO_DH) || defined(HAVE_ECC) || \
-                          defined(HAVE_CURVE25519) || defined(HAVE_CURVE448)
+                          defined(HAVE_CURVE25519) || defined(HAVE_CURVE448) || \
+                          (defined(WOLFSSL_HAVE_MLKEM) && \
+                           !defined(WOLFSSL_TLS_NO_MLKEM_STANDALONE))
                 if (!ssl->options.noPskDheKe) {
                     modes |= 1 << PSK_DHE_KE;
                 }

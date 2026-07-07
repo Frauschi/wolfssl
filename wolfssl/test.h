@@ -458,18 +458,35 @@ err_sys_with_errno(const char* msg)
     } while(0)
 
 
-#ifndef WOLFSSL_NO_TLS12
-#define SERVER_DEFAULT_VERSION 3
-#else
+/* True when no classic public-key authentication algorithm is compiled in
+ * (RSA, ECC, Ed25519 and Ed448 all disabled). Shared by the version-default
+ * logic below and the PSK-fallback logic in the client/server examples so the
+ * duplicated conditions cannot drift apart. */
+#if defined(NO_RSA) && !defined(HAVE_ECC) && !defined(HAVE_ED25519) && \
+    !defined(HAVE_ED448)
+    #define TEST_NO_CLASSIC_AUTH
+#endif
+
+/* With no classic authentication algorithm, a certificate-authenticated
+ * handshake relies on a post-quantum signature (ML-DSA), which is TLS 1.3
+ * only, so default the examples to TLS 1.3 for such post-quantum-only builds.
+ * A PSK-only build (no ML-DSA) keeps the historic TLS 1.2 default. */
+#if defined(WOLFSSL_NO_TLS12) || \
+    (defined(TEST_NO_CLASSIC_AUTH) && defined(WOLFSSL_TLS13) && \
+     defined(WOLFSSL_HAVE_MLDSA))
 #define SERVER_DEFAULT_VERSION 4
+#else
+#define SERVER_DEFAULT_VERSION 3
 #endif
 #define SERVER_DTLS_DEFAULT_VERSION (-2)
 #define SERVER_INVALID_VERSION (-99)
 #define SERVER_DOWNGRADE_VERSION (-98)
-#ifndef WOLFSSL_NO_TLS12
-#define CLIENT_DEFAULT_VERSION 3
-#else
+#if defined(WOLFSSL_NO_TLS12) || \
+    (defined(TEST_NO_CLASSIC_AUTH) && defined(WOLFSSL_TLS13) && \
+     defined(WOLFSSL_HAVE_MLDSA))
 #define CLIENT_DEFAULT_VERSION 4
+#else
+#define CLIENT_DEFAULT_VERSION 3
 #endif
 #define CLIENT_DTLS_DEFAULT_VERSION (-2)
 #define CLIENT_INVALID_VERSION (-99)
@@ -678,6 +695,63 @@ err_sys_with_errno(const char* msg)
     #define wnrConfig     "./wnr-example.conf"
 #endif
 #endif
+
+/* ML-DSA (FIPS 204) certificate material for post-quantum-only TLS 1.3 tests.
+ * The mldsa<N>-cert files are self-signed, so the same file serves as both the
+ * peer certificate and the trust anchor (CA) used to verify it.
+ *
+ * Defined under the same WOLFSSL_HAVE_MLDSA condition the client/server example
+ * ladders reference these macros under, so definition and use cannot diverge.
+ * MLDSA_TEST_LEVEL/MLDSA_TEST_DIR are internal composition helpers: unlike the
+ * fixed cert paths above, the ML-DSA path depends on whichever level is built
+ * (WOLFSSL_HAVE_MLDSA does not imply a level) and on the target base path, so
+ * there is no single literal to inline. They are consumed by the mldsa*File
+ * macros at point of use and are therefore left defined. */
+#if defined(WOLFSSL_HAVE_MLDSA)
+
+#if !defined(WOLFSSL_NO_ML_DSA_65)
+    #define MLDSA_TEST_LEVEL "mldsa65"
+#elif !defined(WOLFSSL_NO_ML_DSA_44)
+    #define MLDSA_TEST_LEVEL "mldsa44"
+#elif !defined(WOLFSSL_NO_ML_DSA_87)
+    #define MLDSA_TEST_LEVEL "mldsa87"
+#else
+    #error "WOLFSSL_HAVE_MLDSA is set but no ML-DSA parameter level is enabled"
+#endif
+
+#if defined(WOLFSSL_NO_CURRDIR) || defined(WOLFSSL_MDK_SHELL)
+    #define MLDSA_TEST_DIR "certs/mldsa/"
+#elif defined(NETOS) && defined(HAVE_FIPS)
+    #define MLDSA_TEST_DIR FS_VOLUME1_DIR "certs/mldsa/"
+#else
+    #define MLDSA_TEST_DIR "./certs/mldsa/"
+#endif
+
+#ifdef WOLFSSL_PEM_TO_DER
+    #ifndef mldsaCertFile
+        #define mldsaCertFile     MLDSA_TEST_DIR MLDSA_TEST_LEVEL "-cert.pem"
+    #endif
+    #ifndef mldsaKeyFile
+        #define mldsaKeyFile      MLDSA_TEST_DIR MLDSA_TEST_LEVEL "-key.pem"
+    #endif
+#else
+    #ifndef mldsaCertFile
+        #define mldsaCertFile     MLDSA_TEST_DIR MLDSA_TEST_LEVEL "-cert.der"
+    #endif
+    #ifndef mldsaKeyFile
+        #define mldsaKeyFile      MLDSA_TEST_DIR MLDSA_TEST_LEVEL "_priv-only.der"
+    #endif
+#endif
+#ifndef cliMldsaCertFile
+    #define cliMldsaCertFile  mldsaCertFile
+#endif
+#ifndef cliMldsaKeyFile
+    #define cliMldsaKeyFile   mldsaKeyFile
+#endif
+#ifndef caMldsaCertFile
+    #define caMldsaCertFile   mldsaCertFile
+#endif
+#endif /* WOLFSSL_HAVE_MLDSA */
 
 #ifdef WOLFSSL_PEM_TO_DER
     #define CERT_FILETYPE WOLFSSL_FILETYPE_PEM

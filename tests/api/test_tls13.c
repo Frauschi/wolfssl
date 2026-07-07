@@ -84,6 +84,9 @@ int test_tls13_apis(void)
 #elif defined(HAVE_ED448)
     const char*  ourCert = ed448CertFile;
     const char*  ourKey  = ed448KeyFile;
+#elif defined(WOLFSSL_HAVE_MLDSA)
+    const char*  ourCert = mldsaCertFile;
+    const char*  ourKey  = mldsaKeyFile;
 #endif
 #endif
 #endif

@@ -8696,6 +8696,7 @@ static WC_INLINE void EncodeSigAlg(const WOLFSSL * ssl, byte hashAlgo,
     byte hsType, byte* output)
 {
     (void)ssl;
+    (void)hashAlgo;
     switch (hsType) {
 #ifdef HAVE_ECC
         case ecc_dsa_sa_algo:
@@ -11864,7 +11865,8 @@ exit_dcv:
 
     return ret;
 }
-#endif /* !NO_RSA || HAVE_ECC */
+#endif /* !NO_RSA || HAVE_ECC || HAVE_ED25519 || HAVE_ED448 ||
+        * HAVE_FALCON || WOLFSSL_HAVE_MLDSA */
 #endif /* !NO_CERTS */
 
 /* Parse and handle a TLS v1.3 Finished message.

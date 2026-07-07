@@ -851,7 +851,8 @@
 #if !defined(WOLFCRYPT_ONLY) && defined(NO_PSK) && \
     (defined(NO_DH) || !defined(HAVE_ANON)) && \
     defined(NO_RSA) && !defined(HAVE_ECC) && \
-    !defined(HAVE_ED25519) && !defined(HAVE_ED448)
+    !defined(HAVE_ED25519) && !defined(HAVE_ED448) && \
+    !defined(HAVE_FALCON) && !defined(WOLFSSL_HAVE_MLDSA)
    #error "No cipher suites available with this build"
 #endif
 

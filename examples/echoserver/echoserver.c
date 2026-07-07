@@ -124,8 +124,7 @@ THREAD_RETURN WOLFSSL_THREAD echoserver_test(void* args)
     ((func_args*)args)->return_code = -1; /* error state */
 
 #if defined(NO_CERTS) || defined(WOLFSSL_LEANPSK) || \
-    (defined(NO_RSA) && !defined(HAVE_ECC) && !defined(HAVE_ED25519) && \
-                                !defined(HAVE_ED448))
+    (defined(TEST_NO_CLASSIC_AUTH) && !defined(WOLFSSL_HAVE_MLDSA))
     doPSK = 1;
 #else
     doPSK = 0;
@@ -210,6 +209,18 @@ THREAD_RETURN WOLFSSL_THREAD echoserver_test(void* args)
 
         if (wolfSSL_CTX_use_PrivateKey_file(ctx, ed448KeyFile,
                 CERT_FILETYPE) != WOLFSSL_SUCCESS)
+            err_sys("can't load server key file, "
+                    "Please run from wolfSSL home dir");
+    #elif defined(WOLFSSL_HAVE_MLDSA) && !defined(NO_CERTS) && \
+                                         !defined(WOLFSSL_SNIFFER)
+        /* ML-DSA (post-quantum-only) */
+        if (wolfSSL_CTX_use_certificate_chain_file(ctx, mldsaCertFile)
+                != WOLFSSL_SUCCESS)
+            err_sys("can't load server cert file, "
+                    "Please run from wolfSSL home dir");
+
+        if (wolfSSL_CTX_use_PrivateKey_file(ctx, mldsaKeyFile, CERT_FILETYPE)
+                != WOLFSSL_SUCCESS)
             err_sys("can't load server key file, "
                     "Please run from wolfSSL home dir");
     #elif defined(NO_CERTS)
