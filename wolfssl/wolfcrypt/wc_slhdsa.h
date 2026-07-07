@@ -468,18 +468,80 @@
 
 #endif /* WOLFSSL_SLHDSA_SHA2 */
 
+/* ======== Combined family-absence guards ======== */
+
+/* A size/speed class is only truly absent when neither its SHAKE variant nor
+ * its SHA2 variant is compiled in. The per-family 'NO' guards above describe
+ * one family each; the SHA2 'NO' macros exist only when WOLFSSL_SLHDSA_SHA2 is
+ * defined, otherwise WOLFSSL_SLHDSA_NO_SHA2 stands for "all SHA2 absent".
+ * These combined guards let the maximum-size defines below (and the internal
+ * buffer maxima in wc_slhdsa.c) stay large enough for every compiled-in
+ * parameter set across both hash families. Without them a SHA2-only build
+ * (SHAKE disabled) would size buffers for the 128-bit level only and overflow
+ * on the 192/256-bit SHA2 parameter sets. */
+#if defined(WOLFSSL_SLHDSA_PARAM_NO_256) && \
+    (defined(WOLFSSL_SLHDSA_NO_SHA2) || \
+     defined(WOLFSSL_SLHDSA_PARAM_NO_SHA2_256))
+    #define SLHDSA_ALL_NO_256
+#endif
+#if defined(WOLFSSL_SLHDSA_PARAM_NO_192) && \
+    (defined(WOLFSSL_SLHDSA_NO_SHA2) || \
+     defined(WOLFSSL_SLHDSA_PARAM_NO_SHA2_192))
+    #define SLHDSA_ALL_NO_192
+#endif
+#if defined(WOLFSSL_SLHDSA_PARAM_NO_SMALL) && \
+    (defined(WOLFSSL_SLHDSA_NO_SHA2) || \
+     defined(WOLFSSL_SLHDSA_PARAM_NO_SHA2_SMALL))
+    #define SLHDSA_ALL_NO_SMALL
+#endif
+#if defined(WOLFSSL_SLHDSA_PARAM_NO_FAST) && \
+    (defined(WOLFSSL_SLHDSA_NO_SHA2) || \
+     defined(WOLFSSL_SLHDSA_PARAM_NO_SHA2_FAST))
+    #define SLHDSA_ALL_NO_FAST
+#endif
+#if defined(WOLFSSL_SLHDSA_PARAM_NO_128) && \
+    (defined(WOLFSSL_SLHDSA_NO_SHA2) || \
+     defined(WOLFSSL_SLHDSA_PARAM_NO_SHA2_128))
+    #define SLHDSA_ALL_NO_128
+#endif
+#if defined(WOLFSSL_SLHDSA_PARAM_NO_256F) && \
+    (defined(WOLFSSL_SLHDSA_NO_SHA2) || \
+     defined(WOLFSSL_SLHDSA_PARAM_NO_SHA2_256F))
+    #define SLHDSA_ALL_NO_256F
+#endif
+#if defined(WOLFSSL_SLHDSA_PARAM_NO_256S) && \
+    (defined(WOLFSSL_SLHDSA_NO_SHA2) || \
+     defined(WOLFSSL_SLHDSA_PARAM_NO_SHA2_256S))
+    #define SLHDSA_ALL_NO_256S
+#endif
+#if defined(WOLFSSL_SLHDSA_PARAM_NO_192F) && \
+    (defined(WOLFSSL_SLHDSA_NO_SHA2) || \
+     defined(WOLFSSL_SLHDSA_PARAM_NO_SHA2_192F))
+    #define SLHDSA_ALL_NO_192F
+#endif
+#if defined(WOLFSSL_SLHDSA_PARAM_NO_192S) && \
+    (defined(WOLFSSL_SLHDSA_NO_SHA2) || \
+     defined(WOLFSSL_SLHDSA_PARAM_NO_SHA2_192S))
+    #define SLHDSA_ALL_NO_192S
+#endif
+#if defined(WOLFSSL_SLHDSA_PARAM_NO_128F) && \
+    (defined(WOLFSSL_SLHDSA_NO_SHA2) || \
+     defined(WOLFSSL_SLHDSA_PARAM_NO_SHA2_128F))
+    #define SLHDSA_ALL_NO_128F
+#endif
+
 /* ======== Maximum size defines ======== */
 
 /* Determine maximum private and public key lengths based on maximum 256-bit
  * output length. SHA2 variants have identical sizes to SHAKE counterparts. */
-#ifndef WOLFSSL_SLHDSA_PARAM_NO_256
+#ifndef SLHDSA_ALL_NO_256
     /* Maximum private key length. */
     #define WC_SLHDSA_MAX_PRIV_LEN          WC_SLHDSA_SHAKE256F_PRIV_LEN
     /* Maximum public key length. */
     #define WC_SLHDSA_MAX_PUB_LEN           WC_SLHDSA_SHAKE256F_PUB_LEN
     /* Maximum seed length. */
     #define WC_SLHDSA_MAX_SEED              WC_SLHDSA_SHAKE256_SEED_LEN
-#elif !defined(WOLFSSL_SLHDSA_PARAM_NO_192)
+#elif !defined(SLHDSA_ALL_NO_192)
     /* Maximum private key length. */
     #define WC_SLHDSA_MAX_PRIV_LEN          WC_SLHDSA_SHAKE192F_PRIV_LEN
     /* Maximum public key length. */
