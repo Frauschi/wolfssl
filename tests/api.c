@@ -26147,7 +26147,7 @@ static int test_wc_MakeCRL_max_crlnum(void)
     }
     if (EXPECT_SUCCESS()) {
         crlSz = wc_SignCRL_ex(tbsBuf, tbsSz, CTC_SHA256wRSA,
-            crlBuf, (word32)bufSz, &rsaKey, NULL, &rng, NULL, NULL);
+            crlBuf, (word32)bufSz, &rsaKey, NULL, &rng);
         ExpectIntGT(crlSz, 0);
     }
 
@@ -26156,7 +26156,7 @@ static int test_wc_MakeCRL_max_crlnum(void)
      * paired with an ECDSA OID must return ALGO_ID_E. --- */
     if (EXPECT_SUCCESS()) {
         ExpectIntEQ(wc_SignCRL_ex(tbsBuf, tbsSz, CTC_SHA256wECDSA,
-            crlBuf, (word32)bufSz, &rsaKey, NULL, &rng, NULL, NULL),
+            crlBuf, (word32)bufSz, &rsaKey, NULL, &rng),
             WC_NO_ERR_TRACE(ALGO_ID_E));
     }
 
@@ -26231,7 +26231,7 @@ static int test_wc_MakeCRL_max_crlnum(void)
  * pointer so this compiles whether or not both algorithms are enabled. Also
  * confirms a tampered signature is rejected. Returns the EXPECT result. */
 static int pqc_crl_sign_verify(const byte* caCertDer, word32 caCertDerSz,
-    wc_MlDsaKey* mldsaKey, SlhDsaKey* slhDsaKey, int sigType)
+    wc_MlDsaKey* mldsaKey, SlhDsaKey* slhDsaKey, int keyType, int sigType)
 {
     EXPECT_DECLS;
     WOLFSSL_CERT_MANAGER* cm = NULL;
@@ -26247,6 +26247,9 @@ static int pqc_crl_sign_verify(const byte* caCertDer, word32 caCertDerSz,
     int crlSz = 0;
     int bufSz = 0;
     int sigSz = 0;
+    /* Exactly one of the PQC keys is non-NULL; wc_SignCRL_ex2 takes it as an
+     * untyped pointer paired with keyType. */
+    void* signKey = (mldsaKey != NULL) ? (void*)mldsaKey : (void*)slhDsaKey;
 
     /* thisUpdate in the past, nextUpdate far in the future so the CRL is
      * current whenever the test runs. */
@@ -26318,8 +26321,8 @@ static int pqc_crl_sign_verify(const byte* caCertDer, word32 caCertDerSz,
 
     /* Sign the CRL with the post-quantum key. */
     if (EXPECT_SUCCESS()) {
-        crlSz = wc_SignCRL_ex(tbsBuf, tbsSz, sigType, crlBuf, (word32)bufSz,
-            NULL, NULL, &rng, mldsaKey, slhDsaKey);
+        crlSz = wc_SignCRL_ex2(tbsBuf, tbsSz, sigType, crlBuf, (word32)bufSz,
+            keyType, signKey, &rng);
         ExpectIntGT(crlSz, 0);
     }
 
@@ -26327,8 +26330,8 @@ static int pqc_crl_sign_verify(const byte* caCertDer, word32 caCertDerSz,
      * key before any signature is produced. CheckSigTypeForKey runs before the
      * TBS is copied into the output, so crlBuf still holds the valid CRL. */
     if (EXPECT_SUCCESS()) {
-        ExpectIntEQ(wc_SignCRL_ex(tbsBuf, tbsSz, CTC_SHA256wRSA, crlBuf,
-            (word32)bufSz, NULL, NULL, &rng, mldsaKey, slhDsaKey),
+        ExpectIntEQ(wc_SignCRL_ex2(tbsBuf, tbsSz, CTC_SHA256wRSA, crlBuf,
+            (word32)bufSz, keyType, signKey, &rng),
             WC_NO_ERR_TRACE(ALGO_ID_E));
     }
 
@@ -26379,14 +26382,15 @@ static int test_wc_SignCRL_mldsa(void)
     static const struct {
         const char* certDer;
         const char* keyPem;
+        int         keyType;
         int         sigType;
     } cases[] = {
         { "./certs/mldsa/mldsa44-cert.der", "./certs/mldsa/mldsa44-key.pem",
-          CTC_ML_DSA_44 },
+          ML_DSA_44_TYPE, CTC_ML_DSA_44 },
         { "./certs/mldsa/mldsa65-cert.der", "./certs/mldsa/mldsa65-key.pem",
-          CTC_ML_DSA_65 },
+          ML_DSA_65_TYPE, CTC_ML_DSA_65 },
         { "./certs/mldsa/mldsa87-cert.der", "./certs/mldsa/mldsa87-key.pem",
-          CTC_ML_DSA_87 },
+          ML_DSA_87_TYPE, CTC_ML_DSA_87 },
     };
     int i;
     int n = (int)(sizeof(cases) / sizeof(cases[0]));
@@ -26424,7 +26428,7 @@ static int test_wc_SignCRL_mldsa(void)
 
         if (EXPECT_SUCCESS()) {
             ExpectIntEQ(pqc_crl_sign_verify(certDer, (word32)certDerSz, &key,
-                NULL, cases[i].sigType), TEST_SUCCESS);
+                NULL, cases[i].keyType, cases[i].sigType), TEST_SUCCESS);
         }
 
         if (keyInit)
@@ -26446,17 +26450,18 @@ static int test_wc_SignCRL_slhdsa(void)
     static const struct {
         const char* certDer;
         const char* keyDer;
+        int         keyType;
         int         sigType;
         int         param;
     } cases[] = {
         /* SHAKE variants are always built with --enable-slhdsa. */
         { "./certs/slhdsa/root-slhdsa-shake-128s.der",
           "./certs/slhdsa/root-slhdsa-shake-128s-priv.der",
-          CTC_SLH_DSA_SHAKE_128S, SLHDSA_SHAKE128S },
+          SLH_DSA_SHAKE_128S_TYPE, CTC_SLH_DSA_SHAKE_128S, SLHDSA_SHAKE128S },
 #ifdef WOLFSSL_SLHDSA_SHA2
         { "./certs/slhdsa/root-slhdsa-sha2-128s.der",
           "./certs/slhdsa/root-slhdsa-sha2-128s-priv.der",
-          CTC_SLH_DSA_SHA2_128S, SLHDSA_SHA2_128S },
+          SLH_DSA_SHA2_128S_TYPE, CTC_SLH_DSA_SHA2_128S, SLHDSA_SHA2_128S },
 #endif
     };
     int i;
@@ -26483,7 +26488,7 @@ static int test_wc_SignCRL_slhdsa(void)
 
         if (EXPECT_SUCCESS()) {
             ExpectIntEQ(pqc_crl_sign_verify(certDer, (word32)certDerSz, NULL,
-                &key, cases[i].sigType), TEST_SUCCESS);
+                &key, cases[i].keyType, cases[i].sigType), TEST_SUCCESS);
         }
 
         if (keyInit)
