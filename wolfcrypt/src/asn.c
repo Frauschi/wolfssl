@@ -37649,8 +37649,6 @@ int wc_SignCRL_ex2(const byte* tbsBuf, int tbsSz, int sType,
     falcon_key*  falconKey  = NULL;
     wc_MlDsaKey* mldsaKey   = NULL;
     SlhDsaKey*   slhDsaKey  = NULL;
-    LmsKey*      lmsKey     = NULL;
-    XmssKey*     xmssKey    = NULL;
 
     if (tbsBuf == NULL || tbsSz <= 0 || buf == NULL || key == NULL ||
             rng == NULL)
@@ -37683,10 +37681,19 @@ int wc_SignCRL_ex2(const byte* tbsBuf, int tbsSz, int sType,
         mldsaKey = (wc_MlDsaKey*)key;
     else if (keyType == ML_DSA_87_TYPE)
         mldsaKey = (wc_MlDsaKey*)key;
-#ifdef WOLFSSL_HAVE_SLHDSA
-    else if (IsSlhDsaKeyType(keyType))
+    else if (keyType == SLH_DSA_SHA2_128S_TYPE ||
+             keyType == SLH_DSA_SHA2_128F_TYPE ||
+             keyType == SLH_DSA_SHA2_192S_TYPE ||
+             keyType == SLH_DSA_SHA2_192F_TYPE ||
+             keyType == SLH_DSA_SHA2_256S_TYPE ||
+             keyType == SLH_DSA_SHA2_256F_TYPE ||
+             keyType == SLH_DSA_SHAKE_128S_TYPE ||
+             keyType == SLH_DSA_SHAKE_128F_TYPE ||
+             keyType == SLH_DSA_SHAKE_192S_TYPE ||
+             keyType == SLH_DSA_SHAKE_192F_TYPE ||
+             keyType == SLH_DSA_SHAKE_256S_TYPE ||
+             keyType == SLH_DSA_SHAKE_256F_TYPE)
         slhDsaKey = (SlhDsaKey*)key;
-#endif
     else if (keyType == LMS_TYPE || keyType == XMSS_TYPE ||
              keyType == XMSSMT_TYPE) {
         /* Stateful hash-based schemes are intentionally rejected for CRL
@@ -37703,7 +37710,7 @@ int wc_SignCRL_ex2(const byte* tbsBuf, int tbsSz, int sType,
     /* The CRL's signatureAlgorithm OID is written from sType while the
      * signature is produced from the key, so reject a mismatch. */
     ret = CheckSigTypeForKey(sType, rsaKey, eccKey, ed25519Key, ed448Key,
-        falconKey, mldsaKey, slhDsaKey, lmsKey, xmssKey);
+        falconKey, mldsaKey, slhDsaKey, NULL, NULL);
     if (ret != 0) {
         WOLFSSL_MSG("Signature type does not match signing key");
         return ret;
@@ -37712,7 +37719,7 @@ int wc_SignCRL_ex2(const byte* tbsBuf, int tbsSz, int sType,
     XMEMSET(certSignCtx, 0, sizeof(*certSignCtx));
 
     heap = GetSigningKeyHeap(rsaKey, eccKey, ed25519Key, ed448Key, mldsaKey,
-        slhDsaKey, lmsKey, xmssKey);
+        slhDsaKey, NULL, NULL);
 
     /* Copy TBS to output buffer first */
     if ((word32)tbsSz > bufSz)
@@ -37723,7 +37730,7 @@ int wc_SignCRL_ex2(const byte* tbsBuf, int tbsSz, int sType,
      * (ML-DSA/SLH-DSA) signatures, which far exceed a classic signature, get
      * enough room. */
     maxSigSz = GetSignatureBufferSz(rsaKey, eccKey, ed25519Key, ed448Key,
-        falconKey, mldsaKey, slhDsaKey, lmsKey, xmssKey);
+        falconKey, mldsaKey, slhDsaKey, NULL, NULL);
     if (maxSigSz <= 0)
         return (maxSigSz < 0) ? maxSigSz : ALGO_ID_E;
 
@@ -37749,8 +37756,8 @@ int wc_SignCRL_ex2(const byte* tbsBuf, int tbsSz, int sType,
     /* Create signature */
     sigSz = MakeSignature(certSignCtx, buf, (word32)tbsSz, certSignCtx->sig,
                           (word32)maxSigSz, rsaKey, eccKey, ed25519Key,
-                          ed448Key, falconKey, mldsaKey, slhDsaKey, lmsKey,
-                          xmssKey, rng, (word32)sType, heap);
+                          ed448Key, falconKey, mldsaKey, slhDsaKey, NULL,
+                          NULL, rng, (word32)sType, heap);
     if (sigSz < 0) {
 #ifndef WOLFSSL_NO_MALLOC
         XFREE(certSignCtx->sig, heap, DYNAMIC_TYPE_TMP_BUFFER);
