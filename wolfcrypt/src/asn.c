@@ -37575,18 +37575,17 @@ int wc_MakeCRL_ex(const byte* issuerDer, word32 issuerSz,
     return (int)idx;
 }
 
-/* Sign a CRL TBS and produce complete CRL DER.
+/* Sign a CRL TBS with an RSA or ECC key and produce the complete CRL DER.
  * tbsBuf: contains the TBS at the beginning
  * tbsSz: size of TBS in tbsBuf
- * sType: signature type (e.g., CTC_SHA256wRSA, CTC_ML_DSA_44)
+ * sType: signature type (e.g., CTC_SHA256wRSA, CTC_SHA256wECDSA)
  * buf: output buffer for complete CRL. May be the same as tbsBuf.
  * bufSz: size of output buffer
- * rsaKey/eccKey/mldsaKey/slhDsaKey: signing key (exactly one must be non-NULL).
- *     ML-DSA and SLH-DSA produce post-quantum signatures; their (much larger)
- *     signature buffer is sized from the key rather than assumed classic. The
- *     PQC key pointers are last so the original RSA/ECC parameter order is
- *     preserved.
+ * rsaKey/eccKey: signing key (exactly one must be non-NULL)
  * rng: random number generator
+ *
+ * For other key types (Ed25519/Ed448, ML-DSA, SLH-DSA, ...) use
+ * wc_SignCRL_ex2.
  *
  * Returns: size of complete CRL on success, negative error on failure
  */
@@ -37617,6 +37616,22 @@ int wc_SignCRL_ex(const byte* tbsBuf, int tbsSz, int sType,
     return wc_SignCRL_ex2(tbsBuf, tbsSz, sType, buf, bufSz, keyType, key, rng);
 }
 
+/* Sign a CRL TBS with any supported key type and produce the complete CRL DER.
+ * key is interpreted according to keyType (RSA_TYPE, ECC_TYPE, ED25519_TYPE,
+ * ED448_TYPE, FALCON_*, ML_DSA_*, SLH_DSA_*), the same selector wc_SignCert_ex
+ * uses. The signature buffer is sized from the key, so post-quantum signatures
+ * get enough room. Stateful hash-based schemes (LMS/XMSS) are rejected.
+ * tbsBuf: contains the TBS at the beginning
+ * tbsSz: size of TBS in tbsBuf
+ * sType: signature type matching the key (e.g., CTC_ML_DSA_44)
+ * buf: output buffer for complete CRL. May be the same as tbsBuf.
+ * bufSz: size of output buffer
+ * keyType: selects how key is interpreted
+ * key: signing key
+ * rng: random number generator
+ *
+ * Returns: size of complete CRL on success, negative error on failure
+ */
 int wc_SignCRL_ex2(const byte* tbsBuf, int tbsSz, int sType,
                    byte* buf, word32 bufSz, int keyType, void* key,
                    WC_RNG* rng)
@@ -37672,24 +37687,15 @@ int wc_SignCRL_ex2(const byte* tbsBuf, int tbsSz, int sType,
     else if (IsSlhDsaKeyType(keyType))
         slhDsaKey = (SlhDsaKey*)key;
 #endif
-#if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_VERIFY_ONLY)
-    else if (keyType == LMS_TYPE)
-        lmsKey = (LmsKey*)key;
-#endif
-#if defined(WOLFSSL_HAVE_XMSS) && !defined(WOLFSSL_XMSS_VERIFY_ONLY)
-    /* The selector must match the key's actual tree variant so XMSS_TYPE and
-     * XMSSMT_TYPE are not silently interchangeable. */
-    else if (keyType == XMSS_TYPE) {
-        xmssKey = (XmssKey*)key;
-        if (xmssKey->is_xmssmt)
-            return BAD_FUNC_ARG;
+    else if (keyType == LMS_TYPE || keyType == XMSS_TYPE ||
+             keyType == XMSSMT_TYPE) {
+        /* Stateful hash-based schemes are intentionally rejected for CRL
+         * signing: a CRL is reissued periodically and would exhaust the key's
+         * one-time signature state, with catastrophic reuse risk if that state
+         * is mismanaged. */
+        WOLFSSL_MSG("Stateful signatures (LMS/XMSS) not supported for CRLs");
+        return ALGO_ID_E;
     }
-    else if (keyType == XMSSMT_TYPE) {
-        xmssKey = (XmssKey*)key;
-        if (!xmssKey->is_xmssmt)
-            return BAD_FUNC_ARG;
-    }
-#endif
     else {
         return BAD_FUNC_ARG;
     }
