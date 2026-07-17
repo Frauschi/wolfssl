@@ -26221,10 +26221,15 @@ static int test_wc_MakeCRL_max_crlnum(void)
     return EXPECT_RESULT();
 }
 
+/* Guard on the union of the caller test-body guards so this helper is only
+ * compiled when at least one caller references it (avoids -Wunused-function
+ * under -Werror). */
 #if defined(WOLFSSL_CERT_GEN) && defined(HAVE_CRL) && !defined(NO_FILESYSTEM) && \
     !defined(NO_ASN) && \
-    (defined(HAVE_ED25519) || defined(HAVE_ED448) || \
-     defined(WOLFSSL_HAVE_MLDSA) || defined(WOLFSSL_HAVE_SLHDSA))
+    ((defined(WOLFSSL_HAVE_MLDSA) && defined(WOLFSSL_PEM_TO_DER)) || \
+     defined(WOLFSSL_HAVE_SLHDSA) || \
+     (defined(HAVE_ED25519) && defined(HAVE_ED25519_SIGN)) || \
+     (defined(HAVE_ED448) && defined(HAVE_ED448_SIGN)))
 /* Build a CRL, sign it with the given CA key through wc_MakeCRL_ex +
  * wc_SignCRL_ex2, then load it via the certificate manager so the signature is
  * verified against the issuing CA. keyType selects how key is interpreted.
