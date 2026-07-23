@@ -98,6 +98,16 @@ jobs:
           ./zephyr/scripts/twister -T modules/crypto/wolfssl --test zephyr/samples/wolfssl_test/sample.crypto.wolfssl_test_no_malloc -vvv
           rm -rf zephyr/twister-out
 
+      - name: Run wolfssl condvar ztest
+        # Native k_condvar / k_mutex / k_thread threading test (no POSIX). Runs
+        # on native_sim (introduced in Zephyr 3.4), so skip the 2.7.4 entry.
+        if: ${{ matrix.config.zephyr-ref != 'v2.7.4' }}
+        id: wolfssl-condvar
+        working-directory: zephyr
+        run: |
+          ./zephyr/scripts/twister -T modules/crypto/wolfssl/zephyr/tests/wolfssl_condvar -p native_sim -vvv
+          rm -rf zephyr/twister-out
+
       - name: Run wolfssl TLS sock test
         # Results in a page fault that I can't trace
         if: ${{ matrix.config.zephyr-ref != 'v2.7.4' }}
@@ -118,12 +128,12 @@ jobs:
           rm -rf zephyr/twister-out
 
       - name: Zip failure logs
-        if: ${{ failure() && (steps.wolfssl-test.outcome == 'failure' || steps.wolfssl-tls-sock.outcome == 'failure' || steps.wolfssl-tls-thread.outcome == 'failure') }}
+        if: ${{ failure() && (steps.wolfssl-test.outcome == 'failure' || steps.wolfssl-condvar.outcome == 'failure' || steps.wolfssl-tls-sock.outcome == 'failure' || steps.wolfssl-tls-thread.outcome == 'failure') }}
         run: |
           zip -9 -r logs.zip zephyr/twister-out
 
       - name: Upload failure logs
-        if: ${{ failure() && (steps.wolfssl-test.outcome == 'failure' || steps.wolfssl-tls-sock.outcome == 'failure' || steps.wolfssl-tls-thread.outcome == 'failure') }}
+        if: ${{ failure() && (steps.wolfssl-test.outcome == 'failure' || steps.wolfssl-condvar.outcome == 'failure' || steps.wolfssl-tls-sock.outcome == 'failure' || steps.wolfssl-tls-thread.outcome == 'failure') }}
         uses: actions/upload-artifact@v6
         with:
           name: zephyr-client-test-logs
