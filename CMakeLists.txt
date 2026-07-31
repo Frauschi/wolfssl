@@ -754,6 +754,23 @@ if(WOLFSSL_DTLS_CH_FRAG)
     list(APPEND WOLFSSL_DEFINITIONS "-DWOLFSSL_DTLS_CH_FRAG")
 endif()
 
+# DTLS 1.3 stateful server. Keeps per-connection state from the first
+# ClientHello (so a fragmented first ClientHello can be reassembled) and skips
+# the stateless HelloRetryRequest cookie for a 1-RTT handshake. WARNING: this
+# waives the RFC 9147 Section 5.1 return-routability check, so the server keeps
+# state for and completes handshakes with unvalidated source addresses and can
+# be used as a traffic amplifier. Opt-in, and off by default.
+add_option("WOLFSSL_DTLS13_STATEFUL_SERVER"
+    "Enable wolfSSL stateful DTLS 1.3 server, without the stateless HRR cookie (default: disabled)"
+    "no" "yes;no")
+
+if(WOLFSSL_DTLS13_STATEFUL_SERVER)
+    if(NOT WOLFSSL_DTLS13)
+        message(FATAL_ERROR "The stateful DTLS 1.3 server is supported only for DTLSv1.3")
+    endif()
+    list(APPEND WOLFSSL_DEFINITIONS "-DWOLFSSL_DTLS13_STATEFUL_SERVER")
+endif()
+
 # RNG
 add_option("WOLFSSL_RNG"
     "Enable compiling and using RNG (default: enabled)"

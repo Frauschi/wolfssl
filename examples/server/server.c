@@ -1146,10 +1146,20 @@ static const char* server_usage_msg[][71] = {
             "                            Supplied as 3 integers (ex: 32,1,3)\n",
                                                                         /* 69 */
 #endif
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+        "--dtls13-stateful-server  Keep DTLS 1.3 server state from the first\n"
+        "            ClientHello, so a fragmented first ClientHello can be\n"
+        "            reassembled, and skip the stateless HelloRetryRequest\n"
+        "            cookie for a 1-RTT handshake. WARNING: this waives the\n"
+        "            RFC 9147 return-routability check, so the server keeps\n"
+        "            state for and completes handshakes with unvalidated\n"
+        "            source addresses, and can be used as a traffic\n"
+        "            amplifier.\n",                                     /* 70 */
+#endif
         "\n"
            "For simpler wolfSSL TLS server examples, visit\n"
            "https://github.com/wolfSSL/wolfssl-examples/tree/master/tls\n",
-                                                                        /* 70 */
+                                                                        /* 71 */
         NULL,
     },
 #ifndef NO_MULTIBYTE_PRINT
@@ -1372,11 +1382,21 @@ static const char* server_usage_msg[][71] = {
             "                            Supplied as 3 integers (ex: 32,1,3)\n",
                                                                         /* 69 */
 #endif
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+        "--dtls13-stateful-server  Keep DTLS 1.3 server state from the first\n"
+        "            ClientHello, so a fragmented first ClientHello can be\n"
+        "            reassembled, and skip the stateless HelloRetryRequest\n"
+        "            cookie for a 1-RTT handshake. WARNING: this waives the\n"
+        "            RFC 9147 return-routability check, so the server keeps\n"
+        "            state for and completes handshakes with unvalidated\n"
+        "            source addresses, and can be used as a traffic\n"
+        "            amplifier.\n",                                     /* 70 */
+#endif
         "\n"
         "より簡単なwolfSSL TSL クライアントの例については"
                                           "下記にアクセスしてください\n"
         "https://github.com/wolfSSL/wolfssl-examples/tree/master/tls\n",
-                                                                        /* 70 */
+                                                                        /* 71 */
         NULL,
     },
 #endif
@@ -1544,6 +1564,9 @@ static void Usage(void)
     printf("%s", msg[++msgId]);     /* --ech */
     printf("%s", msg[++msgId]);     /* --ech-suite */
 #endif
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+    printf("%s", msg[++msgId]);     /* --dtls13-stateful-server */
+#endif
     printf("%s", msg[++msgId]);     /* Examples repo link */
 }
 
@@ -1674,6 +1697,9 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
     !defined(NO_PSK)
         { "psk-with-certs", 0, 271 },
 #endif
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+        { "dtls13-stateful-server", 0, 272 },
+#endif
         { 0, 0, 0 }
     };
 #endif
@@ -1777,6 +1803,9 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
 #ifdef HAVE_SUPPORTED_CURVES
     int onlyPskDheKe = 0;
 #endif
+#endif
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+    int dtls13StatefulServer = 0;
 #endif
     int updateKeysIVs = 0;
 #ifndef NO_CERTS
@@ -2624,6 +2653,15 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
             usePskWithCerts = 1;
             break;
 #endif
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+        case 272:
+            /* Keep server state from the first ClientHello (reassemble a
+             * fragmented first CH) and skip the stateless HRR cookie.
+             * WARNING: waives the RFC 9147 Section 5.1 return-routability
+             * check -- see wolfSSL_dtls13_use_stateful_server(). */
+            dtls13StatefulServer = 1;
+            break;
+#endif
 
         case -1:
             default:
@@ -3396,6 +3434,13 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
         }
         else if (hrrCookie == -1) {
             wolfSSL_disable_hrr_cookie(ssl);
+        }
+#endif
+
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+        if (dtls13StatefulServer &&
+                wolfSSL_dtls13_use_stateful_server(ssl, 1) != WOLFSSL_SUCCESS) {
+            err_sys("unable to enable stateful DTLS 1.3 server");
         }
 #endif
 

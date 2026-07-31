@@ -103,6 +103,7 @@ jobs:
            "configure": ["--enable-intelasm", "--enable-sp-asm",
             "--enable-all", "--enable-testcert", "--enable-acert",
             "--enable-dtls13", "--enable-dtls-mtu", "--enable-dtls-frag-ch",
+            "--enable-dtls13-stateful-server",
             "--enable-dtlscid", "--enable-quic", "--with-sys-crypto-policy",
             "--enable-experimental", "--enable-mlkem=yes,kyber,ml-kem",
             "--enable-tls-mlkem-standalone", "--enable-extra-pqc-hybrids",

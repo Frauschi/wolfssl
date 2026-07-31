@@ -6431,6 +6431,10 @@ WOLFSSL_API const unsigned char* wolfSSL_dtls_cid_parse(const unsigned char* msg
 #ifdef WOLFSSL_DTLS_CH_FRAG
     WOLFSSL_API int wolfSSL_dtls13_allow_ch_frag(WOLFSSL *ssl, int enabled);
 #endif
+#if defined(WOLFSSL_DTLS13) && defined(WOLFSSL_DTLS13_STATEFUL_SERVER)
+    WOLFSSL_API int wolfSSL_dtls13_use_stateful_server(WOLFSSL *ssl,
+                                                       int enabled);
+#endif
 #ifdef WOLFSSL_DTLS13_NO_HRR_ON_RESUME
     WOLFSSL_API int wolfSSL_dtls13_no_hrr_on_resume(WOLFSSL *ssl, int enabled);
 #endif
