@@ -46,6 +46,20 @@
  *     DTLS server can process it statelessly. This is only implemented for
  *     DTLS 1.3. The user MUST call wolfSSL_dtls13_allow_ch_frag() on the server
  *     to explicitly enable this during runtime.
+ * WOLFSSL_DTLS13_STATEFUL_SERVER
+ *     Allow a DTLS 1.3 server to keep per-connection state from the very first
+ *     ClientHello, so that a ClientHello which is already fragmented before any
+ *     cookie exchange (a large PQC key share, as sent by e.g. NSS) can be
+ *     reassembled, and so that a peer offering a usable key share up front
+ *     completes in 1-RTT with no cookie at all. WARNING: this waives the
+ *     HelloRetryRequest cookie's return-routability check (RFC 9147 Section
+ *     5.1) for those handshakes -- the server keeps state for, and completes
+ *     handshakes with, unvalidated source addresses, and answers a small
+ *     ClientHello with its full flight, so it can be used as a traffic
+ *     amplifier. A cookie IS still sent whenever a HelloRetryRequest is
+ *     actually needed. Only implemented for DTLS 1.3; the user MUST call
+ *     wolfSSL_dtls13_use_stateful_server() on the server to enable it at
+ *     runtime, and it is off by default.
  */
 
 #ifndef WOLFCRYPT_ONLY
@@ -832,6 +846,20 @@ static int SendStatelessReplyDtls13(const WOLFSSL* ssl, WolfSSL_CH* ch)
     }
 #endif
 
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+    if (ssl->options.dtls13StatefulServer && !cs.doHelloRetry) {
+        /* Stateful server: the client already sent a usable key share, so no
+         * HelloRetryRequest (and thus no stateless cookie round-trip) is needed.
+         * Commit and process this ClientHello directly for a 1-RTT handshake.
+         * When a key-share HRR *is* needed (cs.doHelloRetry) we fall through and
+         * send it with a cookie, so the second ClientHello is validated by the
+         * normal cookie path -- interoperating with clients (e.g. wolfSSL's own
+         * DTLS client) that omit their key share from the first ClientHello. */
+        ((WOLFSSL*)ssl)->options.dtlsStateful = 1;
+        goto dtls13_cleanup;
+    }
+#endif
+
 #ifdef HAVE_SUPPORTED_CURVES
     if (cs.doHelloRetry) {
         ret = TLSX_KeyShare_SetSupported(ssl, &parsedExts);
@@ -1029,6 +1057,25 @@ int DoClientHelloStateless(WOLFSSL* ssl, const byte* input, word32 helloSz,
         else
 #endif
             ret = SendStatelessReply(ssl, &ch, isTls13);
+#if defined(WOLFSSL_DTLS13) && defined(WOLFSSL_DTLS13_STATEFUL_SERVER)
+        /* A stateful server commits to a cookie-less 1-RTT accept inside
+         * SendStatelessReply(). ProcessReply() skips the DTLS 1.3 window update
+         * while dtlsStateful is 0, so prime the windows here exactly as the
+         * cookie-validated path below does -- otherwise a duplicate of this
+         * ClientHello datagram passes the replay window, is re-processed, and
+         * makes the server rebuild and resend its whole flight. */
+        if (ret == 0 && isTls13 && ssl->options.dtlsStateful &&
+                ssl->options.dtls13StatefulServer) {
+            /* Set record numbers before current record number as read */
+            Dtls13Epoch* e;
+            ret = Dtls13UpdateWindowRecordRecvd(ssl);
+            e = Dtls13GetEpoch(ssl, ssl->keys.curEpoch64);
+            if (e != NULL)
+                XMEMSET(e->window, 0xFF, sizeof(e->window));
+            XMEMSET(ssl->keys.peerSeq->window, 0xFF,
+                    sizeof(ssl->keys.peerSeq->window));
+        }
+#endif
     }
     else {
         byte cookieGood;

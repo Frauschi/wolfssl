@@ -31,6 +31,10 @@
  * WOLFSSL_QUIC:             Enable QUIC protocol support (TLS 1.3) default: off
  * WOLFSSL_DTLS13_NO_HRR_ON_RESUME: Skip HRR on DTLS 1.3 resume   default: off
  * WOLFSSL_DTLS_CH_FRAG:     Enable DTLS 1.3 ClientHello frag     default: off
+ * WOLFSSL_DTLS13_STATEFUL_SERVER: Stateful DTLS 1.3 server,      default: off
+ *                            keeping state from the first ClientHello and
+ *                            waiving the HelloRetryRequest cookie. See the
+ *                            warning in src/dtls.c.
  *
  * Handshake:
  * WOLFSSL_TLS13_MIDDLEBOX_COMPAT: Enable middlebox compatibility  default: on
@@ -7896,10 +7900,22 @@ int DoTls13ClientHello(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
             }
         }
         else {
+            int cookieOptional = 0;
 #if defined(WOLFSSL_DTLS13) && defined(WOLFSSL_DTLS13_NO_HRR_ON_RESUME)
             /* Don't error out as we may be resuming. We confirm this later. */
-            if (!ssl->options.dtls)
+            if (ssl->options.dtls)
+                cookieOptional = 1;
 #endif
+#if defined(WOLFSSL_DTLS13) && defined(WOLFSSL_DTLS13_STATEFUL_SERVER)
+            /* A stateful server accepts a ClientHello that already carries a
+             * usable key share directly (1-RTT): no HelloRetryRequest and thus
+             * no cookie round-trip happened, so a missing cookie is expected.
+             * When an HRR *was* sent (key share was missing) the second
+             * ClientHello does carry a cookie and is validated above. */
+            if (ssl->options.dtls && ssl->options.dtls13StatefulServer)
+                cookieOptional = 1;
+#endif
+            if (!cookieOptional)
                 ERROR_OUT(HRR_COOKIE_ERROR, exit_dch);
         }
     }
@@ -8171,6 +8187,15 @@ int DoTls13ClientHello(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
             ssl->options.serverState != SERVER_HELLO_RETRY_REQUEST_COMPLETE) {
 #ifdef WOLFSSL_DTLS13
             if (ssl->options.dtls) {
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+                /* A stateful server that reached this point already committed
+                 * to a 1-RTT accept in DoClientHelloStateless: the ClientHello
+                 * carried a usable key share, so no HelloRetryRequest/cookie is
+                 * needed. Proceed with the handshake. When an HRR *was* required
+                 * the stateless path sent it, and the second ClientHello carries
+                 * a valid cookie (cookieGood), so this branch is not reached. */
+                if (!ssl->options.dtls13StatefulServer)
+#endif
 #ifdef WOLFSSL_DTLS13_NO_HRR_ON_RESUME
                 /* We can skip cookie on resumption */
                 if (!ssl->options.dtls || !ssl->options.dtls13NoHrrOnResume ||

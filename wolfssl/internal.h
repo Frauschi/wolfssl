@@ -5378,6 +5378,13 @@ struct Options {
 #ifdef WOLFSSL_DTLS_CH_FRAG
     word16            dtls13ChFrag:1;
 #endif
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+    word16            dtls13StatefulServer:1; /* server keeps state from the
+                                               * first ClientHello (reassembles a
+                                               * fragmented first CH) and does a
+                                               * 1-RTT handshake without the
+                                               * stateless HRR cookie */
+#endif
 #endif
 #ifdef WOLFSSL_TLS13
     word16            tls13MiddleBoxCompat:1; /* TLSv1.3 middlebox compatibility */

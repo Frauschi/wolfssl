@@ -2033,3 +2033,53 @@ int test_dtls13_5_9_0_compat_empty_echo(void)
 #endif
     return EXPECT_RESULT();
 }
+
+int test_wolfSSL_dtls13_use_stateful_server(void)
+{
+    EXPECT_DECLS;
+#if defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && \
+    defined(WOLFSSL_DTLS13_STATEFUL_SERVER)
+    WOLFSSL_CTX *ctx_c = NULL;
+    WOLFSSL_CTX *ctx_s = NULL;
+    WOLFSSL *ssl_c = NULL;
+    WOLFSSL *ssl_s = NULL;
+    WOLFSSL_CTX *ctx_tls = NULL;
+    WOLFSSL *ssl_tls = NULL;
+    struct test_memio_ctx test_ctx;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfDTLSv1_3_client_method, wolfDTLSv1_3_server_method), 0);
+
+    /* NULL object is rejected rather than dereferenced. */
+    ExpectIntEQ(wolfSSL_dtls13_use_stateful_server(NULL, 1), WOLFSSL_FAILURE);
+
+    /* Server side of a DTLS connection: accepted, and the option actually
+     * takes the value asked for. */
+    ExpectIntEQ(wolfSSL_dtls13_use_stateful_server(ssl_s, 1), WOLFSSL_SUCCESS);
+    ExpectIntEQ(ssl_s->options.dtls13StatefulServer, 1);
+    ExpectIntEQ(wolfSSL_dtls13_use_stateful_server(ssl_s, 0), WOLFSSL_SUCCESS);
+    ExpectIntEQ(ssl_s->options.dtls13StatefulServer, 0);
+    /* Any non-zero enables, i.e. the value is normalised into the bitfield. */
+    ExpectIntEQ(wolfSSL_dtls13_use_stateful_server(ssl_s, 2), WOLFSSL_SUCCESS);
+    ExpectIntEQ(ssl_s->options.dtls13StatefulServer, 1);
+
+    /* This is a server-only knob: the client side must refuse it. */
+    ExpectIntEQ(wolfSSL_dtls13_use_stateful_server(ssl_c, 1), WOLFSSL_FAILURE);
+
+    /* And it is DTLS-only: a TLS server must refuse it too. */
+    ExpectNotNull(ctx_tls =
+        wolfSSL_CTX_new(wolfTLSv1_3_server_method()));
+    ExpectNotNull(ssl_tls = wolfSSL_new(ctx_tls));
+    ExpectIntEQ(wolfSSL_dtls13_use_stateful_server(ssl_tls, 1),
+        WOLFSSL_FAILURE);
+
+    wolfSSL_free(ssl_tls);
+    wolfSSL_CTX_free(ctx_tls);
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
+#endif
+    return EXPECT_RESULT();
+}

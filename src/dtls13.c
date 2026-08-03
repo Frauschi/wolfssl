@@ -1734,6 +1734,23 @@ static int Dtls13AcceptFragmented(WOLFSSL *ssl, enum HandShakeType type)
             ssl->options.dtls13ChFrag && ssl->options.dtlsStateful)
         return 1;
 #endif
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+    /* A stateful server buffers and reassembles a fragmented ClientHello --
+     * including the very first one, and one whose cookie sits past the first
+     * fragment -- rather than requiring the HRR cookie to be present in the
+     * first fragment. The cookie, when there is one, is then validated on the
+     * complete ClientHello by the DoClientHelloStateless() call in
+     * DoTls13ClientHello().
+     *
+     * This trades the stateless anti-amplification protection (state is now
+     * held for an unverified peer) for the ability to interoperate with peers
+     * whose large PQC ClientHello fragments up front, e.g. NSS. Reassembly is
+     * bounded by DTLS_POOL_SZ / DTLS_TOO_MANY_FRAGMENTS_E.
+     * Opt-in per connection via wolfSSL_dtls13_use_stateful_server(). */
+    if (ssl->options.side == WOLFSSL_SERVER_END && type == client_hello &&
+            ssl->options.dtls13StatefulServer)
+        return 1;
+#endif
     return 0;
 }
 
@@ -3346,6 +3363,46 @@ int wolfSSL_dtls13_allow_ch_frag(WOLFSSL *ssl, int enabled)
         return WOLFSSL_FAILURE;
     }
     ssl->options.dtls13ChFrag = !!enabled;
+    return WOLFSSL_SUCCESS;
+}
+#endif
+
+#ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+/* Make the DTLS 1.3 server keep per-connection state from the first ClientHello
+ * (so a fragmented first ClientHello can be reassembled) and, when the client
+ * already offers a usable key share, complete in 1-RTT without the stateless
+ * HRR cookie. This is needed to interoperate with peers whose large PQC
+ * ClientHello fragments up front, e.g. NSS, which also orders the key_share
+ * ahead of the cookie extension.
+ *
+ * WARNING: enabling this disables the HelloRetryRequest cookie's
+ * return-routability check (RFC 9147 Section 5.1) for such handshakes. The
+ * server will allocate state for, and complete a handshake with, a peer whose
+ * source address has not been validated, and it will send its full flight
+ * (ServerHello..Finished, typically several kB) in response to a ClientHello
+ * that may be as small as a few hundred bytes. That makes the server usable as
+ * a traffic amplifier by an attacker spoofing a victim's address. Deploy only
+ * where the source address is validated by other means, or where the server is
+ * rate limited. Off by default; see --enable-dtls13-stateful-server.
+ *
+ * The stateless cookie is still used when a HelloRetryRequest is actually needed
+ * (the client omitted its key share, as wolfSSL's own DTLS client does for PQC
+ * key shares): the HRR then carries a cookie and the second ClientHello is
+ * validated by the normal cookie path. So the server stays interoperable with
+ * all clients -- 1-RTT when the peer cooperates, a cookie'd HRR otherwise.
+ * Server side of a DTLS connection only. */
+int wolfSSL_dtls13_use_stateful_server(WOLFSSL *ssl, int enabled)
+{
+    if (ssl == NULL) {
+        return WOLFSSL_FAILURE;
+    }
+    if (ssl->options.side == WOLFSSL_CLIENT_END) {
+        return WOLFSSL_FAILURE;
+    }
+    if (!ssl->options.dtls) {
+        return WOLFSSL_FAILURE;
+    }
+    ssl->options.dtls13StatefulServer = !!enabled;
     return WOLFSSL_SUCCESS;
 }
 #endif

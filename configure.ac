@@ -6464,6 +6464,23 @@ then
   AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_DTLS_CH_FRAG"
 fi
 
+# DTLS 1.3 stateful server: keep per-connection state from the first ClientHello
+# (so a fragmented first ClientHello can be reassembled) and skip the stateless
+# HRR cookie for a 1-RTT handshake. This lets the server interoperate with peers
+# whose large PQC ClientHello fragments up front, at the cost of the stateless
+# anti-amplification protection -- hence opt-in and disabled by default.
+# The DTLS 1.3 prerequisite is checked later (see ENABLED_DTLS13_STATEFUL_SERVER
+# below), because other options can still auto-enable DTLS 1.3 after this point.
+AC_ARG_ENABLE([dtls13-stateful-server],
+    [AS_HELP_STRING([--enable-dtls13-stateful-server],[Enable stateful DTLS 1.3 server handling from the first ClientHello. WARNING: waives the HelloRetryRequest cookie, i.e. the RFC 9147 return-routability check, so the server keeps state for and completes handshakes with unvalidated source addresses and can be used as a traffic amplifier (default: disabled)])],
+    [ ENABLED_DTLS13_STATEFUL_SERVER=$enableval ],
+    [ ENABLED_DTLS13_STATEFUL_SERVER=no ]
+    )
+if test "x$ENABLED_DTLS13_STATEFUL_SERVER" = "xyes"
+then
+  AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_DTLS13_STATEFUL_SERVER"
+fi
+
 # CODING
 AC_ARG_ENABLE([coding],
     [AS_HELP_STRING([--enable-coding],[Enable Coding base 16/64 (default: enabled)])],
@@ -13124,6 +13141,15 @@ AM_CONDITIONAL([BUILD_HMAC],[test "x$ENABLED_HMAC" = "xyes"])
 AM_CONDITIONAL([BUILD_ERROR_STRINGS],[test "x$ENABLED_ERROR_STRINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_DO178],[test "x$ENABLED_DO178" = "xyes"])
 AM_CONDITIONAL([BUILD_PSA],[test "x$ENABLED_PSA" = "xyes"])
+# Deferred to here so that options which auto-enable DTLS 1.3 late (e.g.
+# --enable-jni, --enable-all) are accounted for before the prerequisite is
+# enforced.
+if test "x$ENABLED_DTLS13_STATEFUL_SERVER" = "xyes" && \
+   test "x$ENABLED_DTLS13" != "xyes" && test "x$ENABLED_USERSETTINGS" != "xyes"
+then
+  AC_MSG_ERROR([You need to enable DTLSv1.3 to use the stateful DTLS 1.3 server])
+fi
+
 AM_CONDITIONAL([BUILD_DTLS13],[test "x$ENABLED_DTLS13" = "xyes" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_QUIC],[test "x$ENABLED_QUIC" = "xyes"])
 AM_CONDITIONAL([BUILD_DTLS_CID],[test "x$ENABLED_DTLS_CID" = "xyes"])

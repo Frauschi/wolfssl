@@ -5273,6 +5273,9 @@ blinding by defining WC_BLINDING_NO_RNG_ACKNOWLEDGE_WEAKNESS."
 #if !defined(WOLFSSL_DTLS13) && defined(WOLFSSL_DTLS_CH_FRAG)
 #error "WOLFSSL_DTLS_CH_FRAG only works with DTLS 1.3"
 #endif
+#if !defined(WOLFSSL_DTLS13) && defined(WOLFSSL_DTLS13_STATEFUL_SERVER)
+#error "WOLFSSL_DTLS13_STATEFUL_SERVER only works with DTLS 1.3"
+#endif
 
 #if defined(WOLFSSL_HAVE_MLKEM) && \
     !defined(WOLFSSL_NO_ML_KEM) && !defined(WOLFSSL_PQC_HYBRIDS) && \

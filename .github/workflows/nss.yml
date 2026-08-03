@@ -22,7 +22,9 @@ permissions:
 # END OF COMMON SECTION
 
 env:
-  NSS_REF: NSS_3_107_RTM
+  # Recent NSS so the post-quantum ML-KEM hybrid groups (mlkem768x25519 etc.)
+  # are available and negotiated by default.
+  NSS_REF: NSS_3_123_1_RTM
 
 jobs:
   build_nss:
@@ -122,14 +124,24 @@ jobs:
         uses: wolfSSL/actions-build-autotools-project@v1
         with:
           path: wolfssl
-          configure: --enable-dtls --enable-dtls13
+          # curve25519 is required for the X25519MLKEM768 hybrid (and classical
+          # x25519) used against NSS. ML-KEM and PQC hybrids are on by default,
+          # and MLKEM + DTLS 1.3 auto-enables DTLS ClientHello fragmenting.
+          # dtls13-stateful-server is required for the DTLS 1.3 cases: NSS
+          # fragments its ML-KEM ClientHello and puts the cookie behind the
+          # key_share, which a stateless server cannot reassemble.
+          configure: --enable-dtls --enable-dtls13 --enable-curve25519
+            --enable-dtls13-stateful-server
           install: false
           check: false
 
       - name: Test interop
         run: bash wolfssl/.github/workflows/nss.sh
 
-      - name: print server logs
+      - name: print logs
         if: ${{ failure() }}
         run: |
-          cat /tmp/server.log
+          for f in /tmp/server_*.log /tmp/client_*.log; do
+            echo "===== $f ====="
+            cat "$f" 2>/dev/null || true
+          done

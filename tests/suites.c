@@ -1285,6 +1285,37 @@ int SuiteTest(int argc, char** argv)
     #endif
     #endif
     #endif
+    #ifdef WOLFSSL_DTLS13_STATEFUL_SERVER
+    /* Stateful DTLS 1.3 server (1-RTT, no HRR cookie). Uses a classical group so
+     * the client supplies its key share in the first ClientHello and no
+     * HelloRetryRequest is needed -- the no-cookie mode requires the peer to
+     * send a usable key share up front (a peer that omits it, forcing an HRR,
+     * still needs the stateless cookie). */
+    XSTRLCPY(argv0[1], "tests/test-dtls13-stateful-server.conf",
+             sizeof(argv0[1]));
+    printf("starting stateful DTLSv1.3 server test\n");
+    test_harness(&args);
+    if (args.return_code != 0) {
+        printf("error from script %d\n", args.return_code);
+        args.return_code = EXIT_FAILURE;
+        goto exit;
+    }
+    #ifdef WOLFSSL_PQC_HYBRIDS
+    /* Stateful server, PQC hybrid: the client omits its key share so an HRR is
+     * required. Covers that the HRR still carries the stateless cookie and that
+     * the resulting fragmented second ClientHello is reassembled and its cookie
+     * validated on the complete message. */
+    XSTRLCPY(argv0[1], "tests/test-dtls13-stateful-server-pq.conf",
+             sizeof(argv0[1]));
+    printf("starting stateful DTLSv1.3 server test with a PQ hybrid group\n");
+    test_harness(&args);
+    if (args.return_code != 0) {
+        printf("error from script %d\n", args.return_code);
+        args.return_code = EXIT_FAILURE;
+        goto exit;
+    }
+    #endif /* WOLFSSL_PQC_HYBRIDS */
+    #endif /* WOLFSSL_DTLS13_STATEFUL_SERVER */
 #endif
 #if defined(WC_RSA_PSS) && (!defined(HAVE_FIPS) || \
      (defined(HAVE_FIPS_VERSION) && (HAVE_FIPS_VERSION > 2))) && \
