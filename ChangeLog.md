@@ -251,6 +251,15 @@
   private key in a default build, which previously kept the old secret
   polynomials in the structure after reporting the key gone.
 
+* Took the two large SHAKE states in Falcon off the stack.  The sampler
+  context, about 1.5KB of sponge and squeezed stream, was a `WC_DECLARE_VAR`
+  in `wc_falcon_sign_msg()`, and key generation held a similar 570-byte stream
+  state.  Both functions already make one heap allocation for their working
+  set, so each state is now carved from that allocation instead.  The stack
+  frame of `falcon_native_sign_msg()` goes from 2448 to 912 bytes, and key
+  generation's from 1216 to 576.  Heap use is unchanged to within the
+  alignment padding, and so is speed.
+
 * Halved the Falcon verify working set.  It held four n-element buffers, but
   never needs more than two at once: the public key is dead once the pointwise
   product is formed, which is where the hashed point is built, and the
