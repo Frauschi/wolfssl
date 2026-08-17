@@ -56,6 +56,23 @@
 
 /* This is the native wolfCrypt implementation (no liboqs dependency). */
 
+/* Per-key signing caches, off by default and documented with the other tuning
+ * knobs at the top of wolfcrypt/src/falcon.c. They exist only in builds that
+ * sign in software. */
+#if defined(WOLFSSL_FALCON_VERIFY_ONLY) || defined(WOLF_CRYPTO_CB_ONLY_FALCON)
+    #undef WC_FALCON_CACHE_EXPANDED_KEY
+    #undef WC_FALCON_CACHE_PRIV_BASIS
+#endif
+#if defined(WC_FALCON_CACHE_EXPANDED_KEY) && \
+    !defined(WOLFSSL_FALCON_SIGN_SMALL_MEM)
+    /* Internal: the expanded key is really held in the key structure. */
+    #define WC_FALCON_CACHE_TREE
+#elif defined(WC_FALCON_CACHE_EXPANDED_KEY)
+    #ifndef WC_FALCON_CACHE_PRIV_BASIS
+        #define WC_FALCON_CACHE_PRIV_BASIS
+    #endif
+#endif
+
 #ifdef __cplusplus
     extern "C" {
 #endif
@@ -129,6 +146,19 @@ struct falcon_key {
      * key is held separately in p[]; the concat(priv,pub) layout is rebuilt on
      * demand by wc_falcon_export_private, so no duplicate copy is kept here. */
     byte k[FALCON_MAX_KEY_SIZE];
+
+#ifdef WC_FALCON_CACHE_TREE
+    /* Expanded key (basis in FFT form plus the normalized ffLDL tree), built on
+     * the first sign and reused by every later one. Typed word64 because the
+     * internal fpr type is private to falcon.c. Secret: zeroized before free. */
+    word64* expanded;
+    WC_BITFIELD expandedSet:1;
+#endif
+#ifdef WC_FALCON_CACHE_PRIV_BASIS
+    /* Secret basis f | g | F | G, 4n bytes, decoded and completed once. */
+    sword8* basis;
+    WC_BITFIELD basisSet:1;
+#endif
 };
 
 #ifndef WC_FALCONKEY_TYPE_DEFINED
