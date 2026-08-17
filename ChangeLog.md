@@ -191,6 +191,42 @@
 
 * Added Argon2 (RFC 9106) password hashing with all three variants - Argon2d, Argon2i and Argon2id - via `--enable-argon2`. Only version 0x13 is implemented. Provides the one-shot `wc_Argon2()`/`wc_Argon2_ex()` and a reusable context API (`wc_Argon2Init`/`wc_Argon2SetParams`/`wc_Argon2DeriveTag`/`wc_Argon2Free`, plus `wc_Argon2New`/`wc_Argon2Delete` unless `WC_NO_CONSTRUCTORS`) that allocates the memory block array once for applications deriving many tags. `--enable-argon2-threads` fills the segments of a slice in parallel, which does not change the derived tag: the one-shot functions use a thread per lane, and the context API takes a count from `wc_Argon2SetThreads()`. by @SparkiDev
 
+## Post-Quantum Cryptography (PQC)
+
+* Added two per-key signing caches to the native Falcon implementation,
+  selected with `--enable-falcon=cache-key` (`WC_FALCON_CACHE_EXPANDED_KEY`)
+  and `--enable-falcon=cache-basis` (`WC_FALCON_CACHE_PRIV_BASIS`), both off by
+  default.  `wc_falcon_sign_msg()` decodes the private key, recomputes G and
+  builds the ffLDL tree on every call; with the default integer fpr backend
+  that setup is over half of each signature.  Caching the expanded key in the
+  key structure makes only the first signature pay for it, which roughly
+  doubles the signing rate of that backend (Falcon-512 5.35ms to 2.56ms,
+  Falcon-1024 11.48ms to 5.57ms on one x86-64 host), at a cost of about 57KB
+  (Falcon-512) or 120KB (Falcon-1024) of heap per key.  `cache-basis` keeps
+  only the secret basis, for 4*n bytes per key, and is what `cache-key`
+  reduces to in small-mem builds.  Both hold secret material, are zeroized
+  when released, and are invalidated whenever the private key or level
+  changes.  Neither is synchronized, so a key used to sign from several
+  threads at once must either leave them off or be signed with once before it
+  is shared.
+
+* Falcon signing and key expansion now derive the root of the ffLDL tree from
+  the identity det(G) = q^2, which holds for the NTRU basis, instead of the
+  general D11 = G11 - L10*adj(G01).  The general form subtracts two values of
+  about the same size to reach a much smaller one, losing around ten bits of
+  the mantissa to cancellation at the root; the closed form loses none, needs
+  no G11 at all, and reuses the reciprocal already computed for L10.
+  Signatures for a given key and randomness differ from earlier releases as a
+  result, which is not observable in normal use: Falcon signing is randomized
+  and verification is unaffected.
+
+* Added a deterministic Falcon test vector, covering key generation and
+  signing at both levels, which pins the results by digest.  Every Falcon fpr
+  backend implements the same IEEE-754 binary64 arithmetic, so all of them
+  have to reproduce it; the test is what detects one of them drifting.  It
+  needs `WC_RNG_SEED_CB` to make the DRBG reproducible and is skipped
+  otherwise.
+
 ## Fixes
 
 * **Fix (sniffer could not decrypt Encrypt-Then-MAC or X25519 sessions)**: the
