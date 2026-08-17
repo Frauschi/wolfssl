@@ -9894,8 +9894,11 @@ int wc_Falcon_PublicKeyDecode(const byte* input, word32* inOutIdx,
                                     falcon_key* key, word32 inSz)
 {
     int ret = 0;
-    WC_DECLARE_VAR(pubKey, byte, FALCON_MAX_PUB_KEY_SIZE, NULL);
-    word32 pubKeyLen = FALCON_MAX_PUB_KEY_SIZE;
+    /* Heap, not stack: an inline buffer here would be a 1793-byte frame in a
+     * function on the certificate-parsing path. Sized for the key's own
+     * level, which is what a valid encoding for this key holds. */
+    byte* pubKey = NULL;
+    word32 pubKeyLen;
     int keytype = 0;
 
     if (input == NULL || inOutIdx == NULL || key == NULL || inSz == 0) {
@@ -9909,16 +9912,20 @@ int wc_Falcon_PublicKeyDecode(const byte* input, word32* inOutIdx,
 
     if (key->level == 1) {
         keytype = FALCON_LEVEL1k;
+        pubKeyLen = FALCON_LEVEL1_PUB_KEY_SIZE;
     }
     else if (key->level == 5) {
         keytype = FALCON_LEVEL5k;
+        pubKeyLen = FALCON_LEVEL5_PUB_KEY_SIZE;
     }
     else {
         return BAD_FUNC_ARG;
     }
 
-    WC_ALLOC_VAR_EX(pubKey, byte, FALCON_MAX_PUB_KEY_SIZE, NULL,
-                    DYNAMIC_TYPE_TMP_BUFFER, return MEMORY_E);
+    pubKey = (byte*)XMALLOC(pubKeyLen, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    if (pubKey == NULL) {
+        return MEMORY_E;
+    }
 
     ret = DecodeAsymKeyPublic(input, inOutIdx, inSz, pubKey, &pubKeyLen,
                               keytype);
@@ -9926,7 +9933,7 @@ int wc_Falcon_PublicKeyDecode(const byte* input, word32* inOutIdx,
         ret = wc_falcon_import_public(pubKey, pubKeyLen, key);
     }
 
-    WC_FREE_VAR_EX(pubKey, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(pubKey, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     return ret;
 }
 
@@ -9947,8 +9954,9 @@ int wc_Falcon_PublicKeyToDer(falcon_key* key, byte* output, word32 inLen,
                              int withAlg)
 {
     int    ret;
-    WC_DECLARE_VAR(pubKey, byte, FALCON_MAX_PUB_KEY_SIZE, NULL);
-    word32 pubKeyLen = FALCON_MAX_PUB_KEY_SIZE;
+    /* Heap, not stack: see wc_Falcon_PublicKeyDecode. */
+    byte*  pubKey = NULL;
+    word32 pubKeyLen;
     int    keytype = 0;
 
     if (key == NULL) {
@@ -9957,16 +9965,20 @@ int wc_Falcon_PublicKeyToDer(falcon_key* key, byte* output, word32 inLen,
 
     if (key->level == 1) {
         keytype = FALCON_LEVEL1k;
+        pubKeyLen = FALCON_LEVEL1_PUB_KEY_SIZE;
     }
     else if (key->level == 5) {
         keytype = FALCON_LEVEL5k;
+        pubKeyLen = FALCON_LEVEL5_PUB_KEY_SIZE;
     }
     else {
         return BAD_FUNC_ARG;
     }
 
-    WC_ALLOC_VAR_EX(pubKey, byte, FALCON_MAX_PUB_KEY_SIZE, NULL,
-                    DYNAMIC_TYPE_TMP_BUFFER, return MEMORY_E);
+    pubKey = (byte*)XMALLOC(pubKeyLen, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    if (pubKey == NULL) {
+        return MEMORY_E;
+    }
 
     ret = wc_falcon_export_public(key, pubKey, &pubKeyLen);
     if (ret == 0) {
@@ -9974,7 +9986,7 @@ int wc_Falcon_PublicKeyToDer(falcon_key* key, byte* output, word32 inLen,
                                   withAlg);
     }
 
-    WC_FREE_VAR_EX(pubKey, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(pubKey, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     return ret;
 }
 #endif

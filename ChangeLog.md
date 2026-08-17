@@ -251,6 +251,12 @@
   private key in a default build, which previously kept the old secret
   polynomials in the structure after reporting the key gone.
 
+* Falcon's `wc_Falcon_PublicKeyDecode()` and `wc_Falcon_PublicKeyToDer()` no
+  longer keep the encoded public key in a stack array bounded by the highest
+  level built.  They allocate it, as `wc_Falcon_PrivateKeyDecode()` already
+  did, and at the size of the key's own level rather than the maximum.  Both
+  stack frames go from about 1850 bytes to 80.
+
 * Took the two large SHAKE states in Falcon off the stack.  The sampler
   context, about 1.5KB of sponge and squeezed stream, was a `WC_DECLARE_VAR`
   in `wc_falcon_sign_msg()`, and key generation held a similar 570-byte stream
