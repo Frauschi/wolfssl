@@ -251,6 +251,17 @@
   private key in a default build, which previously kept the old secret
   polynomials in the structure after reporting the key gone.
 
+* **Fix (timing side channel in `wc_falcon_check_key()`)**: the consistency
+  loop stopped at the first coefficient where `h*f != g (mod q)`, and the
+  values it compares are the NTT images of the secret `f` and `g`.  A
+  consistent key always ran the loop to completion, so the leak only appeared
+  for an inconsistent pair, but a caller who can import a chosen public key
+  against a stored private key and time the check could learn the index of
+  the first failing slot, and by varying the public key solve for the secret
+  slot by slot.  Every slot is now examined and the verdict folded into a
+  mask, so the loop runs the same length whatever the data.  Consistent keys
+  cost the same as before.
+
 * Falcon's `wc_Falcon_PublicKeyDecode()` and `wc_Falcon_PublicKeyToDer()` no
   longer keep the encoded public key in a stack array bounded by the highest
   level built.  They allocate it, as `wc_Falcon_PrivateKeyDecode()` already
