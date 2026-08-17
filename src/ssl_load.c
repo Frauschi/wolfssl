@@ -829,8 +829,9 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
         return MEMORY_E;
     }
 
-    /* Initialize Falcon key. */
-    ret = wc_falcon_init(key);
+    /* Initialize Falcon key. The struct came from 'heap' and, with
+     * WOLFSSL_FALCON_DYNAMIC_KEYS, so must its encoded-key buffers. */
+    ret = wc_falcon_init_ex(key, heap, INVALID_DEVID);
     if (ret == 0) {
         byte level = 0;
         word32 idx;
@@ -864,7 +865,7 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
             }
             else {
                 wc_falcon_free(key);
-                if (wc_falcon_init(key) != 0) {
+                if (wc_falcon_init_ex(key, heap, INVALID_DEVID) != 0) {
                     XFREE(key, heap, DYNAMIC_TYPE_FALCON);
                     return MEMORY_E;
                 }

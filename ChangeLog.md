@@ -231,6 +231,35 @@
   `--enable-falcon=small-mem`; at Falcon-512, from 108KB to 84KB and from 56KB
   to 44KB.  Both helpers still allocate when the caller passes no scratch.
 
+* Falcon's `FALCON_MAX_*` bounds now follow the highest security level built
+  rather than always Falcon-1024.  `--enable-falcon=level1` or `=level5`
+  (`WOLFSSL_NO_FALCON_LEVEL5` / `WOLFSSL_NO_FALCON_LEVEL1`) builds only the
+  levels named; naming neither builds both, as before.  A level-1 only build
+  takes `falcon_key` from 4120 to 2200 bytes and the verify stack frame from
+  4304 to 2224 bytes.  `wc_falcon_set_level()` returns `BAD_FUNC_ARG` for a
+  level that was not built, and TLS no longer offers or accepts the signature
+  algorithm for it, so a level-restricted peer negotiates a level it can
+  actually perform instead of failing the handshake on the certificate.
+
+* Added `--enable-falcon=dynamic-keys` (`WOLFSSL_FALCON_DYNAMIC_KEYS`), the
+  Falcon counterpart of `WOLFSSL_MLDSA_DYNAMIC_KEYS`, off by default.  The
+  encoded public and private key move from inline arrays to heap buffers sized
+  for the key's own level, which takes `falcon_key` from 4120 bytes to 32.
+  `wc_falcon_set_level()` allocates them and can now return `MEMORY_E`; the
+  buffers are released and the private one zeroized by `wc_falcon_free()` and
+  on a level change.  `wc_falcon_set_level()` now also zeroizes the inline
+  private key in a default build, which previously kept the old secret
+  polynomials in the structure after reporting the key gone.
+
+* Halved the Falcon verify working set.  It held four n-element buffers, but
+  never needs more than two at once: the public key is dead once the pointwise
+  product is formed, which is where the hashed point is built, and the
+  signature polynomial is dead once its squared norm is accumulated, which is
+  before it is lifted in place into that product.  The stack frame of
+  `wc_falcon_verify_msg()` goes from 8368 to 4304 bytes at Falcon-1024, and to
+  2224 bytes in a level-1 only build.  Verification results are unchanged, and
+  `WOLFSSL_SMALL_STACK` still moves the buffer to the heap.
+
 * Added a deterministic Falcon test vector, covering key generation and
   signing at both levels, which pins the results by digest.  Every Falcon fpr
   backend implements the same IEEE-754 binary64 arithmetic, so all of them

@@ -158,6 +158,10 @@ jobs:
           - { name: 'cache-key',         runner: ubuntu-latest,    opts: '--enable-falcon=cache-key' }
           - { name: 'cache-basis',       runner: ubuntu-latest,    opts: '--enable-falcon=cache-basis' }
           - { name: 'cache-key+small-mem', runner: ubuntu-latest,  opts: '--enable-falcon=cache-key,small-mem' }
+          - { name: 'level1 only',       runner: ubuntu-latest,    opts: '--enable-falcon=level1' }
+          - { name: 'level5 only',       runner: ubuntu-latest,    opts: '--enable-falcon=level5' }
+          - { name: 'dynamic-keys',      runner: ubuntu-latest,    opts: '--enable-falcon=dynamic-keys' }
+          - { name: 'level1+dynamic-keys', runner: ubuntu-latest,  opts: '--enable-falcon=level1,dynamic-keys' }
           # verify-only strips keygen/sign, so it is a build/link check only
           # (testwolfcrypt's falcon_test needs signing).
           - { name: 'verify-only',       runner: ubuntu-latest,    opts: '--enable-falcon', cppflags: '-DWOLFSSL_FALCON_VERIFY_ONLY', build_only: true }

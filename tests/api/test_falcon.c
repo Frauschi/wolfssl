@@ -51,6 +51,18 @@
 
 #ifdef HAVE_FALCON
 
+/* The levels this build actually has. Disabling one with
+ * WOLFSSL_NO_FALCON_LEVEL1 / _LEVEL5 drops it from every loop below. */
+static const byte falcon_levels[] = {
+#ifndef WOLFSSL_NO_FALCON_LEVEL1
+    FALCON_LEVEL1,
+#endif
+#ifndef WOLFSSL_NO_FALCON_LEVEL5
+    FALCON_LEVEL5
+#endif
+};
+#define FALCON_NUM_LEVELS ((int)(sizeof(falcon_levels) / sizeof(byte)))
+
 /* Encoded sizes per the Falcon specification (Table 3.3), keyed by level. */
 static word32 falcon_exp_pub(byte level)
 {
@@ -85,7 +97,6 @@ int test_wc_falcon_sizes(void)
 #ifdef HAVE_FALCON
     falcon_key key;
     int li;
-    static const byte levels[2] = { FALCON_LEVEL1, FALCON_LEVEL5 };
 
     /* NULL key -> BAD_FUNC_ARG for every size query. */
     ExpectIntEQ(wc_falcon_size(NULL),      WC_NO_ERR_TRACE(BAD_FUNC_ARG));
@@ -102,8 +113,8 @@ int test_wc_falcon_sizes(void)
     ExpectIntEQ(wc_falcon_sig_size(&key),  WC_NO_ERR_TRACE(BAD_FUNC_ARG));
     wc_falcon_free(&key);
 
-    for (li = 0; li < 2; li++) {
-        byte level = levels[li];
+    for (li = 0; li < FALCON_NUM_LEVELS; li++) {
+        byte level = falcon_levels[li];
         byte gl = 0;
 
         XMEMSET(&key, 0, sizeof(key));
@@ -143,7 +154,6 @@ int test_wc_falcon_make_key(void)
     falcon_key key;
     WC_RNG rng;
     int li;
-    static const byte levels[2] = { FALCON_LEVEL1, FALCON_LEVEL5 };
 
     XMEMSET(&rng, 0, sizeof(rng));
     ExpectIntEQ(wc_InitRng(&rng), 0);
@@ -157,8 +167,8 @@ int test_wc_falcon_make_key(void)
     ExpectIntEQ(wc_falcon_make_key(&key, &rng), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
     wc_falcon_free(&key);
 
-    for (li = 0; li < 2; li++) {
-        byte level = levels[li];
+    for (li = 0; li < FALCON_NUM_LEVELS; li++) {
+        byte level = falcon_levels[li];
 
         XMEMSET(&key, 0, sizeof(key));
         ExpectIntEQ(wc_falcon_init(&key), 0);
@@ -190,7 +200,6 @@ int test_wc_falcon_sign_vfy(void)
     int res;
     int li;
     static const byte msg[] = "wolfSSL Falcon sign/verify unit test";
-    static const byte levels[2] = { FALCON_LEVEL1, FALCON_LEVEL5 };
 
     sig = (byte*)XMALLOC(FALCON_MAX_SIG_SIZE, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     ExpectNotNull(sig);
@@ -198,8 +207,8 @@ int test_wc_falcon_sign_vfy(void)
     XMEMSET(&rng, 0, sizeof(rng));
     ExpectIntEQ(wc_InitRng(&rng), 0);
 
-    for (li = 0; li < 2; li++) {
-        byte level = levels[li];
+    for (li = 0; li < FALCON_NUM_LEVELS; li++) {
+        byte level = falcon_levels[li];
 
         XMEMSET(&key, 0, sizeof(key));
         ExpectIntEQ(wc_falcon_init(&key), 0);
@@ -244,7 +253,7 @@ int test_wc_falcon_sign_vfy(void)
     /* Verify against a key with no public key set -> BAD_FUNC_ARG. */
     XMEMSET(&key, 0, sizeof(key));
     ExpectIntEQ(wc_falcon_init(&key), 0);
-    ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL1), 0);
+    ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[0]), 0);
     res = 0;
     ExpectIntEQ(wc_falcon_verify_msg(sig, FALCON_LEVEL1_SIG_SIZE, msg,
         (word32)sizeof(msg), &res, &key), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
@@ -279,7 +288,6 @@ int test_wc_falcon_import_export(void)
     int res;
     int li;
     static const byte msg[] = "wolfSSL Falcon import/export unit test";
-    static const byte levels[2] = { FALCON_LEVEL1, FALCON_LEVEL5 };
 
     pub    = (byte*)XMALLOC(FALCON_MAX_PUB_KEY_SIZE, NULL,
                             DYNAMIC_TYPE_TMP_BUFFER);
@@ -295,8 +303,8 @@ int test_wc_falcon_import_export(void)
     XMEMSET(&rng, 0, sizeof(rng));
     ExpectIntEQ(wc_InitRng(&rng), 0);
 
-    for (li = 0; li < 2; li++) {
-        byte level = levels[li];
+    for (li = 0; li < FALCON_NUM_LEVELS; li++) {
+        byte level = falcon_levels[li];
         word32 expPub = falcon_exp_pub(level);
         word32 expKey = falcon_exp_key(level);
         word32 expPrv = falcon_exp_prv(level);
@@ -440,7 +448,6 @@ int test_wc_falcon_check_key(void)
     word32 pubLen;
     word32 prvLen;
     int li;
-    static const byte levels[2] = { FALCON_LEVEL1, FALCON_LEVEL5 };
 
     pub = (byte*)XMALLOC(FALCON_MAX_PUB_KEY_SIZE, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     prv = (byte*)XMALLOC(FALCON_MAX_KEY_SIZE, NULL, DYNAMIC_TYPE_TMP_BUFFER);
@@ -453,8 +460,8 @@ int test_wc_falcon_check_key(void)
     /* NULL key. */
     ExpectIntEQ(wc_falcon_check_key(NULL), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
 
-    for (li = 0; li < 2; li++) {
-        byte level = levels[li];
+    for (li = 0; li < FALCON_NUM_LEVELS; li++) {
+        byte level = falcon_levels[li];
 
         XMEMSET(&key, 0, sizeof(key));
         ExpectIntEQ(wc_falcon_init(&key), 0);
@@ -550,7 +557,6 @@ int test_wc_falcon_der(void)
     int qsize;
     int li;
     static const byte msg[] = "wolfSSL Falcon DER round-trip";
-    static const byte levels[2] = { FALCON_LEVEL1, FALCON_LEVEL5 };
 
     der = (byte*)XMALLOC(derSz, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     sig = (byte*)XMALLOC(FALCON_MAX_SIG_SIZE, NULL, DYNAMIC_TYPE_TMP_BUFFER);
@@ -560,8 +566,8 @@ int test_wc_falcon_der(void)
     XMEMSET(&rng, 0, sizeof(rng));
     ExpectIntEQ(wc_InitRng(&rng), 0);
 
-    for (li = 0; li < 2; li++) {
-        byte level = levels[li];
+    for (li = 0; li < FALCON_NUM_LEVELS; li++) {
+        byte level = falcon_levels[li];
 
         XMEMSET(&key, 0, sizeof(key));
         ExpectIntEQ(wc_falcon_init(&key), 0);
@@ -747,7 +753,7 @@ int test_wc_falcon_error_paths(void)
         WC_NO_ERR_TRACE(BAD_FUNC_ARG));
     XMEMSET(&key, 0, sizeof(key));
     ExpectIntEQ(wc_falcon_init(&key), 0);
-    ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL1), 0);
+    ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[0]), 0);
     ExpectIntEQ(wc_falcon_export_public(&key, NULL, &outLen),
         WC_NO_ERR_TRACE(BAD_FUNC_ARG));
     ExpectIntEQ(wc_falcon_export_public(&key, out, NULL),
@@ -889,7 +895,6 @@ int test_wc_falcon_deterministic(void)
           0x08, 0x49, 0x91, 0x4A, 0x6D, 0x16, 0x6C, 0xC0 }
     };
     static const byte msg[] = "wolfSSL Falcon deterministic vector";
-    static const byte levels[2] = { FALCON_LEVEL1, FALCON_LEVEL5 };
     falcon_key key;
     WC_RNG rng;
     byte* buf = NULL;
@@ -908,8 +913,11 @@ int test_wc_falcon_deterministic(void)
         sig = prv + FALCON_MAX_KEY_SIZE;
     }
 
-    for (li = 0; (buf != NULL) && (li < 2); li++) {
-        byte level = levels[li];
+    for (li = 0; (buf != NULL) && (li < FALCON_NUM_LEVELS); li++) {
+        byte level = falcon_levels[li];
+        /* The vectors are per level; the loop index is not, once a level can
+         * be compiled out. */
+        int gi = (level == FALCON_LEVEL1) ? 0 : 1;
         word32 pubLen = FALCON_MAX_PUB_KEY_SIZE;
         word32 prvLen = FALCON_MAX_KEY_SIZE;
         word32 sigLen = FALCON_MAX_SIG_SIZE;
@@ -926,16 +934,16 @@ int test_wc_falcon_deterministic(void)
 
         ExpectIntEQ(wc_falcon_export_public(&key, pub, &pubLen), 0);
         ExpectIntEQ(falcon_det_digest(pub, pubLen, dig), 0);
-        ExpectBufEQ(dig, expPub[li], WC_SHA256_DIGEST_SIZE);
+        ExpectBufEQ(dig, expPub[gi], WC_SHA256_DIGEST_SIZE);
 
         ExpectIntEQ(wc_falcon_export_private_only(&key, prv, &prvLen), 0);
         ExpectIntEQ(falcon_det_digest(prv, prvLen, dig), 0);
-        ExpectBufEQ(dig, expPrv[li], WC_SHA256_DIGEST_SIZE);
+        ExpectBufEQ(dig, expPrv[gi], WC_SHA256_DIGEST_SIZE);
 
         ExpectIntEQ(wc_falcon_sign_msg(msg, (word32)sizeof(msg), sig, &sigLen,
             &key, &rng), 0);
         ExpectIntEQ(falcon_det_digest(sig, sigLen, dig), 0);
-        ExpectBufEQ(dig, expSig[li], WC_SHA256_DIGEST_SIZE);
+        ExpectBufEQ(dig, expSig[gi], WC_SHA256_DIGEST_SIZE);
 
         /* The pinned signature must still verify, so a stale digest cannot
          * hide a signature that no longer works. */
@@ -988,7 +996,7 @@ int test_wc_falcon_key_reuse(void)
 
     ExpectIntEQ(wc_InitRng(&rng), 0);
     ExpectIntEQ(wc_falcon_init(&key), 0);
-    ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL1), 0);
+    ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[0]), 0);
     ExpectIntEQ(wc_falcon_make_key(&key, &rng), 0);
 
     /* Two signatures with one key: the second runs off the cache. */
@@ -1010,7 +1018,7 @@ int test_wc_falcon_key_reuse(void)
     /* A different key imported over the same structure must be the one that
      * signs from then on. */
     ExpectIntEQ(wc_falcon_init(&other), 0);
-    ExpectIntEQ(wc_falcon_set_level(&other, FALCON_LEVEL1), 0);
+    ExpectIntEQ(wc_falcon_set_level(&other, falcon_levels[0]), 0);
     ExpectIntEQ(wc_falcon_make_key(&other, &rng), 0);
     prvLen = FALCON_MAX_KEY_SIZE;
     pubLen = FALCON_MAX_PUB_KEY_SIZE;
@@ -1026,6 +1034,7 @@ int test_wc_falcon_key_reuse(void)
         &res, &other), 0);
     ExpectIntEQ(res, 1);
 
+#if !defined(WOLFSSL_NO_FALCON_LEVEL1) && !defined(WOLFSSL_NO_FALCON_LEVEL5)
     /* Switching the level resizes everything the cache holds. */
     ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL5), 0);
     ExpectIntEQ(wc_falcon_make_key(&key, &rng), 0);
@@ -1047,6 +1056,7 @@ int test_wc_falcon_key_reuse(void)
     ExpectIntEQ(wc_falcon_verify_msg(sig, sigLen, msg, (word32)sizeof(msg),
         &res, &key), 0);
     ExpectIntEQ(res, 1);
+#endif /* both levels */
 
     wc_falcon_free(&other);
     wc_falcon_free(&key);
@@ -1084,8 +1094,10 @@ int test_wc_FalconDecisionCoverage(void)
     word32 outLen;
     /* Buffers sized for a raw Falcon-512 private/public import so the ret==0
      * arm of wc_falcon_import_private_key is reachable without keygen. */
-    static byte prv[FALCON_LEVEL1_KEY_SIZE];
-    static byte pub[FALCON_LEVEL1_PUB_KEY_SIZE];
+    /* Sized for the largest level built; the imports below use the exact size
+     * of the level actually in use, since a mismatch is itself rejected. */
+    static byte prv[FALCON_MAX_KEY_SIZE];
+    static byte pub[FALCON_MAX_PUB_KEY_SIZE];
 
     XMEMSET(prv, 0, sizeof(prv));
     XMEMSET(pub, 0, sizeof(pub));
@@ -1103,6 +1115,7 @@ int test_wc_FalconDecisionCoverage(void)
      * occurs, so the small out[] buffer is never touched. */
     XMEMSET(&key, 0, sizeof(key));
     ExpectIntEQ(wc_falcon_init(&key), 0);
+#ifndef WOLFSSL_NO_FALCON_LEVEL1
     ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL1), 0);
     outLen = (word32)sizeof(out);
     ExpectIntEQ(wc_falcon_export_public(&key, out, &outLen),
@@ -1115,7 +1128,9 @@ int test_wc_FalconDecisionCoverage(void)
         WC_NO_ERR_TRACE(BAD_FUNC_ARG));
     ExpectIntEQ(wc_falcon_check_key(&key),
         WC_NO_ERR_TRACE(PUBLIC_KEY_E));        /* level ok, halves unset */
+#endif
 
+#ifndef WOLFSSL_NO_FALCON_LEVEL5
     ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL5), 0);
     outLen = (word32)sizeof(out);
     ExpectIntEQ(wc_falcon_export_public(&key, out, &outLen),
@@ -1127,6 +1142,7 @@ int test_wc_FalconDecisionCoverage(void)
     ExpectIntEQ(wc_falcon_export_private(&key, out, &outLen),
         WC_NO_ERR_TRACE(BAD_FUNC_ARG));
     ExpectIntEQ(wc_falcon_check_key(&key), WC_NO_ERR_TRACE(PUBLIC_KEY_E));
+#endif
 
     key.level = 2; /* invalid -> (level!=1)&&(level!=5) both true */
     outLen = (word32)sizeof(out);
@@ -1147,7 +1163,7 @@ int test_wc_FalconDecisionCoverage(void)
      * operands with the earlier ones held false (valid key, level set). */
     XMEMSET(&key, 0, sizeof(key));
     ExpectIntEQ(wc_falcon_init(&key), 0);
-    ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL1), 0);
+    ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[0]), 0);
     outLen = (word32)sizeof(out);
     ExpectIntEQ(wc_falcon_export_private_only(&key, NULL, &outLen),
         WC_NO_ERR_TRACE(BAD_FUNC_ARG));        /* out==NULL determines */
@@ -1163,9 +1179,9 @@ int test_wc_FalconDecisionCoverage(void)
     /* ---- import (priv==NULL) || (key==NULL) ----------------------------
      * priv==NULL shown by error_paths; here flip key==NULL with priv held
      * non-NULL. */
-    ExpectIntEQ(wc_falcon_import_private_only(prv, FALCON_LEVEL1_KEY_SIZE, NULL),
+    ExpectIntEQ(wc_falcon_import_private_only(prv, falcon_exp_key(falcon_levels[0]), NULL),
         WC_NO_ERR_TRACE(BAD_FUNC_ARG));
-    ExpectIntEQ(wc_falcon_import_private_key(prv, FALCON_LEVEL1_KEY_SIZE,
+    ExpectIntEQ(wc_falcon_import_private_key(prv, falcon_exp_key(falcon_levels[0]),
         NULL, 0, NULL), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
 
     /* ---- wc_falcon_import_private_key: (ret==0) && (pub != NULL) --------
@@ -1176,19 +1192,19 @@ int test_wc_FalconDecisionCoverage(void)
      *   bad priv size, pub NULL-> ret!=0 (op0 F) short-circuits the AND */
     XMEMSET(&key, 0, sizeof(key));
     ExpectIntEQ(wc_falcon_init(&key), 0);
-    ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL1), 0);
-    ExpectIntEQ(wc_falcon_import_private_key(prv, FALCON_LEVEL1_KEY_SIZE,
+    ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[0]), 0);
+    ExpectIntEQ(wc_falcon_import_private_key(prv, falcon_exp_key(falcon_levels[0]),
         NULL, 0, &key), 0);                    /* pub!=NULL F */
     wc_falcon_free(&key);
     XMEMSET(&key, 0, sizeof(key));
     ExpectIntEQ(wc_falcon_init(&key), 0);
-    ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL1), 0);
-    ExpectIntEQ(wc_falcon_import_private_key(prv, FALCON_LEVEL1_KEY_SIZE,
-        pub, FALCON_LEVEL1_PUB_KEY_SIZE, &key), 0); /* pub!=NULL T */
+    ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[0]), 0);
+    ExpectIntEQ(wc_falcon_import_private_key(prv, falcon_exp_key(falcon_levels[0]),
+        pub, falcon_exp_pub(falcon_levels[0]), &key), 0); /* pub!=NULL T */
     wc_falcon_free(&key);
     XMEMSET(&key, 0, sizeof(key));
     ExpectIntEQ(wc_falcon_init(&key), 0);
-    ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL1), 0);
+    ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[0]), 0);
     ExpectIntEQ(wc_falcon_import_private_key(prv, 1 /* bad size */,
         NULL, 0, &key), WC_NO_ERR_TRACE(BAD_FUNC_ARG)); /* ret!=0 (op0 F) */
     wc_falcon_free(&key);
@@ -1211,7 +1227,7 @@ int test_wc_FalconDecisionCoverage(void)
         XMEMSET(msg, 0, sizeof(msg));
         XMEMSET(&key, 0, sizeof(key));
         ExpectIntEQ(wc_falcon_init(&key), 0);
-        ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL1), 0);
+        ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[0]), 0);
         outLen = (word32)sizeof(out);
         ExpectIntEQ(wc_falcon_sign_msg(msg, (word32)sizeof(msg), out, &outLen,
             &key, &rng), WC_NO_ERR_TRACE(BAD_FUNC_ARG));   /* !prvKeySet T */
@@ -1234,7 +1250,7 @@ int test_wc_FalconDecisionCoverage(void)
         XMEMSET(msg, 0, sizeof(msg));
         XMEMSET(&key, 0, sizeof(key));
         ExpectIntEQ(wc_falcon_init(&key), 0);
-        ExpectIntEQ(wc_falcon_set_level(&key, FALCON_LEVEL1), 0);
+        ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[0]), 0);
         ExpectIntEQ(wc_falcon_verify_msg(msg, (word32)sizeof(msg), msg,
             (word32)sizeof(msg), &res, &key),
             WC_NO_ERR_TRACE(BAD_FUNC_ARG));                /* !pubKeySet T */
@@ -1249,12 +1265,20 @@ int test_wc_FalconDecisionCoverage(void)
         falcon_key idkey;
         static const byte idbytes[FALCON_MAX_ID_LEN] = { 0 };
 
+        /* The frees below are unconditional; ExpectIntEQ skips the paired init
+         * once an earlier expectation has failed. */
+        XMEMSET(&idkey, 0, sizeof(idkey));
+
         /* key==NULL -> ret!=0 before the length AND -> ret==0 operand F */
         ExpectIntEQ(wc_falcon_init_id(NULL, idbytes, 4, NULL, INVALID_DEVID),
             WC_NO_ERR_TRACE(BAD_FUNC_ARG));
-        /* valid len -> length test all-false, then id!=NULL && len!=0 all-true */
+        /* valid len -> length test all-false, then id!=NULL && len!=0 all-true.
+         * A successful init sets the level, which owns two allocations with
+         * WOLFSSL_FALCON_DYNAMIC_KEYS, and re-initializing drops the pointers
+         * to them - so each one is released before the next init runs. */
         ExpectIntEQ(wc_falcon_init_id(&idkey, idbytes, 4, NULL, INVALID_DEVID),
             0);
+        wc_falcon_free(&idkey);
         /* len < 0 -> first length operand determines */
         ExpectIntEQ(wc_falcon_init_id(&idkey, idbytes, -1, NULL, INVALID_DEVID),
             WC_NO_ERR_TRACE(BUFFER_E));
@@ -1263,9 +1287,11 @@ int test_wc_FalconDecisionCoverage(void)
             NULL, INVALID_DEVID), WC_NO_ERR_TRACE(BUFFER_E));
         /* id==NULL with valid len -> (id!=NULL) operand F, skips copy */
         ExpectIntEQ(wc_falcon_init_id(&idkey, NULL, 4, NULL, INVALID_DEVID), 0);
+        wc_falcon_free(&idkey);
         /* len==0 with non-NULL id -> (len!=0) operand F, skips copy */
         ExpectIntEQ(wc_falcon_init_id(&idkey, idbytes, 0, NULL, INVALID_DEVID),
             0);
+        wc_falcon_free(&idkey);
     }
 
     /* ---- wc_falcon_init_label: (key==NULL)||(label==NULL), then
@@ -1273,6 +1299,7 @@ int test_wc_FalconDecisionCoverage(void)
     {
         falcon_key lblkey;
         char toolong[FALCON_MAX_LABEL_LEN + 2];
+        XMEMSET(&lblkey, 0, sizeof(lblkey));
         XMEMSET(toolong, 'a', sizeof(toolong));
         toolong[sizeof(toolong) - 1] = '\0';
 
@@ -1285,9 +1312,11 @@ int test_wc_FalconDecisionCoverage(void)
         /* both non-NULL -> falls through to the length OR; "" -> len==0 T */
         ExpectIntEQ(wc_falcon_init_label(&lblkey, "", NULL, INVALID_DEVID),
             WC_NO_ERR_TRACE(BUFFER_E));
-        /* valid label -> length OR all-false -> success */
+        /* valid label -> length OR all-false -> success. Released for the same
+         * reason as the init_id block above. */
         ExpectIntEQ(wc_falcon_init_label(&lblkey, "lbl", NULL, INVALID_DEVID),
             0);
+        wc_falcon_free(&lblkey);
         /* over-long label -> (labelLen>MAX) operand determines */
         ExpectIntEQ(wc_falcon_init_label(&lblkey, toolong, NULL, INVALID_DEVID),
             WC_NO_ERR_TRACE(BUFFER_E));
