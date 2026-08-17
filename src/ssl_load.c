@@ -829,8 +829,9 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
         return MEMORY_E;
     }
 
-    /* Initialize Falcon key. */
-    ret = wc_falcon_init(key);
+    /* Initialize Falcon key. The struct came from 'heap' and, with
+     * WOLFSSL_FALCON_DYNAMIC_KEYS, so must its encoded-key buffers. */
+    ret = wc_falcon_init_ex(key, heap, INVALID_DEVID);
     if (ret == 0) {
         byte level = 0;
         word32 idx;
@@ -864,7 +865,7 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
             }
             else {
                 wc_falcon_free(key);
-                if (wc_falcon_init(key) != 0) {
+                if (wc_falcon_init_ex(key, heap, INVALID_DEVID) != 0) {
                     XFREE(key, heap, DYNAMIC_TYPE_FALCON);
                     return MEMORY_E;
                 }
@@ -1907,9 +1908,13 @@ static int ProcessBufferCertPublicKey(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
             /* Falcon is fixed key size */
             keySz = FALCON_LEVEL1_KEY_SIZE;
             if (checkKeySz) {
+            #ifdef WOLFSSL_NO_FALCON_LEVEL1
+                ret = NOT_COMPILED_IN;
+            #else
                 ret = CHECK_KEY_SZ(ssl ? ssl->options.minFalconKeySz :
                     ctx->minFalconKeySz, FALCON_MAX_KEY_SIZE, keySz,
                     FALCON_KEY_SIZE_E);
+            #endif
             }
             break;
         case FALCON_LEVEL5k:
@@ -1917,9 +1922,13 @@ static int ProcessBufferCertPublicKey(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
             /* Falcon is fixed key size */
             keySz = FALCON_LEVEL5_KEY_SIZE;
             if (checkKeySz) {
+            #ifdef WOLFSSL_NO_FALCON_LEVEL5
+                ret = NOT_COMPILED_IN;
+            #else
                 ret = CHECK_KEY_SZ(ssl ? ssl->options.minFalconKeySz :
                     ctx->minFalconKeySz, FALCON_MAX_KEY_SIZE, keySz,
                     FALCON_KEY_SIZE_E);
+            #endif
             }
             break;
     #endif /* HAVE_FALCON */
@@ -2159,9 +2168,13 @@ static int ProcessBufferCertAltPublicKey(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
             /* Falcon is fixed key size */
             keySz = FALCON_LEVEL1_KEY_SIZE;
             if (checkKeySz) {
+            #ifdef WOLFSSL_NO_FALCON_LEVEL1
+                ret = NOT_COMPILED_IN;
+            #else
                 ret = CHECK_KEY_SZ(ssl ? ssl->options.minFalconKeySz :
                     ctx->minFalconKeySz, FALCON_MAX_KEY_SIZE, keySz,
                     FALCON_KEY_SIZE_E);
+            #endif
             }
             break;
         case FALCON_LEVEL5k:
@@ -2169,9 +2182,13 @@ static int ProcessBufferCertAltPublicKey(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
             /* Falcon is fixed key size */
             keySz = FALCON_LEVEL5_KEY_SIZE;
             if (checkKeySz) {
+            #ifdef WOLFSSL_NO_FALCON_LEVEL5
+                ret = NOT_COMPILED_IN;
+            #else
                 ret = CHECK_KEY_SZ(ssl ? ssl->options.minFalconKeySz :
                     ctx->minFalconKeySz, FALCON_MAX_KEY_SIZE, keySz,
                     FALCON_KEY_SIZE_E);
+            #endif
             }
             break;
     #endif /* HAVE_FALCON */
