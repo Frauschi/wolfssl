@@ -359,31 +359,31 @@ static void wb_complete_private(void)
 
     /* both range operands FALSE (a*b+q = -30) and full NULL/logn guard FALSE. */
     g[0] = 127; F[0] = -97;
-    r = falcon_complete_private(G, f, g, F, logn, NULL);
+    r = falcon_complete_private(G, f, g, F, logn, NULL, NULL);
     if (r != 0) {
         WB_NOTE("complete_private(in-range) expected 0");
     }
     /* z > 127 (cond1 TRUE): a*b+q = 12290. */
     g[0] = 1; F[0] = 1;
-    r = falcon_complete_private(G, f, g, F, logn, NULL);
+    r = falcon_complete_private(G, f, g, F, logn, NULL, NULL);
     if (r != WC_NO_ERR_TRACE(BAD_FUNC_ARG)) {
         WB_NOTE("complete_private(z>127) expected BAD_FUNC_ARG");
     }
     /* z < -127 (cond0 TRUE): a*b+q = -157. */
     g[0] = 127; F[0] = -98;
-    r = falcon_complete_private(G, f, g, F, logn, NULL);
+    r = falcon_complete_private(G, f, g, F, logn, NULL, NULL);
     if (r != WC_NO_ERR_TRACE(BAD_FUNC_ARG)) {
         WB_NOTE("complete_private(z<-127) expected BAD_FUNC_ARG");
     }
 
     /* NULL/logn guard TRUE halves (each early-returns before any deref). */
     g[0] = 1; F[0] = 1;
-    (void)falcon_complete_private(NULL, f, g, F, logn, NULL);
-    (void)falcon_complete_private(G, NULL, g, F, logn, NULL);
-    (void)falcon_complete_private(G, f, NULL, F, logn, NULL);
-    (void)falcon_complete_private(G, f, g, NULL, logn, NULL);
-    (void)falcon_complete_private(G, f, g, F, 0, NULL);
-    (void)falcon_complete_private(G, f, g, F, 11, NULL);
+    (void)falcon_complete_private(NULL, f, g, F, logn, NULL, NULL);
+    (void)falcon_complete_private(G, NULL, g, F, logn, NULL, NULL);
+    (void)falcon_complete_private(G, f, NULL, F, logn, NULL, NULL);
+    (void)falcon_complete_private(G, f, g, NULL, logn, NULL, NULL);
+    (void)falcon_complete_private(G, f, g, F, 0, NULL, NULL);
+    (void)falcon_complete_private(G, f, g, F, 11, NULL, NULL);
     WB_OK("falcon_complete_private guard + range pairs exercised");
 }
 
@@ -471,13 +471,13 @@ static void wb_expand_and_ffsampling_guards(void)
     XMEMSET(tmp, 0, sizeof(tmp));
 
     /* falcon_expand_privkey guard: each operand's TRUE half. */
-    (void)falcon_expand_privkey(NULL, f8, g8, F8, G8, 2, NULL);
-    (void)falcon_expand_privkey(edummy, NULL, g8, F8, G8, 2, NULL);
-    (void)falcon_expand_privkey(edummy, f8, NULL, F8, G8, 2, NULL);
-    (void)falcon_expand_privkey(edummy, f8, g8, NULL, G8, 2, NULL);
-    (void)falcon_expand_privkey(edummy, f8, g8, F8, NULL, 2, NULL);
-    (void)falcon_expand_privkey(edummy, f8, g8, F8, G8, 0, NULL);
-    (void)falcon_expand_privkey(edummy, f8, g8, F8, G8, 11, NULL);
+    (void)falcon_expand_privkey(NULL, f8, g8, F8, G8, 2, NULL, NULL);
+    (void)falcon_expand_privkey(edummy, NULL, g8, F8, G8, 2, NULL, NULL);
+    (void)falcon_expand_privkey(edummy, f8, NULL, F8, G8, 2, NULL, NULL);
+    (void)falcon_expand_privkey(edummy, f8, g8, NULL, G8, 2, NULL, NULL);
+    (void)falcon_expand_privkey(edummy, f8, g8, F8, NULL, 2, NULL, NULL);
+    (void)falcon_expand_privkey(edummy, f8, g8, F8, G8, 0, NULL, NULL);
+    (void)falcon_expand_privkey(edummy, f8, g8, F8, G8, 11, NULL, NULL);
 
     /* falcon_ffSampling_fft logn guard (returns before touching buffers). */
     falcon_ffSampling_fft(falcon_sampler_z, NULL, z0, z1, tree, t0, t1, 0, tmp);
@@ -1198,7 +1198,7 @@ static void wb_sign_core_err(WC_RNG* rng)
     XMEMSET(tmp, 0, sizeof(tmp));
     XMEMSET(hm, 0, sizeof(hm));
     if (falcon_expand_privkey(expanded, wb_basis_f, wb_basis_g, wb_basis_F,
-            wb_basis_G, WB_SIGN_LOGN, NULL) != 0) {
+            wb_basis_G, WB_SIGN_LOGN, NULL, NULL) != 0) {
         WB_NOTE("sign_core: expand_privkey(test basis) failed");
         return;
     }

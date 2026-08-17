@@ -220,6 +220,17 @@
   result, which is not observable in normal use: Falcon signing is randomized
   and verification is unaffected.
 
+* Reduced the peak heap of a Falcon signature by about 21% in every
+  configuration, with no change to the signatures produced or to signing
+  speed.  `falcon_complete_private()` and `falcon_expand_privkey()` each
+  allocated their own scratch (3 and 6 polynomials) while the signer's own
+  scratch, six polynomials in the default signer and ten in the small-mem one,
+  sat idle until the sampler ran.  They now borrow it, so a signature is a
+  single allocation instead of three.  Peak heap per signature at Falcon-1024
+  goes from 224KB to 176KB in the default build and from 112KB to 88KB with
+  `--enable-falcon=small-mem`; at Falcon-512, from 108KB to 84KB and from 56KB
+  to 44KB.  Both helpers still allocate when the caller passes no scratch.
+
 * Added a deterministic Falcon test vector, covering key generation and
   signing at both levels, which pins the results by digest.  Every Falcon fpr
   backend implements the same IEEE-754 binary64 arithmetic, so all of them
