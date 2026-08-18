@@ -20,6 +20,10 @@
 * Fixed `--enable-mldsa=<level>` building no ML-DSA operations. by @Frauschi
 * Fixed ML-DSA small memory key generation keeping the caches (`WC_MLDSA_CACHE_*`) of the key it replaced, which broke its signatures. by @Frauschi
 
+## Build System and Portability
+
+* Added `WOLFSSL_HAVE_SHA256_HASH_BLOCK`, fixing LMS calling `wc_Sha256HashBlock()` on hardware SHA-256 ports that do not build it. by @Frauschi
+
 # wolfSSL Release 5.9.4 (Sep 25, 2026)
 
 Release 5.9.4 has been developed according to wolfSSL's development and QA
