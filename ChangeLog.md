@@ -526,6 +526,11 @@ PR stands for Pull Request, and PR <NUMBER> references a GitHub pull request num
 * Migrate internal ML-KEM consumers to canonical wc_MlKemKey API by @Frauschi (PR 10571)
 * Add PQ documentation for LMS, ML-DSA, ML-KEM, XMSS by @kaleb-himes (PR 10514)
 * Various leak / alloc and zeroization fixes for SLH-DSA by @Frauschi (PR 10698)
+* Hash the block after the pre-computed PK.seed midstate directly for the
+  SLH-DSA SHA2 parameter sets, rather than copying a hash object and
+  streaming two updates into it for every hash. by @Frauschi
+* Use the 8-way AVX512 Keccak permutation for the SLH-DSA WOTS+ chains on
+  capable CPUs, which the four-way AVX2 path had to itself. by @Frauschi
 
 ## TLS/DTLS
 
@@ -633,6 +638,10 @@ PR stands for Pull Request, and PR <NUMBER> references a GitHub pull request num
 * Fixed the SGX build to not require fcntl.h. by @JacobBarthelmeh (PR 10524)
 * Various linuxkm Fenrir fixes by @douzzer (PR 10688)
 * Various bsdkm fixes and cleanup by @philljj (PR 10565)
+* Added `WOLFSSL_HAVE_SHA256_HASH_BLOCK` to report whether
+  `wc_Sha256HashBlock()` is built. LMS gated its use on a macro that was
+  never defined, so ports without the software SHA-256 transform called a
+  function that was not compiled. by @Frauschi
 
 ## Bug Fixes
 
