@@ -195,6 +195,36 @@ wc_static_assert(SLHDSA_MAX_MSG_SZ <= 255);
     #define SLHDSA_SHAKE_STATE_W    SLHDSA_SHAKE_X4_STATE_W
 #endif
 
+/* Bytes of chain values one WOTS+ public key needs, including the overshoot
+ * the batched paths write past len. */
+#define SLHDSA_WOTS_SK_SZ       ((SLHDSA_MAX_MSG_SZ + 7) * SLHDSA_MAX_N)
+
+/* A batched WOTS+ helper lets its last group of eight run past len, so the
+ * buffer has to cover the whole group holding index len - 1. */
+wc_static_assert(SLHDSA_WOTS_SK_SZ >=
+    (((SLHDSA_MAX_MSG_SZ + 7) / 8) * 8) * SLHDSA_MAX_N);
+
+/* Words in the unchanging head of the batched state, widest path in build. */
+#ifdef SLHDSA_HAVE_SHAKE_X8
+    #define SLHDSA_WOTS_FIXED_W     SLHDSA_SHAKE_X8_FIXED_W
+#else
+    #define SLHDSA_WOTS_FIXED_W     (8 * 4)
+#endif
+
+/* Buffers reused by every WOTS+ public key computed from one subtree. A
+ * subtree builds thousands of them, so allocating per public key put the
+ * allocator on the hot path. */
+typedef struct SlhDsaWotsBufs {
+    /* Chain values of the public key being built. */
+    byte* sk;
+#if defined(USE_INTEL_SPEEDUP) && !defined(WOLFSSL_WC_SLHDSA_SMALL)
+    /* Unchanging head of the batched Keccak state. */
+    word64* fixed;
+    /* Batched Keccak state. */
+    word64* state;
+#endif
+} SlhDsaWotsBufs;
+
 #ifndef WC_SLHDSA_ALL_NO_256F
     /* Maximum number of bytes to produce from digest of message. */
     #define SLHDSA_MAX_MD               49
@@ -2512,6 +2542,183 @@ static int slhdsakey_chain_idx_x4_32(byte* sk, word32 i, word32 s,
 #endif
 #endif
 
+#ifdef SLHDSA_HAVE_SHAKE_X8
+/* Fill the 8-way state with the seed and encoded HashAddress, one copy per
+ * lane.
+ *
+ * @param [out] state  SHAKE-256 x8 state.
+ * @param [in]  seed   Seed at the start of each hash.
+ * @param [in]  addr   Encoded HashAddress for each hash.
+ * @param [in]  n      Number of bytes of seed.
+ * @return  Offset after the seed and HashAddress.
+ */
+static word32 slhdsakey_shake256_set_seed_ha_x8(word64* state,
+    const byte* seed, const byte* addr, int n)
+{
+    int i;
+    int l;
+    word32 o = 0;
+
+    for (i = 0; i < n; i += 8) {
+        word64 v = readUnalignedWord64(seed + i);
+
+        for (l = 0; l < 8; l++) {
+            state[o + l] = v;
+        }
+        o += 8;
+    }
+    for (i = 0; i < SLHDSA_HA_SZ; i += 8) {
+        word64 v = readUnalignedWord64(addr + i);
+
+        for (l = 0; l < 8; l++) {
+            state[o + l] = v;
+        }
+        o += 8;
+    }
+
+    return o;
+}
+
+/* Append one n-byte hash per lane to the 8-way state.
+ *
+ * @param [in, out] state  SHAKE-256 x8 state.
+ * @param [in]      o      Offset to place the hashes at.
+ * @param [in]      hash   Eight n-byte hashes.
+ * @param [in]      n      Number of bytes in each hash.
+ */
+static void slhdsakey_shake256_set_hash_x8(word64* state, word32 o,
+    const byte* hash, int n)
+{
+    int i;
+    int l;
+
+    for (i = 0; i < n; i += 8) {
+        for (l = 0; l < 8; l++) {
+            state[o + l] = readUnalignedWord64(hash + l * n + i);
+        }
+        o += 8;
+    }
+}
+
+/* Get the eight SHAKE-256 n-byte hash results.
+ *
+ * @param [in]  state  SHAKE-256 x8 state.
+ * @param [out] hash   Buffer to hold eight n-byte hash results.
+ * @param [in]  n      Length of each hash in bytes.
+ */
+static void slhdsakey_shake256_get_hash_x8(const word64* state, byte* hash,
+    int n)
+{
+    int i;
+    int l;
+
+    for (i = 0; i < (n / 8); i++) {
+        for (l = 0; l < 8; l++) {
+            writeUnalignedWord64(hash + l * n + i * 8, state[8 * i + l]);
+        }
+    }
+}
+
+/* Set the end of the SHAKE-256 x8 state.
+ *
+ * @param [in, out] state  SHAKE-256 x8 state.
+ * @param [in]      o      Offset to the end of the data.
+ */
+static void slhdsakey_shake256_set_end_x8(word64* state, word32 o)
+{
+    int l;
+
+    /* Data end marker. */
+    for (l = 0; l < 8; l++) {
+        state[o + l] = (word64)0x1f;
+    }
+    XMEMSET(state + o + 8, 0,
+        (size_t)(SLHDSA_SHAKE_X8_STATE_W - (o + 8)) * sizeof(word64));
+    /* SHAKE-256 state end marker. */
+    for (l = 0; l < 8; l++) {
+        ((word8*)(state + 8 * WC_SHA3_256_COUNT - 8 + l))[7] ^= 0x80;
+    }
+}
+
+/* Set the same hash address into each lane of the 8-way state.
+ *
+ * @param [in, out] state  SHAKE-256 x8 state.
+ * @param [in]      o      Offset of state after the HashAddress.
+ * @param [in]      a      Value to set for each hash.
+ */
+static void slhdsakey_shake256_set_hash_addr_x8(word64* state, word32 o,
+    byte a)
+{
+    int l;
+
+    for (l = 0; l < 8; l++) {
+        ((word8*)(state + o - 8 + l))[7] = (word8)a;
+    }
+}
+
+/* Set the chain address indices into each lane of the 8-way state.
+ *
+ * @param [in, out] state  SHAKE-256 x8 state.
+ * @param [in]      o      Offset of state after the HashAddress.
+ * @param [in]      idx    Chain address to set for each hash.
+ */
+static void slhdsakey_shake256_set_chain_addr_idx_x8(word64* state, word32 o,
+    const byte* idx)
+{
+    int l;
+
+    for (l = 0; l < 8; l++) {
+        ((word8*)(state + o - 8 + l))[3] = idx[l];
+    }
+}
+
+/* Iterate the hash function over eight chains with their own addresses.
+ *
+ * FIPS 205. Section 5. Algorithm 5.
+ * chain(X, i, s, PK.seed, ADRS)
+ *
+ * @param [in, out] sk       Eight hashes to iterate.
+ * @param [in]      i        Step to start at.
+ * @param [in]      s        Number of steps to take.
+ * @param [in]      n        Number of bytes in each hash.
+ * @param [in]      o        Offset of the state after the seed and address.
+ * @param [in]      fixed    Caller owned state head, already filled.
+ * @param [in]      state    Caller owned x8 Keccak state.
+ * @return  0 on success.
+ */
+static int slhdsakey_chain_idx_x8(byte* sk, word32 i, word32 s, byte n,
+    word32 o, word64* fixed, word64* state)
+{
+    int ret = 0;
+    word32 j;
+    /* Words the eight hashes occupy in the state. */
+    word32 hw = (word32)(n / 8) * 8;
+
+    slhdsakey_shake256_set_hash_x8(state, o, sk, n);
+
+    for (j = i; j < i + s; j++) {
+        if (j != i) {
+            XMEMCPY(state + o, state, hw * sizeof(word64));
+        }
+        XMEMCPY(state, fixed, o * sizeof(word64));
+        slhdsakey_shake256_set_hash_addr_x8(state, o, (byte)j);
+        slhdsakey_shake256_set_end_x8(state, o + hw);
+        ret = SAVE_VECTOR_REGISTERS2();
+        if (ret != 0)
+            break;
+        sha3_blocksx8_avx512(state);
+        RESTORE_VECTOR_REGISTERS();
+    }
+
+    if (ret == 0) {
+        slhdsakey_shake256_get_hash_x8(state, sk, n);
+    }
+
+    return ret;
+}
+
+#endif /* SLHDSA_HAVE_SHAKE_X8 */
+
 #ifndef WOLFSSL_SLHDSA_VERIFY_ONLY
 #if defined(USE_INTEL_SPEEDUP) && !defined(WOLFSSL_WC_SLHDSA_SMALL)
 /* PRF hash 4 simultaneously.
@@ -3047,39 +3254,26 @@ static int slhdsakey_chain_idx_32(SlhDsaKey* key, byte* sk,
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_wots_pkgen_chain_x4_16(SlhDsaKey* key, const byte* sk_seed,
-    const byte* pk_seed, byte* addr, byte* sk_addr)
+    const byte* pk_seed, byte* addr, byte* sk_addr,
+    SlhDsaWotsBufs* bufs)
 {
     int ret = 0;
     int i;
     byte len = key->params->len;
-    WC_DECLARE_VAR(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 16, key->heap);
-    WC_DECLARE_VAR(fixed, word64, 8 * 4, key->heap);
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap);
+    byte* sk = bufs->sk;
+    word64* fixed = bufs->fixed;
+    word64* state = bufs->state;
 
-    /* One state for every chain in this public key, rather than one per group
-     * of four. Each group refills it before use. */
-    WC_ALLOC_VAR_EX(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 16, key->heap,
-        DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(fixed, word64, 8 * 4, key->heap, DYNAMIC_TYPE_SLHDSA,
-            ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap,
-            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        for (i = 0; i < len - 3; i += 4) {
-            ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 16, (byte)i,
-                sk + i * 16, state);
-            if (ret != 0) {
-                break;
-            }
-            ret = slhdsakey_chain_x4_16(sk + i * 16, pk_seed, addr, (byte)i,
-                fixed, state);
-            if (ret != 0) {
-                break;
-            }
+    for (i = 0; i < len - 3; i += 4) {
+        ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 16, (byte)i,
+            sk + i * 16, state);
+        if (ret != 0) {
+            break;
+        }
+        ret = slhdsakey_chain_x4_16(sk + i * 16, pk_seed, addr, (byte)i,
+            fixed, state);
+        if (ret != 0) {
+            break;
         }
     }
     if (ret == 0) {
@@ -3097,12 +3291,9 @@ static int slhdsakey_wots_pkgen_chain_x4_16(SlhDsaKey* key, const byte* sk_seed,
     /* On error sk still holds secret WOTS+ leaves; on success it is overwritten
      * with public chain values. The x4 PRF fills up to a 4-lane multiple
      * (beyond len), so wipe the whole buffer. */
-    if ((ret != 0) && WC_VAR_OK(sk)) {
+    if (ret != 0) {
         ForceZero(sk, (SLHDSA_MAX_MSG_SZ + 3) * 16);
     }
-    WC_FREE_VAR_EX(state, key->heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(fixed, key->heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(sk, key->heap, DYNAMIC_TYPE_SLHDSA);
     return ret;
 }
 #endif
@@ -3135,39 +3326,26 @@ static int slhdsakey_wots_pkgen_chain_x4_16(SlhDsaKey* key, const byte* sk_seed,
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_wots_pkgen_chain_x4_24(SlhDsaKey* key, const byte* sk_seed,
-    const byte* pk_seed, byte* addr, byte* sk_addr)
+    const byte* pk_seed, byte* addr, byte* sk_addr,
+    SlhDsaWotsBufs* bufs)
 {
     int ret = 0;
     int i;
     byte len = key->params->len;
-    WC_DECLARE_VAR(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 24, key->heap);
-    WC_DECLARE_VAR(fixed, word64, 8 * 4, key->heap);
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap);
+    byte* sk = bufs->sk;
+    word64* fixed = bufs->fixed;
+    word64* state = bufs->state;
 
-    /* One state for every chain in this public key, rather than one per group
-     * of four. Each group refills it before use. */
-    WC_ALLOC_VAR_EX(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 24, key->heap,
-        DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(fixed, word64, 8 * 4, key->heap, DYNAMIC_TYPE_SLHDSA,
-            ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap,
-            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        for (i = 0; i < len - 3; i += 4) {
-            ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 24, (byte)i,
-                sk + i * 24, state);
-            if (ret != 0) {
-                break;
-            }
-            ret = slhdsakey_chain_x4_24(sk + i * 24, pk_seed, addr, (byte)i,
-                fixed, state);
-            if (ret != 0) {
-                break;
-            }
+    for (i = 0; i < len - 3; i += 4) {
+        ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 24, (byte)i,
+            sk + i * 24, state);
+        if (ret != 0) {
+            break;
+        }
+        ret = slhdsakey_chain_x4_24(sk + i * 24, pk_seed, addr, (byte)i,
+            fixed, state);
+        if (ret != 0) {
+            break;
         }
     }
     if (ret == 0) {
@@ -3185,12 +3363,9 @@ static int slhdsakey_wots_pkgen_chain_x4_24(SlhDsaKey* key, const byte* sk_seed,
     /* On error sk still holds secret WOTS+ leaves; on success it is overwritten
      * with public chain values. The x4 PRF fills up to a 4-lane multiple
      * (beyond len), so wipe the whole buffer. */
-    if ((ret != 0) && WC_VAR_OK(sk)) {
+    if (ret != 0) {
         ForceZero(sk, (SLHDSA_MAX_MSG_SZ + 3) * 24);
     }
-    WC_FREE_VAR_EX(state, key->heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(fixed, key->heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(sk, key->heap, DYNAMIC_TYPE_SLHDSA);
     return ret;
 }
 #endif
@@ -3223,39 +3398,26 @@ static int slhdsakey_wots_pkgen_chain_x4_24(SlhDsaKey* key, const byte* sk_seed,
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_wots_pkgen_chain_x4_32(SlhDsaKey* key, const byte* sk_seed,
-    const byte* pk_seed, byte* addr, byte* sk_addr)
+    const byte* pk_seed, byte* addr, byte* sk_addr,
+    SlhDsaWotsBufs* bufs)
 {
     int ret = 0;
     int i;
     byte len = key->params->len;
-    WC_DECLARE_VAR(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 32, key->heap);
-    WC_DECLARE_VAR(fixed, word64, 8 * 4, key->heap);
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap);
+    byte* sk = bufs->sk;
+    word64* fixed = bufs->fixed;
+    word64* state = bufs->state;
 
-    /* One state for every chain in this public key, rather than one per group
-     * of four. Each group refills it before use. */
-    WC_ALLOC_VAR_EX(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 32, key->heap,
-        DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(fixed, word64, 8 * 4, key->heap, DYNAMIC_TYPE_SLHDSA,
-            ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap,
-            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        for (i = 0; i < len - 3; i += 4) {
-            ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 32, (byte)i,
-                sk + i * 32, state);
-            if (ret != 0) {
-                break;
-            }
-            ret = slhdsakey_chain_x4_32(sk + i * 32, pk_seed, addr, (byte)i,
-                fixed, state);
-            if (ret != 0) {
-                break;
-            }
+    for (i = 0; i < len - 3; i += 4) {
+        ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 32, (byte)i,
+            sk + i * 32, state);
+        if (ret != 0) {
+            break;
+        }
+        ret = slhdsakey_chain_x4_32(sk + i * 32, pk_seed, addr, (byte)i,
+            fixed, state);
+        if (ret != 0) {
+            break;
         }
     }
     if (ret == 0) {
@@ -3270,121 +3432,16 @@ static int slhdsakey_wots_pkgen_chain_x4_32(SlhDsaKey* key, const byte* sk_seed,
         ret = HASH_T_UPDATE(key, sk, (word32)len * 32U);
     }
 
-    /* On error sk still holds secret WOTS+ leaves; on success it is overwritten
-     * with public chain values. The x4 PRF fills up to a 4-lane multiple
-     * (beyond len), so wipe the whole buffer. */
-    if ((ret != 0) && WC_VAR_OK(sk)) {
+    /* On error sk still holds secret WOTS+ leaves, and the x4 PRF fills past
+     * len to a 4-lane multiple, so wipe the whole buffer. */
+    if (ret != 0) {
         ForceZero(sk, (SLHDSA_MAX_MSG_SZ + 3) * 32);
     }
-    WC_FREE_VAR_EX(state, key->heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(fixed, key->heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(sk, key->heap, DYNAMIC_TYPE_SLHDSA);
     return ret;
 }
 #endif
 
 #ifdef SLHDSA_HAVE_SHAKE_X8
-/* Fill the 8-way state with the seed and encoded HashAddress, one copy per
- * lane.
- *
- * The 8-way helpers loop over the lanes rather than unrolling like the 4-way
- * ones. Setting up the state is a fraction of a percent of a signature; the
- * Keccak permutation is the rest.
- *
- * @param [out] state  SHAKE-256 x8 state.
- * @param [in]  seed   Seed at the start of each hash.
- * @param [in]  addr   Encoded HashAddress for each hash.
- * @param [in]  n      Number of bytes of seed.
- * @return  Offset after the seed and HashAddress.
- */
-static word32 slhdsakey_shake256_set_seed_ha_x8(word64* state,
-    const byte* seed, const byte* addr, int n)
-{
-    int i;
-    int l;
-    word32 o = 0;
-
-    for (i = 0; i < n; i += 8) {
-        word64 v = readUnalignedWord64(seed + i);
-
-        for (l = 0; l < 8; l++) {
-            state[o + l] = v;
-        }
-        o += 8;
-    }
-    for (i = 0; i < SLHDSA_HA_SZ; i += 8) {
-        word64 v = readUnalignedWord64(addr + i);
-
-        for (l = 0; l < 8; l++) {
-            state[o + l] = v;
-        }
-        o += 8;
-    }
-
-    return o;
-}
-
-/* Append one n-byte hash per lane to the 8-way state.
- *
- * @param [in, out] state  SHAKE-256 x8 state.
- * @param [in]      o      Offset to place the hashes at.
- * @param [in]      hash   Eight n-byte hashes.
- * @param [in]      n      Number of bytes in each hash.
- */
-static void slhdsakey_shake256_set_hash_x8(word64* state, word32 o,
-    const byte* hash, int n)
-{
-    int i;
-    int l;
-
-    for (i = 0; i < n; i += 8) {
-        for (l = 0; l < 8; l++) {
-            state[o + l] = readUnalignedWord64(hash + l * n + i);
-        }
-        o += 8;
-    }
-}
-
-/* Get the eight SHAKE-256 n-byte hash results.
- *
- * @param [in]  state  SHAKE-256 x8 state.
- * @param [out] hash   Buffer to hold eight n-byte hash results.
- * @param [in]  n      Length of each hash in bytes.
- */
-static void slhdsakey_shake256_get_hash_x8(const word64* state, byte* hash,
-    int n)
-{
-    int i;
-    int l;
-
-    for (i = 0; i < (n / 8); i++) {
-        for (l = 0; l < 8; l++) {
-            writeUnalignedWord64(hash + l * n + i * 8, state[8 * i + l]);
-        }
-    }
-}
-
-/* Set the end of the SHAKE-256 x8 state.
- *
- * @param [in, out] state  SHAKE-256 x8 state.
- * @param [in]      o      Offset to the end of the data.
- */
-static void slhdsakey_shake256_set_end_x8(word64* state, word32 o)
-{
-    int l;
-
-    /* Data end marker. */
-    for (l = 0; l < 8; l++) {
-        state[o + l] = (word64)0x1f;
-    }
-    XMEMSET(state + o + 8, 0,
-        (size_t)(SLHDSA_SHAKE_X8_STATE_W - (o + 8)) * sizeof(word64));
-    /* SHAKE-256 state end marker. */
-    for (l = 0; l < 8; l++) {
-        ((word8*)(state + 8 * WC_SHA3_256_COUNT - 8 + l))[7] ^= 0x80;
-    }
-}
-
 /* Set an incrementing chain address into each lane of the 8-way state.
  *
  * @param [in, out] state  SHAKE-256 x8 state.
@@ -3398,22 +3455,6 @@ static void slhdsakey_shake256_set_chain_addr_x8(word64* state, word32 o,
 
     for (l = 0; l < 8; l++) {
         ((word8*)(state + o - 8 + l))[3] = (word8)(a + l);
-    }
-}
-
-/* Set the same hash address into each lane of the 8-way state.
- *
- * @param [in, out] state  SHAKE-256 x8 state.
- * @param [in]      o      Offset of state after the HashAddress.
- * @param [in]      a      Value to set for each hash.
- */
-static void slhdsakey_shake256_set_hash_addr_x8(word64* state, word32 o,
-    byte a)
-{
-    int l;
-
-    for (l = 0; l < 8; l++) {
-        ((word8*)(state + o - 8 + l))[7] = (word8)a;
     }
 }
 
@@ -3572,41 +3613,27 @@ static int slhdsakey_chain_x8(byte* sk, const byte* pk_seed, byte* addr,
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_wots_pkgen_chain_x8(SlhDsaKey* key, const byte* sk_seed,
-    const byte* pk_seed, byte* addr, byte* sk_addr)
+    const byte* pk_seed, byte* addr, byte* sk_addr,
+    SlhDsaWotsBufs* bufs)
 {
     int ret = 0;
     int i = 0;
     byte n = key->params->n;
     byte len = key->params->len;
-    WC_DECLARE_VAR(sk, byte, (SLHDSA_MAX_MSG_SZ + 7) * SLHDSA_MAX_N,
-        key->heap);
-    WC_DECLARE_VAR(fixed, word64, SLHDSA_SHAKE_X8_FIXED_W, key->heap);
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X8_STATE_W, key->heap);
+    byte* sk = bufs->sk;
+    word64* fixed = bufs->fixed;
+    word64* state = bufs->state;
 
-    /* One state for every chain in this public key, rather than one per group
-     * of eight. Each group refills it before use. */
-    WC_ALLOC_VAR_EX(sk, byte, (SLHDSA_MAX_MSG_SZ + 7) * SLHDSA_MAX_N,
-        key->heap, DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(fixed, word64, SLHDSA_SHAKE_X8_FIXED_W, key->heap,
-            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X8_STATE_W, key->heap,
-            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        for (i = 0; i < len - 7; i += 8) {
-            ret = slhdsakey_hash_prf_x8(pk_seed, sk_seed, sk_addr, n, (byte)i,
-                sk + i * n, state);
-            if (ret != 0) {
-                break;
-            }
-            ret = slhdsakey_chain_x8(sk + i * n, pk_seed, addr, (byte)i, n,
-                fixed, state);
-            if (ret != 0) {
-                break;
-            }
+    for (i = 0; i < len - 7; i += 8) {
+        ret = slhdsakey_hash_prf_x8(pk_seed, sk_seed, sk_addr, n, (byte)i,
+            sk + i * n, state);
+        if (ret != 0) {
+            break;
+        }
+        ret = slhdsakey_chain_x8(sk + i * n, pk_seed, addr, (byte)i, n,
+            fixed, state);
+        if (ret != 0) {
+            break;
         }
     }
     if (ret == 0) {
@@ -3624,12 +3651,9 @@ static int slhdsakey_wots_pkgen_chain_x8(SlhDsaKey* key, const byte* sk_seed,
 
     /* On error sk still holds secret WOTS+ leaves, and the x8 PRF fills past
      * len to an 8-lane multiple, so wipe the whole buffer. */
-    if ((ret != 0) && WC_VAR_OK(sk)) {
-        ForceZero(sk, (SLHDSA_MAX_MSG_SZ + 7) * SLHDSA_MAX_N);
+    if (ret != 0) {
+        ForceZero(sk, SLHDSA_WOTS_SK_SZ);
     }
-    WC_FREE_VAR_EX(state, key->heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(fixed, key->heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(sk, key->heap, DYNAMIC_TYPE_SLHDSA);
     return ret;
 }
 #endif /* SLHDSA_HAVE_SHAKE_X8 */
@@ -3661,7 +3685,7 @@ static int slhdsakey_wots_pkgen_chain_x8(SlhDsaKey* key, const byte* sk_seed,
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_wots_pkgen_chain_x4(SlhDsaKey* key, const byte* sk_seed,
-    const byte* pk_seed, word32* adrs, word32* sk_adrs)
+    const byte* pk_seed, word32* adrs, word32* sk_adrs, SlhDsaWotsBufs* bufs)
 {
     int ret = 0;
     byte sk_addr[SLHDSA_HA_SZ];
@@ -3675,28 +3699,28 @@ static int slhdsakey_wots_pkgen_chain_x4(SlhDsaKey* key, const byte* sk_seed,
 #ifdef SLHDSA_HAVE_SHAKE_X8
     if (USE_INTEL_AVX512(cpuid_flags)) {
         return slhdsakey_wots_pkgen_chain_x8(key, sk_seed, pk_seed, addr,
-            sk_addr);
+            sk_addr, bufs);
     }
 #endif
 
 #if !defined(WOLFSSL_SLHDSA_PARAM_NO_128)
     if (n == WC_SLHDSA_N_128) {
         ret = slhdsakey_wots_pkgen_chain_x4_16(key, sk_seed, pk_seed, addr,
-            sk_addr);
+            sk_addr, bufs);
     }
     else
 #endif
 #if !defined(WOLFSSL_SLHDSA_PARAM_NO_192)
     if (n == 24) {
         ret = slhdsakey_wots_pkgen_chain_x4_24(key, sk_seed, pk_seed, addr,
-            sk_addr);
+            sk_addr, bufs);
     }
     else
 #endif
 #if !defined(WOLFSSL_SLHDSA_PARAM_NO_256)
     if (n == 32) {
         ret = slhdsakey_wots_pkgen_chain_x4_32(key, sk_seed, pk_seed, addr,
-            sk_addr);
+            sk_addr, bufs);
     }
     else
 #endif
@@ -3736,7 +3760,8 @@ static int slhdsakey_wots_pkgen_chain_x4(SlhDsaKey* key, const byte* sk_seed,
  * @return  SHAKE-256 error return code on digest failure.
  */
 static int slhdsakey_wots_pkgen_chain_c(SlhDsaKey* key, const byte* sk_seed,
-    const byte* pk_seed, word32* adrs, word32* sk_adrs)
+    const byte* pk_seed, word32* adrs, word32* sk_adrs,
+    SlhDsaWotsBufs* bufs)
 {
     int ret = 0;
     int i;
@@ -3744,12 +3769,9 @@ static int slhdsakey_wots_pkgen_chain_c(SlhDsaKey* key, const byte* sk_seed,
     byte len = key->params->len;
 
 #if !defined(WOLFSSL_WC_SLHDSA_SMALL_MEM)
-    WC_DECLARE_VAR(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * SLHDSA_MAX_N, key->heap);
+    byte* sk = bufs->sk;
 
-    WC_ALLOC_VAR_EX(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * SLHDSA_MAX_N,
-        key->heap, DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    if (ret == 0)
-        XMEMSET(sk, 0, (SLHDSA_MAX_MSG_SZ + 3) * SLHDSA_MAX_N);
+    XMEMSET(sk, 0, SLHDSA_WOTS_SK_SZ);
     if (ret == 0) {
         /* Step 4. len consecutive addresses. */
         for (i = 0; i < len; i++) {
@@ -3777,12 +3799,13 @@ static int slhdsakey_wots_pkgen_chain_c(SlhDsaKey* key, const byte* sk_seed,
     }
     /* On error sk still holds secret WOTS+ leaves; on success it is overwritten
      * with public chain values (generic path fills exactly len entries). */
-    if ((ret != 0) && WC_VAR_OK(sk)) {
+    if (ret != 0) {
         ForceZero(sk, (word32)len * n);
     }
-    WC_FREE_VAR_EX(sk, key->heap, DYNAMIC_TYPE_SLHDSA);
 #else
     byte sk[SLHDSA_MAX_N];
+
+    (void)bufs;
 
     /* Step 4. len consecutive addresses. */
     for (i = 0; i < len; i++) {
@@ -3847,7 +3870,7 @@ static int slhdsakey_wots_pkgen_chain_c(SlhDsaKey* key, const byte* sk_seed,
  * @return  SHAKE-256 error return code on digest failure.
  */
 static int slhdsakey_wots_pkgen(SlhDsaKey* key, const byte* sk_seed,
-    const byte* pk_seed, word32* adrs, byte* node)
+    const byte* pk_seed, word32* adrs, byte* node, SlhDsaWotsBufs* bufs)
 {
     int ret;
     byte n = key->params->n;
@@ -3876,14 +3899,14 @@ static int slhdsakey_wots_pkgen(SlhDsaKey* key, const byte* sk_seed,
                 IS_INTEL_AVX2(cpuid_flags) &&
                 (SAVE_VECTOR_REGISTERS2() == 0)) {
             ret = slhdsakey_wots_pkgen_chain_x4(key, sk_seed, pk_seed, adrs,
-                sk_adrs);
+                sk_adrs, bufs);
             RESTORE_VECTOR_REGISTERS();
         }
         else
 #endif
         {
             ret = slhdsakey_wots_pkgen_chain_c(key, sk_seed, pk_seed, adrs,
-                sk_adrs);
+                sk_adrs, bufs);
         }
     }
     if (ret == 0) {
@@ -4613,6 +4636,123 @@ static int slhdsakey_chain_idx_to_max_32(SlhDsaKey* key, const byte* sig,
  * @return  0 on success.
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
+#ifdef SLHDSA_HAVE_SHAKE_X8
+/* Complete the WOTS+ chains of a signature, eight at a time.
+ *
+ * FIPS 205. Section 5.3. Algorithm 8.
+ * wots_pkFromSig(sig, M, PK.seed, ADRS)
+ *  10:     tmp[i] <- chain(sig[i], msg[i], w - 1 - msg[i], PK.seed, ADRS)
+ *
+ * A group of eight is brought up in steps: each chain joins the ones already
+ * running when its own start value is reached, then the group grows to w-1
+ * together. Lanes not yet carrying a signature value hash buffer contents and
+ * are overwritten before they matter.
+ *
+ * @param [in]  key      SLH-DSA key.
+ * @param [in]  sig      Signature - (2.n + 3) hashes of length n.
+ * @param [in]  msg      Encoded message with checksum.
+ * @param [in]  pk_seed  Public key seed.
+ * @param [in]  adrs     WOTS HASH HashAddress.
+ * @param [out] nodes    Buffer to hold the len completed chains.
+ * @return  0 on success.
+ * @return  MEMORY_E on dynamic memory allocation failure.
+ */
+static int slhdsakey_wots_pk_from_sig_x8(SlhDsaKey* key, const byte* sig,
+    const byte* msg, const byte* pk_seed, word32* adrs, byte* nodes)
+{
+    int ret = 0;
+    int i;
+    int j;
+    int k;
+    word32 o = 0;
+    byte n = key->params->n;
+    byte len = key->params->len;
+    byte ii = 0;
+    byte idx[8];
+    byte addr[SLHDSA_HA_SZ];
+    WC_DECLARE_VAR(node, byte, 8 * SLHDSA_MAX_N, key->heap);
+    WC_DECLARE_VAR(fixed, word64, SLHDSA_SHAKE_X8_FIXED_W, key->heap);
+    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X8_STATE_W, key->heap);
+
+    XMEMSET(idx, 0, sizeof(idx));
+
+    WC_ALLOC_VAR_EX(node, byte, 8 * SLHDSA_MAX_N, key->heap,
+        DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    if (ret == 0) {
+        WC_ALLOC_VAR_EX(fixed, word64, SLHDSA_SHAKE_X8_FIXED_W, key->heap,
+            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    }
+    if (ret == 0) {
+        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X8_STATE_W, key->heap,
+            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    }
+    if (ret == 0) {
+        XMEMSET(node, 0, 8 * (size_t)n);
+    }
+
+    for (j = 0; (ret == 0) && (j <= (int)SLHDSA_WM1); j++) {
+        for (i = 0; (ret == 0) && (i < (int)len); i++) {
+            if (msg[i] != (byte)j) {
+                continue;
+            }
+            idx[ii++] = (byte)i;
+            if (ii < 8) {
+                continue;
+            }
+
+            HA_SetChainAddress(adrs, idx[0]);
+            HA_Encode(adrs, addr);
+            /* Seed, address and chain indices are the same for the group. */
+            o = slhdsakey_shake256_set_seed_ha_x8(fixed, pk_seed, addr, n);
+            slhdsakey_shake256_set_chain_addr_idx_x8(fixed, o, idx);
+            /* Bring each chain up to the start of the next one. */
+            for (k = 0; (ret == 0) && (k < 8); k++) {
+                XMEMCPY(node + k * n, sig + idx[k] * n, n);
+                if (k + 1 < 8) {
+                    byte cur = msg[idx[k]];
+                    byte nxt = msg[idx[k + 1]];
+
+                    if (cur != nxt) {
+                        ret = slhdsakey_chain_idx_x8(node, cur,
+                            (word32)(nxt - cur), n, o, fixed, state);
+                    }
+                }
+            }
+            /* Grow the whole group to the end of the chain. */
+            if ((ret == 0) && (j != (int)SLHDSA_WM1)) {
+                ret = slhdsakey_chain_idx_x8(node, (word32)j,
+                    (word32)((int)SLHDSA_WM1 - j), n, o, fixed, state);
+            }
+            if (ret == 0) {
+                for (k = 0; k < 8; k++) {
+                    XMEMCPY(nodes + idx[k] * n, node + k * n, n);
+                }
+            }
+            ii = 0;
+        }
+    }
+
+    /* Chains left over after the last full group finish one at a time. */
+    for (k = 0; (ret == 0) && (k < (int)ii); k++) {
+        HA_SetChainAddress(adrs, idx[k]);
+        XMEMCPY(node, sig + idx[k] * n, n);
+        ret = slhdsakey_chain(key, node, msg[idx[k]],
+            (byte)((int)SLHDSA_WM1 - msg[idx[k]]), pk_seed, adrs, node);
+        if (ret == 0) {
+            XMEMCPY(nodes + idx[k] * n, node, n);
+        }
+    }
+
+    if (WC_VAR_OK(state)) {
+        ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X8_STATE_W);
+    }
+    WC_FREE_VAR_EX(state, key->heap, DYNAMIC_TYPE_SLHDSA);
+    WC_FREE_VAR_EX(fixed, key->heap, DYNAMIC_TYPE_SLHDSA);
+    WC_FREE_VAR_EX(node, key->heap, DYNAMIC_TYPE_SLHDSA);
+    return ret;
+}
+#endif /* SLHDSA_HAVE_SHAKE_X8 */
+
 static int slhdsakey_wots_pk_from_sig_x4(SlhDsaKey* key, const byte* sig,
     const byte* msg, const byte* pk_seed, word32* adrs, byte* pk_sig)
 {
@@ -4625,6 +4765,13 @@ static int slhdsakey_wots_pk_from_sig_x4(SlhDsaKey* key, const byte* sig,
 
     WC_ALLOC_VAR_EX(nodes, byte, SLHDSA_MAX_MSG_SZ * SLHDSA_MAX_N, key->heap,
         DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+#ifdef SLHDSA_HAVE_SHAKE_X8
+    if ((ret == 0) && SLHDSA_USE_SHAKE_X8()) {
+        ret = slhdsakey_wots_pk_from_sig_x8(key, sig, msg, pk_seed, adrs,
+            nodes);
+    }
+    else
+#endif
 #if !defined(WOLFSSL_SLHDSA_PARAM_NO_128)
     if ((ret == 0) && (n == WC_SLHDSA_N_128)) {
         int i;
@@ -5002,7 +5149,8 @@ static int slhdsakey_wots_pk_from_sig(SlhDsaKey* key, const byte* sig,
  * @return  SHAKE-256 error return code on digest failure.
  */
 static int slhdsakey_xmss_node(SlhDsaKey* key, const byte* sk_seed, int i,
-    int z, const byte* pk_seed, word32* adrs, byte* node)
+    int z, const byte* pk_seed, word32* adrs, byte* node,
+    SlhDsaWotsBufs* bufs)
 {
     int ret = 0;
 
@@ -5013,7 +5161,8 @@ static int slhdsakey_xmss_node(SlhDsaKey* key, const byte* sk_seed, int i,
         /* Step 3: Set key pair address. */
         HA_SetKeyPairAddress(adrs, i);
         /* Step 4: Generate WOTS+ public key. */
-        ret = slhdsakey_wots_pkgen(key, sk_seed, pk_seed, adrs, node);
+        ret = slhdsakey_wots_pkgen(key, sk_seed, pk_seed, adrs, node,
+            bufs);
     }
     else {
         WC_DECLARE_VAR(nodes, byte, (SLHDSA_MAX_H_M + 2) * SLHDSA_MAX_N,
@@ -5034,7 +5183,7 @@ static int slhdsakey_xmss_node(SlhDsaKey* key, const byte* sk_seed, int i,
                 HA_SetKeyPairAddress(adrs, m * (word32)i + j);
                 /* Step 4: Generate WOTS+ public key. */
                 ret = slhdsakey_wots_pkgen(key, sk_seed, pk_seed, adrs,
-                    nodes + ((word32)z - 1U + (j & 1U)) * n);
+                    nodes + ((word32)z - 1U + (j & 1U)) * n, bufs);
                 if (ret != 0) {
                     break;
                 }
@@ -5111,7 +5260,8 @@ static int slhdsakey_xmss_node(SlhDsaKey* key, const byte* sk_seed, int i,
  * @return  SHAKE-256 error return code on digest failure.
  */
 static int slhdsakey_xmss_node(SlhDsaKey* key, const byte* sk_seed, int i,
-    int z, const byte* pk_seed, word32* adrs, byte* node)
+    int z, const byte* pk_seed, word32* adrs, byte* node,
+    SlhDsaWotsBufs* bufs)
 {
     int ret;
     byte nodes[2 * SLHDSA_MAX_N];
@@ -5123,18 +5273,19 @@ static int slhdsakey_xmss_node(SlhDsaKey* key, const byte* sk_seed, int i,
         /* Step 3: Set key pair address. */
         HA_SetKeyPairAddress(adrs, i);
         /* Step 4: Generate WOTS+ public key. */
-        ret = slhdsakey_wots_pkgen(key, sk_seed, pk_seed, adrs, node);
+        ret = slhdsakey_wots_pkgen(key, sk_seed, pk_seed, adrs, node,
+            bufs);
     }
     else {
         byte n = key->params->n;
 
         /* Step 6: Calculate left node recursively. */
         ret = slhdsakey_xmss_node(key, sk_seed, 2 * i, z - 1, pk_seed, adrs,
-            nodes);
+            nodes, bufs);
         if (ret == 0) {
             /* Step 7: Calculate right node recursively. */
             ret = slhdsakey_xmss_node(key, sk_seed, 2 * i + 1, z - 1, pk_seed,
-                adrs, nodes + n);
+                adrs, nodes + n, bufs);
         }
         if (ret == 0) {
             /* Steps 8-10: Step type, height and index for TREE. */
@@ -5176,11 +5327,95 @@ static int slhdsakey_xmss_node(SlhDsaKey* key, const byte* sk_seed, int i,
  * @return  MEMORY_E on dynamic memory allocation failure.
  * @return  SHAKE-256 error return code on digest failure.
  */
+/* Allocate the buffers a subtree's WOTS+ public keys share.
+ *
+ * @param [in]  key   SLH-DSA key.
+ * @param [out] bufs  Buffers to allocate.
+ * @return  0 on success.
+ * @return  MEMORY_E on dynamic memory allocation failure.
+ */
+static int slhdsakey_wots_bufs_alloc(SlhDsaKey* key, SlhDsaWotsBufs* bufs)
+{
+    int ret = 0;
+
+    bufs->sk = (byte*)XMALLOC(SLHDSA_WOTS_SK_SZ, key->heap,
+        DYNAMIC_TYPE_SLHDSA);
+    if (bufs->sk == NULL) {
+        ret = MEMORY_E;
+    }
+#if defined(USE_INTEL_SPEEDUP) && !defined(WOLFSSL_WC_SLHDSA_SMALL)
+    bufs->fixed = NULL;
+    bufs->state = NULL;
+    if (ret == 0) {
+        bufs->fixed = (word64*)XMALLOC(sizeof(word64) * SLHDSA_WOTS_FIXED_W,
+            key->heap, DYNAMIC_TYPE_SLHDSA);
+        if (bufs->fixed == NULL) {
+            ret = MEMORY_E;
+        }
+    }
+    if (ret == 0) {
+        bufs->state = (word64*)XMALLOC(sizeof(word64) * SLHDSA_SHAKE_STATE_W,
+            key->heap, DYNAMIC_TYPE_SLHDSA);
+        if (bufs->state == NULL) {
+            ret = MEMORY_E;
+        }
+    }
+#endif
+
+    return ret;
+}
+
+/* Release the buffers a subtree's WOTS+ public keys share.
+ *
+ * @param [in]      key   SLH-DSA key.
+ * @param [in, out] bufs  Buffers to release.
+ */
+static void slhdsakey_wots_bufs_free(SlhDsaKey* key, SlhDsaWotsBufs* bufs)
+{
+#if defined(USE_INTEL_SPEEDUP) && !defined(WOLFSSL_WC_SLHDSA_SMALL)
+    XFREE(bufs->state, key->heap, DYNAMIC_TYPE_SLHDSA);
+    XFREE(bufs->fixed, key->heap, DYNAMIC_TYPE_SLHDSA);
+#endif
+    XFREE(bufs->sk, key->heap, DYNAMIC_TYPE_SLHDSA);
+}
+
+/* Compute the root of the top XMSS subtree from the private key seeds.
+ *
+ * FIPS 205. Section 9.1. Algorithm 18. Steps 1-3.
+ *
+ * @param [in]  key   SLH-DSA key with the private key seeds set.
+ * @param [out] root  Root node. n bytes.
+ * @return  0 on success.
+ * @return  MEMORY_E on dynamic memory allocation failure.
+ * @return  SHAKE-256 error return code on digest failure.
+ */
+static int slhdsakey_root_from_seed(SlhDsaKey* key, byte* root)
+{
+    int ret;
+    byte n = key->params->n;
+    HashAddress adrs;
+    /* Buffers every WOTS+ public key in the root subtree shares. */
+    SlhDsaWotsBufs bufs;
+
+    ret = slhdsakey_wots_bufs_alloc(key, &bufs);
+    if (ret == 0) {
+        /* Steps 1-2: Address of the top-level XMSS tree. */
+        HA_Init(adrs);
+        HA_SetLayerAddress(adrs, key->params->d - 1);
+        /* Step 3: Compute the root node. */
+        ret = slhdsakey_xmss_node(key, key->sk, 0, key->params->h_m,
+            key->sk + 2 * n, adrs, root, &bufs);
+    }
+    slhdsakey_wots_bufs_free(key, &bufs);
+
+    return ret;
+}
+
 static int slhdsakey_xmss_sign(SlhDsaKey* key, const byte* m,
     const byte* sk_seed, word32 idx, const byte* pk_seed, word32* adrs,
     byte* sig_xmss)
 {
-    int ret = WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    int ret = 0;
     byte n = key->params->n;
     byte len = key->params->len;
     byte h_m = key->params->h_m;
@@ -5188,14 +5423,37 @@ static int slhdsakey_xmss_sign(SlhDsaKey* key, const byte* m,
     byte* auth = sig_xmss + (len * n);
     word32 i = idx;
     int j;
+    /* Buffers every WOTS+ public key in this subtree shares. */
+    SlhDsaWotsBufs bufs;
+    WC_DECLARE_VAR(sk, byte, SLHDSA_WOTS_SK_SZ, key->heap);
+#if defined(USE_INTEL_SPEEDUP) && !defined(WOLFSSL_WC_SLHDSA_SMALL)
+    WC_DECLARE_VAR(fixed, word64, SLHDSA_WOTS_FIXED_W, key->heap);
+    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_STATE_W, key->heap);
+#endif
+
+    WC_ALLOC_VAR_EX(sk, byte, SLHDSA_WOTS_SK_SZ, key->heap,
+        DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+#if defined(USE_INTEL_SPEEDUP) && !defined(WOLFSSL_WC_SLHDSA_SMALL)
+    if (ret == 0) {
+        WC_ALLOC_VAR_EX(fixed, word64, SLHDSA_WOTS_FIXED_W, key->heap,
+            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    }
+    if (ret == 0) {
+        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_STATE_W, key->heap,
+            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    }
+    bufs.fixed = fixed;
+    bufs.state = state;
+#endif
+    bufs.sk = sk;
 
     /* Step 1: For each height of XMSS tree. */
-    for (j = 0; j < h_m; j++) {
+    for (j = 0; (ret == 0) && (j < h_m); j++) {
         /* Step 2: Calculate index of other node. */
         word32 k = i ^ 1;
         /* Step 3: Calculate authentication node. */
         ret = slhdsakey_xmss_node(key, sk_seed, (int)k, j, pk_seed, adrs,
-            auth);
+            auth, &bufs);
         if (ret != 0) {
             break;
         }
@@ -5214,6 +5472,11 @@ static int slhdsakey_xmss_sign(SlhDsaKey* key, const byte* m,
         ret = slhdsakey_wots_sign(key, m, sk_seed, pk_seed, adrs, sig_xmss);
     }
 
+#if defined(USE_INTEL_SPEEDUP) && !defined(WOLFSSL_WC_SLHDSA_SMALL)
+    WC_FREE_VAR_EX(state, key->heap, DYNAMIC_TYPE_SLHDSA);
+    WC_FREE_VAR_EX(fixed, key->heap, DYNAMIC_TYPE_SLHDSA);
+#endif
+    WC_FREE_VAR_EX(sk, key->heap, DYNAMIC_TYPE_SLHDSA);
     return ret;
 }
 #endif /* !WOLFSSL_SLHDSA_VERIFY_ONLY */
@@ -7682,7 +7945,6 @@ int wc_SlhDsaKey_MakeKeyWithRandom(SlhDsaKey* key, const byte* sk_seed,
     }
     else {
         byte n = key->params->n;
-        HashAddress adrs;
 
         /* Step 4: Copy the seeds into the key if they didn't come from the key.
          */
@@ -7702,13 +7964,8 @@ int wc_SlhDsaKey_MakeKeyWithRandom(SlhDsaKey* key, const byte* sk_seed,
         }
 #endif
 
-        /* Step 1: Set address to all zeroes. */
-        HA_Init(adrs);
-        /* Step 2: Set the address layer to the top of the subtree. */
-        HA_SetLayerAddress(adrs, key->params->d - 1);
-        /* Step 3: Compute the root node. */
-        ret = slhdsakey_xmss_node(key, sk_seed, 0, key->params->h_m, pk_seed,
-             adrs, &key->sk[3 * n]);
+        /* Steps 1-3: Compute the root node from the seeds now in the key. */
+        ret = slhdsakey_root_from_seed(key, &key->sk[3 * n]);
         if (ret == 0) {
             key->flags = WC_SLHDSA_FLAG_BOTH_KEYS;
         }
@@ -7731,7 +7988,6 @@ int wc_SlhDsaKey_MakeKeyWithRandom(SlhDsaKey* key, const byte* sk_seed,
         byte        pct_root[SLHDSA_MAX_N];
         byte        pct_pub[2 * SLHDSA_MAX_N];
         word32      pct_pubLen = (word32)(n * 2);
-        HashAddress pct_adrs;
 
         /* The key identifier the IG names. */
         ret = wc_SlhDsaKey_ExportPublic(key, pct_pub, &pct_pubLen);
@@ -7741,10 +7997,7 @@ int wc_SlhDsaKey_MakeKeyWithRandom(SlhDsaKey* key, const byte* sk_seed,
 
         /* The public root, recomputed from the private seed. */
         if (ret == 0) {
-            HA_Init(pct_adrs);
-            HA_SetLayerAddress(pct_adrs, key->params->d - 1);
-            ret = slhdsakey_xmss_node(key, key->sk, 0, key->params->h_m,
-                    key->sk + 2 * n, pct_adrs, pct_root);
+            ret = slhdsakey_root_from_seed(key, pct_root);
             if ((ret == 0) && (XMEMCMP(pct_root, key->sk + 3 * n, n) != 0)) {
                 ret = SLH_DSA_PCT_E;
             }
@@ -9472,18 +9725,14 @@ int wc_SlhDsaKey_CheckKey(SlhDsaKey* key)
         ret = MISSING_KEY;
     }
     if (ret == 0) {
-        byte        n = key->params->n;
-        byte        root[SLHDSA_MAX_N];
-        HashAddress adrs;
+        byte n = key->params->n;
+        byte root[SLHDSA_MAX_N];
 
         /* Recompute the public root from the private seed and compare.
          * Done directly rather than by regenerating the key: regeneration
          * overwrites the key being checked, and its key-pair test frees the
          * key on failure, which a validation call must never do. */
-        HA_Init(adrs);
-        HA_SetLayerAddress(adrs, key->params->d - 1);
-        ret = slhdsakey_xmss_node(key, key->sk, 0, key->params->h_m,
-                key->sk + 2 * n, adrs, root);
+        ret = slhdsakey_root_from_seed(key, root);
         if ((ret == 0) && (XMEMCMP(root, key->sk + 3 * n, n) != 0)) {
             ret = WC_KEY_MISMATCH_E;
         }

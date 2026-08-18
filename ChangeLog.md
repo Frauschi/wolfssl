@@ -536,6 +536,11 @@ PR stands for Pull Request, and PR <NUMBER> references a GitHub pull request num
 * Give each SLH-DSA WOTS+ public key and FORS subtree one Keccak state to
   reuse, instead of allocating one per group of hashes. A SHAKE-128s
   signature now makes about twelve times fewer allocations. by @Frauschi
+* Use the 8-way AVX512 Keccak permutation when completing the WOTS+ chains of
+  an SLH-DSA signature, which speeds up verification. by @Frauschi
+* Give a whole SLH-DSA XMSS subtree one set of WOTS+ buffers to reuse. A
+  SHAKE-128s signature now makes about 1000 allocations where it made about
+  144000. by @Frauschi
 
 ## TLS/DTLS
 

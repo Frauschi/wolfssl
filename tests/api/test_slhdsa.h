@@ -30,6 +30,7 @@ int test_wc_slhdsa_make_key(void);
 int test_wc_slhdsa_sign(void);
 int test_wc_slhdsa_verify(void);
 int test_wc_slhdsa_sign_vfy(void);
+int test_wc_slhdsa_verify_negative(void);
 int test_wc_slhdsa_sign_hash(void);
 int test_wc_slhdsa_sign_msg(void);
 int test_wc_slhdsa_export_import(void);
@@ -58,6 +59,7 @@ int test_slhdsa_cb_free(void);
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_sign),                            \
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_verify),                          \
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_sign_vfy),                        \
+    TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_verify_negative),                 \
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_sign_hash),                       \
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_sign_msg),                        \
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_export_import),                   \

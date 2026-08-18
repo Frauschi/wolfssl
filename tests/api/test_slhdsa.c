@@ -1046,6 +1046,141 @@ int test_wc_slhdsa_sign_vfy(void)
     return EXPECT_RESULT();
 }
 
+#if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY)
+/* Number of single bit flips applied across one signature. */
+#define TEST_SLHDSA_NEG_FLIPS   9
+
+/* Drive verification with signatures that have to be rejected, for one
+ * parameter set. A verifier that skipped part of the signature, or stopped
+ * comparing early, would still pass every positive round-trip above. Flip
+ * offsets are spread so they land in the randomiser, the FORS signature and
+ * the XMSS layers above it whatever the parameter set.
+ */
+static int slhdsa_verify_negative_one(enum SlhDsaParam param)
+{
+    EXPECT_DECLS;
+    SlhDsaKey key;
+    WC_RNG rng;
+    byte* sig = NULL;
+    word32 sigLen = WC_SLHDSA_MAX_SIG_LEN;
+    static const byte msg[] = "SLH-DSA negative verification";
+    static const byte ctx[] = { 0x01, 0x02, 0x03, 0x04 };
+    byte altMsg[sizeof(msg)];
+    byte altCtx[sizeof(ctx)];
+    int i;
+
+    XMEMSET(&key, 0, sizeof(key));
+    XMEMSET(&rng, 0, sizeof(rng));
+
+    sig = (byte*)XMALLOC(WC_SLHDSA_MAX_SIG_LEN, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    ExpectNotNull(sig);
+
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_SlhDsaKey_Init(&key, param, NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+    ExpectIntEQ(wc_SlhDsaKey_Sign(&key, ctx, sizeof(ctx), msg,
+        (word32)sizeof(msg), sig, &sigLen, &rng), 0);
+
+    /* The signature has to verify first, or the rejections below would prove
+     * nothing. */
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, ctx, (word32)sizeof(ctx), msg,
+        (word32)sizeof(msg), sig, sigLen), 0);
+
+    /* One flipped bit anywhere in the signature has to be rejected. */
+    for (i = 0; i < TEST_SLHDSA_NEG_FLIPS; i++) {
+        word32 off;
+
+        if (!EXPECT_SUCCESS()) {
+            break;
+        }
+        /* Evenly spaced, first and last byte included. */
+        off = (word32)i * (sigLen - 1) / (TEST_SLHDSA_NEG_FLIPS - 1);
+        sig[off] ^= 0x01;
+        ExpectIntEQ(wc_SlhDsaKey_Verify(&key, ctx, (word32)sizeof(ctx), msg,
+            (word32)sizeof(msg), sig, sigLen),
+            WC_NO_ERR_TRACE(SIG_VERIFY_E));
+        sig[off] ^= 0x01;
+    }
+
+    XMEMCPY(altMsg, msg, sizeof(msg));
+    altMsg[0] ^= 0x01;
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, ctx, sizeof(ctx), altMsg,
+        (word32)sizeof(altMsg), sig, sigLen), WC_NO_ERR_TRACE(SIG_VERIFY_E));
+
+    XMEMCPY(altCtx, ctx, sizeof(ctx));
+    altCtx[0] ^= 0x01;
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, altCtx, sizeof(altCtx), msg,
+        (word32)sizeof(msg), sig, sigLen), WC_NO_ERR_TRACE(SIG_VERIFY_E));
+
+    /* An absent context is the same signature under a different domain
+     * separation, so accepting it would be a silent downgrade. */
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, NULL, 0, msg, (word32)sizeof(msg),
+        sig, sigLen), WC_NO_ERR_TRACE(SIG_VERIFY_E));
+
+    /* The untouched signature still verifies, so the rejections above were
+     * caused by the input under test and not by damage left behind. */
+    ExpectIntEQ(wc_SlhDsaKey_Verify(&key, ctx, (word32)sizeof(ctx), msg,
+        (word32)sizeof(msg), sig, sigLen), 0);
+
+    wc_SlhDsaKey_Free(&key);
+    wc_FreeRng(&rng);
+    XFREE(sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+
+    return EXPECT_RESULT();
+}
+#endif /* WOLFSSL_HAVE_SLHDSA && !WOLFSSL_SLHDSA_VERIFY_ONLY */
+
+/*
+ * Negative verification test: every compiled-in parameter set must reject a
+ * signature with a flipped bit, a message it was not made over, and a context
+ * it was not made under.
+ */
+int test_wc_slhdsa_verify_negative(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY)
+#ifdef WOLFSSL_SLHDSA_PARAM_128S
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHAKE128S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_128F
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHAKE128F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_192S
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHAKE192S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_192F
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHAKE192F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_256S
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHAKE256S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_256F
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHAKE256F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_SHA2
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128S
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHA2_128S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_128F
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHA2_128F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192S
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHA2_192S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_192F
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHA2_192F), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256S
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHA2_256S), TEST_SUCCESS);
+#endif
+#ifdef WOLFSSL_SLHDSA_PARAM_SHA2_256F
+    ExpectIntEQ(slhdsa_verify_negative_one(SLHDSA_SHA2_256F), TEST_SUCCESS);
+#endif
+#endif /* WOLFSSL_SLHDSA_SHA2 */
+#endif /* WOLFSSL_HAVE_SLHDSA && !WOLFSSL_SLHDSA_VERIFY_ONLY */
+    return EXPECT_RESULT();
+}
+
 /*
  * Test hash signing and verification for SLH-DSA.
  */
