@@ -189,6 +189,20 @@ wc_static_assert(SLHDSA_MAX_MSG_SZ <= 255);
     #define SLHDSA_HAVE_SHAKE_X8
 #endif
 
+/* True when the eight-way path may be used for this CPU. */
+#ifdef SLHDSA_HAVE_SHAKE_X8
+    #define SLHDSA_USE_SHAKE_X8()   USE_INTEL_AVX512(cpuid_flags)
+#else
+    #define SLHDSA_USE_SHAKE_X8()   0
+#endif
+
+/* Width of a Keccak state buffer that either path can use. */
+#ifdef SLHDSA_HAVE_SHAKE_X8
+    #define SLHDSA_SHAKE_STATE_W    SLHDSA_SHAKE_X8_STATE_W
+#else
+    #define SLHDSA_SHAKE_STATE_W    SLHDSA_SHAKE_X4_STATE_W
+#endif
+
 #ifndef WC_SLHDSA_ALL_NO_256F
     /* Maximum number of bytes to produce from digest of message. */
     #define SLHDSA_MAX_MD               49
@@ -2538,31 +2552,23 @@ static int slhdsakey_chain_idx_x4_32(byte* sk, word32 i, word32 s,
  * @return  SHAKE-256 error return code on digest failure.
  */
 static int slhdsakey_hash_prf_x4(const byte* pk_seed, const byte* sk_seed,
-    byte* addr, byte n, byte ca, byte* sk, void* heap)
+    byte* addr, byte n, byte ca, byte* sk, word64* state)
 {
-    int ret = 0;
-    word32 o = 0;
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap);
+    int ret;
+    word32 o;
 
-    (void)heap;
-
-    WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap,
-        DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    o = slhdsakey_shake256_set_seed_ha_hash_x4(state, pk_seed, addr, sk_seed,
+        n);
+    SHAKE256_SET_CHAIN_ADDRESS(state, o, ca);
+    ret = SAVE_VECTOR_REGISTERS2();
     if (ret == 0) {
-        o = slhdsakey_shake256_set_seed_ha_hash_x4(state, pk_seed, addr,
-            sk_seed, n);
-        SHAKE256_SET_CHAIN_ADDRESS(state, o, ca);
-        ret = SAVE_VECTOR_REGISTERS2();
-        if (ret == 0) {
-            sha3_blocksx4_avx2(state);
-            slhdsakey_shake256_get_hash_x4(state, sk, n);
-            RESTORE_VECTOR_REGISTERS();
-        }
-
-        /* state holds the secret PRF output (WOTS+ key). */
-        ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X4_STATE_W);
-        WC_FREE_VAR_EX(state, heap, DYNAMIC_TYPE_SLHDSA);
+        sha3_blocksx4_avx2(state);
+        slhdsakey_shake256_get_hash_x4(state, sk, n);
+        RESTORE_VECTOR_REGISTERS();
     }
+
+    /* state holds the secret PRF output (WOTS+ key). */
+    ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X4_STATE_W);
 
     return ret;
 }
@@ -2588,51 +2594,35 @@ static int slhdsakey_hash_prf_x4(const byte* pk_seed, const byte* sk_seed,
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_chain_x4_16(byte* sk, const byte* pk_seed, byte* addr,
-    byte ca, void* heap)
+    byte ca, word64* fixed, word64* state)
 {
     int ret = 0;
     int j;
-    WC_DECLARE_VAR(fixed, word64, 8 * 4, heap);
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap);
 
-    (void)heap;
+    SHAKE256_SET_SEED_HA_X4_16(fixed, pk_seed, addr);
+    SHAKE256_SET_CHAIN_ADDRESS(fixed, 24, ca);
+    SHAKE256_SET_HASH_X4_16(state, sk);
 
-    WC_ALLOC_VAR_EX(fixed, word64, 8 * 4, heap, DYNAMIC_TYPE_SLHDSA,
-        ret = MEMORY_E);
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap,
-            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        SHAKE256_SET_SEED_HA_X4_16(fixed, pk_seed, addr);
-        SHAKE256_SET_CHAIN_ADDRESS(fixed, 24, ca);
-        SHAKE256_SET_HASH_X4_16(state, sk);
-
-        for (j = 0; j < 15; j++) {
-            if (j != 0) {
-                XMEMCPY(state + 24, state, 16 * 4);
-            }
-            XMEMCPY(state, fixed, 24 * sizeof(word64));
-            SHAKE256_SET_HASH_ADDRESS(state, 24, j);
-            SHAKE256_SET_END_X4(state, 32);
-            ret = SAVE_VECTOR_REGISTERS2();
-            if (ret != 0)
-                break;
-            sha3_blocksx4_avx2(state);
-            RESTORE_VECTOR_REGISTERS();
+    for (j = 0; j < 15; j++) {
+        if (j != 0) {
+            XMEMCPY(state + 24, state, 16 * 4);
         }
-
-        if (ret == 0)
-            SHAKE256_GET_HASH_X4_16(state, sk);
+        XMEMCPY(state, fixed, 24 * sizeof(word64));
+        SHAKE256_SET_HASH_ADDRESS(state, 24, j);
+        SHAKE256_SET_END_X4(state, 32);
+        ret = SAVE_VECTOR_REGISTERS2();
+        if (ret != 0)
+            break;
+        sha3_blocksx4_avx2(state);
+        RESTORE_VECTOR_REGISTERS();
     }
 
-    /* state holds the secret WOTS+ chain value; guard against a NULL state
-     * after an allocation failure (WOLFSSL_SMALL_STACK). */
-    if (WC_VAR_OK(state)) {
-        ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X4_STATE_W);
-    }
-    WC_FREE_VAR_EX(state, heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(fixed, heap, DYNAMIC_TYPE_SLHDSA);
+    if (ret == 0)
+        SHAKE256_GET_HASH_X4_16(state, sk);
+
+    /* state holds the secret WOTS+ chain value. */
+    ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X4_STATE_W);
+
     return ret;
 }
 #endif /* !WOLFSSL_SLHDSA_VERIFY_ONLY */
@@ -2658,51 +2648,35 @@ static int slhdsakey_chain_x4_16(byte* sk, const byte* pk_seed, byte* addr,
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_chain_x4_24(byte* sk, const byte* pk_seed, byte* addr,
-    byte ca, void* heap)
+    byte ca, word64* fixed, word64* state)
 {
     int ret = 0;
     int j;
-    WC_DECLARE_VAR(fixed, word64, 8 * 4, heap);
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap);
 
-    (void)heap;
+    SHAKE256_SET_SEED_HA_X4_24(fixed, pk_seed, addr);
+    SHAKE256_SET_CHAIN_ADDRESS(fixed, 28, ca);
+    SHAKE256_SET_HASH_X4_24(state, sk);
 
-    WC_ALLOC_VAR_EX(fixed, word64, 8 * 4, heap, DYNAMIC_TYPE_SLHDSA,
-        ret = MEMORY_E);
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap,
-            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        SHAKE256_SET_SEED_HA_X4_24(fixed, pk_seed, addr);
-        SHAKE256_SET_CHAIN_ADDRESS(fixed, 28, ca);
-        SHAKE256_SET_HASH_X4_24(state, sk);
-
-        for (j = 0; j < 15; j++) {
-            if (j != 0) {
-                XMEMCPY(state + 28, state, 24 * 4);
-            }
-            XMEMCPY(state, fixed, 28 * sizeof(word64));
-            SHAKE256_SET_HASH_ADDRESS(state, 28, j);
-            SHAKE256_SET_END_X4(state, 40);
-            ret = SAVE_VECTOR_REGISTERS2();
-            if (ret != 0)
-                break;
-            sha3_blocksx4_avx2(state);
-            RESTORE_VECTOR_REGISTERS();
+    for (j = 0; j < 15; j++) {
+        if (j != 0) {
+            XMEMCPY(state + 28, state, 24 * 4);
         }
-
-        if (ret == 0)
-            SHAKE256_GET_HASH_X4_24(state, sk);
+        XMEMCPY(state, fixed, 28 * sizeof(word64));
+        SHAKE256_SET_HASH_ADDRESS(state, 28, j);
+        SHAKE256_SET_END_X4(state, 40);
+        ret = SAVE_VECTOR_REGISTERS2();
+        if (ret != 0)
+            break;
+        sha3_blocksx4_avx2(state);
+        RESTORE_VECTOR_REGISTERS();
     }
 
-    /* state holds the secret WOTS+ chain value; guard against a NULL state
-     * after an allocation failure (WOLFSSL_SMALL_STACK). */
-    if (WC_VAR_OK(state)) {
-        ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X4_STATE_W);
-    }
-    WC_FREE_VAR_EX(state, heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(fixed, heap, DYNAMIC_TYPE_SLHDSA);
+    if (ret == 0)
+        SHAKE256_GET_HASH_X4_24(state, sk);
+
+    /* state holds the secret WOTS+ chain value. */
+    ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X4_STATE_W);
+
     return ret;
 }
 #endif
@@ -2728,51 +2702,35 @@ static int slhdsakey_chain_x4_24(byte* sk, const byte* pk_seed, byte* addr,
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_chain_x4_32(byte* sk, const byte* pk_seed, byte* addr,
-    byte ca, void* heap)
+    byte ca, word64* fixed, word64* state)
 {
     int ret = 0;
     int j;
-    WC_DECLARE_VAR(fixed, word64, 8 * 4, heap);
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap);
 
-    (void)heap;
+    SHAKE256_SET_SEED_HA_X4_32(fixed, pk_seed, addr);
+    SHAKE256_SET_CHAIN_ADDRESS(fixed, 32, ca);
+    SHAKE256_SET_HASH_X4_32(state, sk);
 
-    WC_ALLOC_VAR_EX(fixed, word64, 8 * 4, heap, DYNAMIC_TYPE_SLHDSA,
-        ret = MEMORY_E);
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap,
-            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        SHAKE256_SET_SEED_HA_X4_32(fixed, pk_seed, addr);
-        SHAKE256_SET_CHAIN_ADDRESS(fixed, 32, ca);
-        SHAKE256_SET_HASH_X4_32(state, sk);
-
-        for (j = 0; j < 15; j++) {
-            if (j != 0) {
-                XMEMCPY(state + 32, state, 32 * 4);
-            }
-            XMEMCPY(state, fixed, 32 * sizeof(word64));
-            SHAKE256_SET_HASH_ADDRESS(state, 32, j);
-            SHAKE256_SET_END_X4(state, 48);
-            ret = SAVE_VECTOR_REGISTERS2();
-            if (ret != 0)
-                break;
-            sha3_blocksx4_avx2(state);
-            RESTORE_VECTOR_REGISTERS();
+    for (j = 0; j < 15; j++) {
+        if (j != 0) {
+            XMEMCPY(state + 32, state, 32 * 4);
         }
-
-        if (ret == 0)
-            SHAKE256_GET_HASH_X4_32(state, sk);
+        XMEMCPY(state, fixed, 32 * sizeof(word64));
+        SHAKE256_SET_HASH_ADDRESS(state, 32, j);
+        SHAKE256_SET_END_X4(state, 48);
+        ret = SAVE_VECTOR_REGISTERS2();
+        if (ret != 0)
+            break;
+        sha3_blocksx4_avx2(state);
+        RESTORE_VECTOR_REGISTERS();
     }
 
-    /* state holds the secret WOTS+ chain value; guard against a NULL state
-     * after an allocation failure (WOLFSSL_SMALL_STACK). */
-    if (WC_VAR_OK(state)) {
-        ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X4_STATE_W);
-    }
-    WC_FREE_VAR_EX(state, heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(fixed, heap, DYNAMIC_TYPE_SLHDSA);
+    if (ret == 0)
+        SHAKE256_GET_HASH_X4_32(state, sk);
+
+    /* state holds the secret WOTS+ chain value. */
+    ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X4_STATE_W);
+
     return ret;
 }
 #endif
@@ -3110,18 +3068,30 @@ static int slhdsakey_wots_pkgen_chain_x4_16(SlhDsaKey* key, const byte* sk_seed,
     int i;
     byte len = key->params->len;
     WC_DECLARE_VAR(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 16, key->heap);
+    WC_DECLARE_VAR(fixed, word64, 8 * 4, key->heap);
+    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap);
 
+    /* One state for every chain in this public key, rather than one per group
+     * of four. Each group refills it before use. */
     WC_ALLOC_VAR_EX(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 16, key->heap,
         DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
     if (ret == 0) {
+        WC_ALLOC_VAR_EX(fixed, word64, 8 * 4, key->heap, DYNAMIC_TYPE_SLHDSA,
+            ret = MEMORY_E);
+    }
+    if (ret == 0) {
+        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap,
+            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    }
+    if (ret == 0) {
         for (i = 0; i < len - 3; i += 4) {
             ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 16, (byte)i,
-                sk + i * 16, key->heap);
+                sk + i * 16, state);
             if (ret != 0) {
                 break;
             }
             ret = slhdsakey_chain_x4_16(sk + i * 16, pk_seed, addr, (byte)i,
-                key->heap);
+                fixed, state);
             if (ret != 0) {
                 break;
             }
@@ -3129,10 +3099,10 @@ static int slhdsakey_wots_pkgen_chain_x4_16(SlhDsaKey* key, const byte* sk_seed,
     }
     if (ret == 0) {
         ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 16, (byte)i,
-            sk + i * 16, key->heap);
+            sk + i * 16, state);
         if (ret == 0) {
             ret = slhdsakey_chain_x4_16(sk + i * 16, pk_seed, addr, (byte)i,
-                key->heap);
+                fixed, state);
         }
     }
     if (ret == 0) {
@@ -3145,6 +3115,8 @@ static int slhdsakey_wots_pkgen_chain_x4_16(SlhDsaKey* key, const byte* sk_seed,
     if ((ret != 0) && WC_VAR_OK(sk)) {
         ForceZero(sk, (SLHDSA_MAX_MSG_SZ + 3) * 16);
     }
+    WC_FREE_VAR_EX(state, key->heap, DYNAMIC_TYPE_SLHDSA);
+    WC_FREE_VAR_EX(fixed, key->heap, DYNAMIC_TYPE_SLHDSA);
     WC_FREE_VAR_EX(sk, key->heap, DYNAMIC_TYPE_SLHDSA);
     return ret;
 }
@@ -3184,18 +3156,30 @@ static int slhdsakey_wots_pkgen_chain_x4_24(SlhDsaKey* key, const byte* sk_seed,
     int i;
     byte len = key->params->len;
     WC_DECLARE_VAR(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 24, key->heap);
+    WC_DECLARE_VAR(fixed, word64, 8 * 4, key->heap);
+    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap);
 
+    /* One state for every chain in this public key, rather than one per group
+     * of four. Each group refills it before use. */
     WC_ALLOC_VAR_EX(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 24, key->heap,
         DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
     if (ret == 0) {
+        WC_ALLOC_VAR_EX(fixed, word64, 8 * 4, key->heap, DYNAMIC_TYPE_SLHDSA,
+            ret = MEMORY_E);
+    }
+    if (ret == 0) {
+        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap,
+            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    }
+    if (ret == 0) {
         for (i = 0; i < len - 3; i += 4) {
             ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 24, (byte)i,
-                sk + i * 24, key->heap);
+                sk + i * 24, state);
             if (ret != 0) {
                 break;
             }
             ret = slhdsakey_chain_x4_24(sk + i * 24, pk_seed, addr, (byte)i,
-                key->heap);
+                fixed, state);
             if (ret != 0) {
                 break;
             }
@@ -3203,10 +3187,10 @@ static int slhdsakey_wots_pkgen_chain_x4_24(SlhDsaKey* key, const byte* sk_seed,
     }
     if (ret == 0) {
         ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 24, (byte)i,
-            sk + i * 24, key->heap);
+            sk + i * 24, state);
         if (ret == 0) {
             ret = slhdsakey_chain_x4_24(sk + i * 24, pk_seed, addr, (byte)i,
-                key->heap);
+                fixed, state);
         }
     }
     if (ret == 0) {
@@ -3219,6 +3203,8 @@ static int slhdsakey_wots_pkgen_chain_x4_24(SlhDsaKey* key, const byte* sk_seed,
     if ((ret != 0) && WC_VAR_OK(sk)) {
         ForceZero(sk, (SLHDSA_MAX_MSG_SZ + 3) * 24);
     }
+    WC_FREE_VAR_EX(state, key->heap, DYNAMIC_TYPE_SLHDSA);
+    WC_FREE_VAR_EX(fixed, key->heap, DYNAMIC_TYPE_SLHDSA);
     WC_FREE_VAR_EX(sk, key->heap, DYNAMIC_TYPE_SLHDSA);
     return ret;
 }
@@ -3258,18 +3244,30 @@ static int slhdsakey_wots_pkgen_chain_x4_32(SlhDsaKey* key, const byte* sk_seed,
     int i;
     byte len = key->params->len;
     WC_DECLARE_VAR(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 32, key->heap);
+    WC_DECLARE_VAR(fixed, word64, 8 * 4, key->heap);
+    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap);
 
+    /* One state for every chain in this public key, rather than one per group
+     * of four. Each group refills it before use. */
     WC_ALLOC_VAR_EX(sk, byte, (SLHDSA_MAX_MSG_SZ + 3) * 32, key->heap,
         DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
     if (ret == 0) {
+        WC_ALLOC_VAR_EX(fixed, word64, 8 * 4, key->heap, DYNAMIC_TYPE_SLHDSA,
+            ret = MEMORY_E);
+    }
+    if (ret == 0) {
+        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, key->heap,
+            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    }
+    if (ret == 0) {
         for (i = 0; i < len - 3; i += 4) {
             ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 32, (byte)i,
-                sk + i * 32, key->heap);
+                sk + i * 32, state);
             if (ret != 0) {
                 break;
             }
             ret = slhdsakey_chain_x4_32(sk + i * 32, pk_seed, addr, (byte)i,
-                key->heap);
+                fixed, state);
             if (ret != 0) {
                 break;
             }
@@ -3277,10 +3275,10 @@ static int slhdsakey_wots_pkgen_chain_x4_32(SlhDsaKey* key, const byte* sk_seed,
     }
     if (ret == 0) {
         ret = slhdsakey_hash_prf_x4(pk_seed, sk_seed, sk_addr, 32, (byte)i,
-            sk + i * 32, key->heap);
+            sk + i * 32, state);
         if (ret == 0) {
             ret = slhdsakey_chain_x4_32(sk + i * 32, pk_seed, addr, (byte)i,
-                key->heap);
+                fixed, state);
         }
     }
     if (ret == 0) {
@@ -3293,6 +3291,8 @@ static int slhdsakey_wots_pkgen_chain_x4_32(SlhDsaKey* key, const byte* sk_seed,
     if ((ret != 0) && WC_VAR_OK(sk)) {
         ForceZero(sk, (SLHDSA_MAX_MSG_SZ + 3) * 32);
     }
+    WC_FREE_VAR_EX(state, key->heap, DYNAMIC_TYPE_SLHDSA);
+    WC_FREE_VAR_EX(fixed, key->heap, DYNAMIC_TYPE_SLHDSA);
     WC_FREE_VAR_EX(sk, key->heap, DYNAMIC_TYPE_SLHDSA);
     return ret;
 }
@@ -3432,6 +3432,55 @@ static void slhdsakey_shake256_set_hash_addr_x8(word64* state, word32 o,
     }
 }
 
+/* Fill the 8-way state with the seed, encoded HashAddress and a hash that is
+ * the same in every lane.
+ *
+ * @param [out] state  SHAKE-256 x8 state.
+ * @param [in]  seed   Seed at the start of each hash.
+ * @param [in]  addr   Encoded HashAddress for each hash.
+ * @param [in]  hash   Hash data to put into each hash.
+ * @param [in]  n      Number of bytes of seed.
+ * @return  Offset after the seed and HashAddress, before the hash.
+ */
+static word32 slhdsakey_shake256_set_seed_ha_hash_x8(word64* state,
+    const byte* seed, const byte* addr, const byte* hash, int n)
+{
+    int i;
+    int l;
+    word32 o;
+    word32 ret;
+
+    ret = o = slhdsakey_shake256_set_seed_ha_x8(state, seed, addr, n);
+    for (i = 0; i < n; i += 8) {
+        word64 v = readUnalignedWord64(hash + i);
+
+        for (l = 0; l < 8; l++) {
+            state[o + l] = v;
+        }
+        o += 8;
+    }
+    slhdsakey_shake256_set_end_x8(state, o);
+
+    return ret;
+}
+
+/* Set an incrementing tree index into each lane of the 8-way state.
+ *
+ * @param [in, out] state  SHAKE-256 x8 state.
+ * @param [in]      o      Offset of state after the HashAddress.
+ * @param [in]      ti     Value to encode, incrementing for each hash.
+ */
+static void slhdsakey_shake256_set_tree_index_x8(word64* state, word32 o,
+    word32 ti)
+{
+    int l;
+
+    for (l = 0; l < 8; l++) {
+        c32toa(ti + (word32)l,
+            (byte*)&((word32*)(state + o - 8 + l))[1]);
+    }
+}
+
 /* PRF eight WOTS+ secret values at consecutive chain addresses.
  *
  * @param [in]  pk_seed  Public key seed.
@@ -3440,49 +3489,28 @@ static void slhdsakey_shake256_set_hash_addr_x8(word64* state, word32 o,
  * @param [in]  n        Number of bytes in each hash.
  * @param [in]  ca       Chain address start index.
  * @param [out] sk       Eight n-byte secret values.
- * @param [in]  heap     Dynamic memory allocation hint.
+ * @param [in]  state    Caller owned x8 Keccak state.
  * @return  0 on success.
- * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_hash_prf_x8(const byte* pk_seed, const byte* sk_seed,
-    byte* addr, byte n, byte ca, byte* sk, void* heap)
+    byte* addr, byte n, byte ca, byte* sk, word64* state)
 {
-    int ret = 0;
+    int ret;
     word32 o;
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X8_STATE_W, heap);
 
-    (void)heap;
+    o = slhdsakey_shake256_set_seed_ha_hash_x8(state, pk_seed, addr, sk_seed,
+        n);
+    slhdsakey_shake256_set_chain_addr_x8(state, o, ca);
 
-    WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X8_STATE_W, heap,
-        DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    ret = SAVE_VECTOR_REGISTERS2();
     if (ret == 0) {
-        int i;
-        int l;
-
-        o = slhdsakey_shake256_set_seed_ha_x8(state, pk_seed, addr, n);
-        slhdsakey_shake256_set_chain_addr_x8(state, o, ca);
-        /* PRF hashes the private key seed, the same value in every lane. */
-        for (i = 0; i < n; i += 8) {
-            word64 v = readUnalignedWord64(sk_seed + i);
-
-            for (l = 0; l < 8; l++) {
-                state[o + l] = v;
-            }
-            o += 8;
-        }
-        slhdsakey_shake256_set_end_x8(state, o);
-
-        ret = SAVE_VECTOR_REGISTERS2();
-        if (ret == 0) {
-            sha3_blocksx8_avx512(state);
-            slhdsakey_shake256_get_hash_x8(state, sk, n);
-            RESTORE_VECTOR_REGISTERS();
-        }
-
-        /* state holds the secret PRF output (WOTS+ key). */
-        ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X8_STATE_W);
-        WC_FREE_VAR_EX(state, heap, DYNAMIC_TYPE_SLHDSA);
+        sha3_blocksx8_avx512(state);
+        slhdsakey_shake256_get_hash_x8(state, sk, n);
+        RESTORE_VECTOR_REGISTERS();
     }
+
+    /* state holds the secret PRF output (WOTS+ key). */
+    ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X8_STATE_W);
 
     return ret;
 }
@@ -3503,61 +3531,45 @@ static int slhdsakey_hash_prf_x8(const byte* pk_seed, const byte* sk_seed,
  * @param [in]      addr     Encoded HashAddress.
  * @param [in]      ca       Chain address start index.
  * @param [in]      n        Number of bytes in each hash.
- * @param [in]      heap     Dynamic memory allocation hint.
+ * @param [in]      fixed    Caller owned buffer for the unchanging state head.
+ * @param [in]      state    Caller owned x8 Keccak state.
  * @return  0 on success.
- * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_chain_x8(byte* sk, const byte* pk_seed, byte* addr,
-    byte ca, byte n, void* heap)
+    byte ca, byte n, word64* fixed, word64* state)
 {
     int ret = 0;
     int j;
-    word32 o = 0;
+    word32 o;
     /* Words the eight hashes occupy in the state. */
     word32 hw = (word32)(n / 8) * 8;
-    WC_DECLARE_VAR(fixed, word64, SLHDSA_SHAKE_X8_FIXED_W, heap);
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X8_STATE_W, heap);
 
-    (void)heap;
+    o = slhdsakey_shake256_set_seed_ha_x8(fixed, pk_seed, addr, n);
+    slhdsakey_shake256_set_chain_addr_x8(fixed, o, ca);
+    slhdsakey_shake256_set_hash_x8(state, o, sk, n);
 
-    WC_ALLOC_VAR_EX(fixed, word64, SLHDSA_SHAKE_X8_FIXED_W, heap,
-        DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    if (ret == 0) {
-        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X8_STATE_W, heap,
-            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
-    }
-    if (ret == 0) {
-        o = slhdsakey_shake256_set_seed_ha_x8(fixed, pk_seed, addr, n);
-        slhdsakey_shake256_set_chain_addr_x8(fixed, o, ca);
-        slhdsakey_shake256_set_hash_x8(state, o, sk, n);
-
-        for (j = 0; j < SLHDSA_WM1; j++) {
-            if (j != 0) {
-                /* Feed the previous output back in as the next input. */
-                XMEMCPY(state + o, state, hw * sizeof(word64));
-            }
-            XMEMCPY(state, fixed, o * sizeof(word64));
-            slhdsakey_shake256_set_hash_addr_x8(state, o, (byte)j);
-            slhdsakey_shake256_set_end_x8(state, o + hw);
-            ret = SAVE_VECTOR_REGISTERS2();
-            if (ret != 0)
-                break;
-            sha3_blocksx8_avx512(state);
-            RESTORE_VECTOR_REGISTERS();
+    for (j = 0; j < SLHDSA_WM1; j++) {
+        if (j != 0) {
+            /* Feed the previous output back in as the next input. */
+            XMEMCPY(state + o, state, hw * sizeof(word64));
         }
-
-        if (ret == 0) {
-            slhdsakey_shake256_get_hash_x8(state, sk, n);
-        }
+        XMEMCPY(state, fixed, o * sizeof(word64));
+        slhdsakey_shake256_set_hash_addr_x8(state, o, (byte)j);
+        slhdsakey_shake256_set_end_x8(state, o + hw);
+        ret = SAVE_VECTOR_REGISTERS2();
+        if (ret != 0)
+            break;
+        sha3_blocksx8_avx512(state);
+        RESTORE_VECTOR_REGISTERS();
     }
 
-    /* state holds the secret WOTS+ chain value; guard against a NULL state
-     * after an allocation failure (WOLFSSL_SMALL_STACK). */
-    if (WC_VAR_OK(state)) {
-        ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X8_STATE_W);
+    if (ret == 0) {
+        slhdsakey_shake256_get_hash_x8(state, sk, n);
     }
-    WC_FREE_VAR_EX(state, heap, DYNAMIC_TYPE_SLHDSA);
-    WC_FREE_VAR_EX(fixed, heap, DYNAMIC_TYPE_SLHDSA);
+
+    /* state holds the secret WOTS+ chain value. */
+    ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X8_STATE_W);
+
     return ret;
 }
 
@@ -3583,18 +3595,30 @@ static int slhdsakey_wots_pkgen_chain_x8(SlhDsaKey* key, const byte* sk_seed,
     byte len = key->params->len;
     WC_DECLARE_VAR(sk, byte, (SLHDSA_MAX_MSG_SZ + 7) * SLHDSA_MAX_N,
         key->heap);
+    WC_DECLARE_VAR(fixed, word64, SLHDSA_SHAKE_X8_FIXED_W, key->heap);
+    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X8_STATE_W, key->heap);
 
+    /* One state for every chain in this public key, rather than one per group
+     * of eight. Each group refills it before use. */
     WC_ALLOC_VAR_EX(sk, byte, (SLHDSA_MAX_MSG_SZ + 7) * SLHDSA_MAX_N,
         key->heap, DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
     if (ret == 0) {
+        WC_ALLOC_VAR_EX(fixed, word64, SLHDSA_SHAKE_X8_FIXED_W, key->heap,
+            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    }
+    if (ret == 0) {
+        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X8_STATE_W, key->heap,
+            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    }
+    if (ret == 0) {
         for (i = 0; i < len - 7; i += 8) {
             ret = slhdsakey_hash_prf_x8(pk_seed, sk_seed, sk_addr, n, (byte)i,
-                sk + i * n, key->heap);
+                sk + i * n, state);
             if (ret != 0) {
                 break;
             }
             ret = slhdsakey_chain_x8(sk + i * n, pk_seed, addr, (byte)i, n,
-                key->heap);
+                fixed, state);
             if (ret != 0) {
                 break;
             }
@@ -3603,10 +3627,10 @@ static int slhdsakey_wots_pkgen_chain_x8(SlhDsaKey* key, const byte* sk_seed,
     if (ret == 0) {
         /* Trailing group, which runs past len into the buffer's slack. */
         ret = slhdsakey_hash_prf_x8(pk_seed, sk_seed, sk_addr, n, (byte)i,
-            sk + i * n, key->heap);
+            sk + i * n, state);
         if (ret == 0) {
             ret = slhdsakey_chain_x8(sk + i * n, pk_seed, addr, (byte)i, n,
-                key->heap);
+                fixed, state);
         }
     }
     if (ret == 0) {
@@ -3618,6 +3642,8 @@ static int slhdsakey_wots_pkgen_chain_x8(SlhDsaKey* key, const byte* sk_seed,
     if ((ret != 0) && WC_VAR_OK(sk)) {
         ForceZero(sk, (SLHDSA_MAX_MSG_SZ + 7) * SLHDSA_MAX_N);
     }
+    WC_FREE_VAR_EX(state, key->heap, DYNAMIC_TYPE_SLHDSA);
+    WC_FREE_VAR_EX(fixed, key->heap, DYNAMIC_TYPE_SLHDSA);
     WC_FREE_VAR_EX(sk, key->heap, DYNAMIC_TYPE_SLHDSA);
     return ret;
 }
@@ -5556,31 +5582,23 @@ static int slhdsakey_fors_sk_gen(SlhDsaKey* key, const byte* sk_seed,
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_hash_prf_ti_x4(const byte* pk_seed, const byte* sk_seed,
-    byte* addr, byte n, word32 ti, byte* node, void* heap)
+    byte* addr, byte n, word32 ti, byte* node, word64* state)
 {
-    int ret = 0;
-    word32 o = 0;
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap);
+    int ret;
+    word32 o;
 
-    (void)heap;
-
-    WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap,
-        DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    o = slhdsakey_shake256_set_seed_ha_hash_x4(state, pk_seed, addr, sk_seed,
+        n);
+    SHAKE256_SET_TREE_INDEX(state, o, ti);
+    ret = SAVE_VECTOR_REGISTERS2();
     if (ret == 0) {
-        o = slhdsakey_shake256_set_seed_ha_hash_x4(state, pk_seed, addr,
-            sk_seed, n);
-        SHAKE256_SET_TREE_INDEX(state, o, ti);
-        ret = SAVE_VECTOR_REGISTERS2();
-        if (ret == 0) {
-            sha3_blocksx4_avx2(state);
-            RESTORE_VECTOR_REGISTERS();
-            slhdsakey_shake256_get_hash_x4(state, node, n);
-        }
-
-        /* state holds the secret PRF output (FORS key). */
-        ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X4_STATE_W);
-        WC_FREE_VAR_EX(state, heap, DYNAMIC_TYPE_SLHDSA);
+        sha3_blocksx4_avx2(state);
+        RESTORE_VECTOR_REGISTERS();
+        slhdsakey_shake256_get_hash_x4(state, node, n);
     }
+
+    /* state holds the secret PRF output (FORS key). */
+    ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X4_STATE_W);
 
     return ret;
 }
@@ -5606,36 +5624,27 @@ static int slhdsakey_hash_prf_ti_x4(const byte* pk_seed, const byte* sk_seed,
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_hash_f_ti_x4(const byte* pk_seed, byte* addr, byte* node,
-    byte n, word32 ti, void* heap)
+    byte n, word32 ti, word64* state)
 {
-    int ret = 0;
+    int ret;
     int i;
-    word32 o = 0;
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap);
+    word32 o;
 
-    (void)heap;
-
-    WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap,
-        DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    o = slhdsakey_shake256_set_seed_ha_x4(state, pk_seed, addr, n);
+    SHAKE256_SET_TREE_INDEX(state, o, ti);
+    for (i = 0; i < n / 8; i++) {
+        state[o + 0] = readUnalignedWord64(node + 0 * n + i * 8);
+        state[o + 1] = readUnalignedWord64(node + 1 * n + i * 8);
+        state[o + 2] = readUnalignedWord64(node + 2 * n + i * 8);
+        state[o + 3] = readUnalignedWord64(node + 3 * n + i * 8);
+        o += 4;
+    }
+    SHAKE256_SET_END_X4(state, o);
+    ret = SAVE_VECTOR_REGISTERS2();
     if (ret == 0) {
-        o = slhdsakey_shake256_set_seed_ha_x4(state, pk_seed, addr, n);
-        SHAKE256_SET_TREE_INDEX(state, o, ti);
-        for (i = 0; i < n / 8; i++) {
-            state[o + 0] = readUnalignedWord64(node + 0 * n + i * 8);
-            state[o + 1] = readUnalignedWord64(node + 1 * n + i * 8);
-            state[o + 2] = readUnalignedWord64(node + 2 * n + i * 8);
-            state[o + 3] = readUnalignedWord64(node + 3 * n + i * 8);
-            o += 4;
-        }
-        SHAKE256_SET_END_X4(state, o);
-        ret = SAVE_VECTOR_REGISTERS2();
-        if (ret == 0) {
-            sha3_blocksx4_avx2(state);
-            RESTORE_VECTOR_REGISTERS();
-            slhdsakey_shake256_get_hash_x4(state, node, n);
-        }
-
-        WC_FREE_VAR_EX(state, heap, DYNAMIC_TYPE_SLHDSA);
+        sha3_blocksx4_avx2(state);
+        RESTORE_VECTOR_REGISTERS();
+        slhdsakey_shake256_get_hash_x4(state, node, n);
     }
 
     return ret;
@@ -5663,40 +5672,144 @@ static int slhdsakey_hash_f_ti_x4(const byte* pk_seed, byte* addr, byte* node,
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_hash_h_ti_x4(const byte* pk_seed, byte* addr,
-    const byte* m, byte n, word32 ti, byte* hash, void* heap)
+    const byte* m, byte n, word32 ti, byte* hash, word64* state)
 {
-    int ret = 0;
+    int ret;
     int i;
-    word32 o = 0;
-    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap);
+    word32 o;
 
-    (void)heap;
-
-    WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_X4_STATE_W, heap,
-        DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+    o = slhdsakey_shake256_set_seed_ha_x4(state, pk_seed, addr, n);
+    SHAKE256_SET_TREE_INDEX(state, o, ti);
+    for (i = 0; i < 2 * n / 8; i++) {
+        state[o + 0] = readUnalignedWord64(m + 0 * n + i * 8);
+        state[o + 1] = readUnalignedWord64(m + 2 * n + i * 8);
+        state[o + 2] = readUnalignedWord64(m + 4 * n + i * 8);
+        state[o + 3] = readUnalignedWord64(m + 6 * n + i * 8);
+        o += 4;
+    }
+    SHAKE256_SET_END_X4(state, o);
+    ret = SAVE_VECTOR_REGISTERS2();
     if (ret == 0) {
-        o = slhdsakey_shake256_set_seed_ha_x4(state, pk_seed, addr, n);
-        SHAKE256_SET_TREE_INDEX(state, o, ti);
-        for (i = 0; i < 2 * n / 8; i++) {
-            state[o + 0] = readUnalignedWord64(m + 0 * n + i * 8);
-            state[o + 1] = readUnalignedWord64(m + 2 * n + i * 8);
-            state[o + 2] = readUnalignedWord64(m + 4 * n + i * 8);
-            state[o + 3] = readUnalignedWord64(m + 6 * n + i * 8);
-            o += 4;
-        }
-        SHAKE256_SET_END_X4(state, o);
-        ret = SAVE_VECTOR_REGISTERS2();
-        if (ret == 0) {
-            sha3_blocksx4_avx2(state);
-            RESTORE_VECTOR_REGISTERS();
-            slhdsakey_shake256_get_hash_x4(state, hash, n);
-        }
-
-        WC_FREE_VAR_EX(state, heap, DYNAMIC_TYPE_SLHDSA);
+        sha3_blocksx4_avx2(state);
+        RESTORE_VECTOR_REGISTERS();
+        slhdsakey_shake256_get_hash_x4(state, hash, n);
     }
 
     return ret;
 }
+
+#ifdef SLHDSA_HAVE_SHAKE_X8
+/* PRF eight FORS secret values at consecutive tree indices.
+ *
+ * @param [in]  pk_seed  Public key seed.
+ * @param [in]  sk_seed  Private key seed.
+ * @param [in]  addr     Encoded HashAddress.
+ * @param [in]  n        Number of bytes in each hash.
+ * @param [in]  ti       Tree index start value.
+ * @param [out] node     Eight n-byte outputs.
+ * @param [in]  heap     Dynamic memory allocation hint.
+ * @return  0 on success.
+ * @return  MEMORY_E on dynamic memory allocation failure.
+ */
+static int slhdsakey_hash_prf_ti_x8(const byte* pk_seed, const byte* sk_seed,
+    byte* addr, byte n, word32 ti, byte* node, word64* state)
+{
+    int ret;
+    word32 o;
+
+    o = slhdsakey_shake256_set_seed_ha_hash_x8(state, pk_seed, addr, sk_seed,
+        n);
+    slhdsakey_shake256_set_tree_index_x8(state, o, ti);
+    ret = SAVE_VECTOR_REGISTERS2();
+    if (ret == 0) {
+        sha3_blocksx8_avx512(state);
+        RESTORE_VECTOR_REGISTERS();
+        slhdsakey_shake256_get_hash_x8(state, node, n);
+    }
+
+    /* state holds the secret PRF output (FORS key). */
+    ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_X8_STATE_W);
+
+    return ret;
+}
+
+/* F hash eight at a time, varying by tree index.
+ *
+ * @param [in]      pk_seed  Public key seed.
+ * @param [in]      addr     Encoded HashAddress.
+ * @param [in, out] node     On in, eight n-byte messages. On out, the outputs.
+ * @param [in]      n        Number of bytes in hash output.
+ * @param [in]      ti       Tree index start value.
+ * @param [in]      heap     Dynamic memory allocation hint.
+ * @return  0 on success.
+ * @return  MEMORY_E on dynamic memory allocation failure.
+ */
+static int slhdsakey_hash_f_ti_x8(const byte* pk_seed, byte* addr, byte* node,
+    byte n, word32 ti, word64* state)
+{
+    int ret;
+    int i;
+    int l;
+    word32 o;
+
+    o = slhdsakey_shake256_set_seed_ha_x8(state, pk_seed, addr, n);
+    slhdsakey_shake256_set_tree_index_x8(state, o, ti);
+    for (i = 0; i < n / 8; i++) {
+        for (l = 0; l < 8; l++) {
+            state[o + l] = readUnalignedWord64(node + l * n + i * 8);
+        }
+        o += 8;
+    }
+    slhdsakey_shake256_set_end_x8(state, o);
+    ret = SAVE_VECTOR_REGISTERS2();
+    if (ret == 0) {
+        sha3_blocksx8_avx512(state);
+        RESTORE_VECTOR_REGISTERS();
+        slhdsakey_shake256_get_hash_x8(state, node, n);
+    }
+
+    return ret;
+}
+
+/* H hash eight at a time, varying by tree index.
+ *
+ * @param [in]  pk_seed  Public key seed.
+ * @param [in]  addr     Encoded HashAddress.
+ * @param [in]  m        Sixteen n-byte values, a 2n-byte message per lane.
+ * @param [in]  n        Number of bytes in hash output.
+ * @param [in]  ti       Tree index start value.
+ * @param [out] hash     Buffer to hold eight n-byte hash outputs.
+ * @param [in]  heap     Dynamic memory allocation hint.
+ * @return  0 on success.
+ * @return  MEMORY_E on dynamic memory allocation failure.
+ */
+static int slhdsakey_hash_h_ti_x8(const byte* pk_seed, byte* addr,
+    const byte* m, byte n, word32 ti, byte* hash, word64* state)
+{
+    int ret;
+    int i;
+    int l;
+    word32 o;
+
+    o = slhdsakey_shake256_set_seed_ha_x8(state, pk_seed, addr, n);
+    slhdsakey_shake256_set_tree_index_x8(state, o, ti);
+    for (i = 0; i < 2 * n / 8; i++) {
+        for (l = 0; l < 8; l++) {
+            state[o + l] = readUnalignedWord64(m + 2 * l * n + i * 8);
+        }
+        o += 8;
+    }
+    slhdsakey_shake256_set_end_x8(state, o);
+    ret = SAVE_VECTOR_REGISTERS2();
+    if (ret == 0) {
+        sha3_blocksx8_avx512(state);
+        RESTORE_VECTOR_REGISTERS();
+        slhdsakey_shake256_get_hash_x8(state, hash, n);
+    }
+
+    return ret;
+}
+#endif /* SLHDSA_HAVE_SHAKE_X8 */
 
 /* A ranges from 6-14. */
 #if SLHDSA_MAX_A < 9
@@ -5857,12 +5970,14 @@ static int slhdsakey_fors_node_x4_z1(SlhDsaKey* key, const byte* sk_seed,
  * @param [in]  pk_seed  Public key seed.
  * @param [in]  adrs     FORS tree HashAddress.
  * @param [out] node     n-byte root node.
+ * @param [in]  state    Batched Keccak state.
  * @return  0 on success.
  * @return  SHAKE-256 error return code on digest failure.
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_fors_node_x4_low(SlhDsaKey* key, const byte* sk_seed,
-    word32 i, word32 z, const byte* pk_seed, word32* adrs, byte* node)
+    word32 i, word32 z, const byte* pk_seed, word32* adrs, byte* node,
+    word64* state)
 {
     int ret = 0;
     byte n = key->params->n;
@@ -5889,24 +6004,43 @@ static int slhdsakey_fors_node_x4_low(SlhDsaKey* key, const byte* sk_seed,
         HA_Encode(adrs, addr);
 
         /* Step 2: Generate private key values for leaf indices. */
-        for (j = 0; j < m; j += 4) {
-            ret = slhdsakey_hash_prf_ti_x4(pk_seed, sk_seed, sk_addr, n,
-                m * i + j, nodes + j * n, key->heap);
-            if (ret != 0) {
-                break;
+        j = 0;
+#ifdef SLHDSA_HAVE_SHAKE_X8
+        if (SLHDSA_USE_SHAKE_X8()) {
+            for (; j + 7 < m; j += 8) {
+                ret = slhdsakey_hash_prf_ti_x8(pk_seed, sk_seed, sk_addr, n,
+                    m * i + j, nodes + j * n, state);
+                if (ret != 0) {
+                    break;
+                }
             }
+        }
+#endif
+        /* Levels narrower than eight nodes finish four at a time. */
+        for (; (ret == 0) && (j < m); j += 4) {
+            ret = slhdsakey_hash_prf_ti_x4(pk_seed, sk_seed, sk_addr, n,
+                m * i + j, nodes + j * n, state);
         }
     }
     if (ret == 0) {
         /* Step 3: Set tree height to zero. */
         HA_SetTreeHeight((word32*)addr, 0);
         /* Step 4-5: Set tree indices and compute leaf node. */
-        for (j = 0; j < m; j += 4) {
-            ret = slhdsakey_hash_f_ti_x4(pk_seed, addr, nodes + j * n, n,
-                m * i + j, key->heap);
-            if (ret != 0) {
-                break;
+        j = 0;
+#ifdef SLHDSA_HAVE_SHAKE_X8
+        if (SLHDSA_USE_SHAKE_X8()) {
+            for (; j + 7 < m; j += 8) {
+                ret = slhdsakey_hash_f_ti_x8(pk_seed, addr, nodes + j * n, n,
+                    m * i + j, state);
+                if (ret != 0) {
+                    break;
+                }
             }
+        }
+#endif
+        for (; (ret == 0) && (j < m); j += 4) {
+            ret = slhdsakey_hash_f_ti_x4(pk_seed, addr, nodes + j * n, n,
+                m * i + j, state);
         }
     }
     if (ret == 0) {
@@ -5916,12 +6050,22 @@ static int slhdsakey_fors_node_x4_low(SlhDsaKey* key, const byte* sk_seed,
             /* Step 9: Set tree height. */
             HA_SetTreeHeightBE(addr, k);
             /* Step 10-11: Set tree index and compute nodes. */
-            for (j = 0; j < m; j += 4) {
-                ret = slhdsakey_hash_h_ti_x4(pk_seed, addr, nodes + 2 * j * n,
-                    n, m * i + j, nodes + j * n, key->heap);
-                if (ret != 0) {
-                    break;
+            j = 0;
+#ifdef SLHDSA_HAVE_SHAKE_X8
+            if (SLHDSA_USE_SHAKE_X8()) {
+                for (; j + 7 < m; j += 8) {
+                    ret = slhdsakey_hash_h_ti_x8(pk_seed, addr,
+                        nodes + 2 * j * n, n, m * i + j, nodes + j * n,
+                        state);
+                    if (ret != 0) {
+                        break;
+                    }
                 }
+            }
+#endif
+            for (; (ret == 0) && (j < m); j += 4) {
+                ret = slhdsakey_hash_h_ti_x4(pk_seed, addr, nodes + 2 * j * n,
+                    n, m * i + j, nodes + j * n, state);
             }
             if (ret != 0) {
                 break;
@@ -5986,12 +6130,14 @@ static int slhdsakey_fors_node_x4_low(SlhDsaKey* key, const byte* sk_seed,
  * @param [in]  pk_seed  Public key seed.
  * @param [in]  adrs     FORS tree HashAddress.
  * @param [out] node     n-byte root node.
+ * @param [in]  state    Batched Keccak state.
  * @return  0 on success.
  * @return  SHAKE-256 error return code on digest failure.
  * @return  MEMORY_E on dynamic memory allocation failure.
  */
 static int slhdsakey_fors_node_x4_high(SlhDsaKey* key, const byte* sk_seed,
-    word32 i, word32 z, const byte* pk_seed, word32* adrs, byte* node)
+    word32 i, word32 z, const byte* pk_seed, word32* adrs, byte* node,
+    word64* state)
 {
     int ret = 0;
     byte n = key->params->n;
@@ -6011,7 +6157,7 @@ static int slhdsakey_fors_node_x4_high(SlhDsaKey* key, const byte* sk_seed,
         /* Steps 7-8: Compute left and right nodes. */
         for (j = 0; j < m; j++) {
             ret = slhdsakey_fors_node_x4_low(key, sk_seed, m * i + j, z - z2,
-                pk_seed, adrs, nodes + j * n);
+                pk_seed, adrs, nodes + j * n, state);
             if (ret != 0) {
                 break;
             }
@@ -6028,12 +6174,22 @@ static int slhdsakey_fors_node_x4_high(SlhDsaKey* key, const byte* sk_seed,
             /* Encode FORS tree address for hashing. */
             HA_Encode(adrs, addr);
             /* Step 10-11: Set tree index and compute nodes. */
-            for (j = 0; j < m; j += 4) {
-                ret = slhdsakey_hash_h_ti_x4(pk_seed, addr, nodes + 2 * j * n,
-                    n, m * i + j, nodes + j * n, key->heap);
-                if (ret != 0) {
-                    break;
+            j = 0;
+#ifdef SLHDSA_HAVE_SHAKE_X8
+            if (SLHDSA_USE_SHAKE_X8()) {
+                for (; j + 7 < m; j += 8) {
+                    ret = slhdsakey_hash_h_ti_x8(pk_seed, addr,
+                        nodes + 2 * j * n, n, m * i + j, nodes + j * n,
+                        state);
+                    if (ret != 0) {
+                        break;
+                    }
                 }
+            }
+#endif
+            for (; (ret == 0) && (j < m); j += 4) {
+                ret = slhdsakey_hash_h_ti_x4(pk_seed, addr, nodes + 2 * j * n,
+                    n, m * i + j, nodes + j * n, state);
             }
             if (ret != 0) {
                 break;
@@ -6106,6 +6262,7 @@ static int slhdsakey_fors_node_x4(SlhDsaKey* key, const byte* sk_seed, word32 i,
     word32 z, const byte* pk_seed, word32* adrs, byte* node)
 {
     int ret = 0;
+    WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_STATE_W, key->heap);
 
     /* Step 1: Check if we are at leaf node. */
     if (z == 0) {
@@ -6115,18 +6272,24 @@ static int slhdsakey_fors_node_x4(SlhDsaKey* key, const byte* sk_seed, word32 i,
     else if (z == 1) {
         ret = slhdsakey_fors_node_x4_z1(key, sk_seed, i, pk_seed, adrs, node);
     }
-    /* Step 6: 2-MAX_DEPTH levels above leaf node. */
-    else if ((z >= 2) && (z <= SLHDSA_MAX_FORS_NODE_DEPTH)) {
-        ret = slhdsakey_fors_node_x4_low(key, sk_seed, i, z, pk_seed, adrs,
-            node);
-    }
-#if SLHDSA_MAX_FORS_NODE_DEPTH < SLHDSA_MAX_A-1
-    /* Step 6: More than MAX_DEPTH levels above leaf node. */
     else {
-        ret = slhdsakey_fors_node_x4_high(key, sk_seed, i, z, pk_seed, adrs,
-            node);
+        /* One state for every batch of hashes in the subtree. */
+        WC_ALLOC_VAR_EX(state, word64, SLHDSA_SHAKE_STATE_W, key->heap,
+            DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
+        /* Step 6: 2-MAX_DEPTH levels above leaf node. */
+        if ((ret == 0) && (z <= SLHDSA_MAX_FORS_NODE_DEPTH)) {
+            ret = slhdsakey_fors_node_x4_low(key, sk_seed, i, z, pk_seed,
+                adrs, node, state);
+        }
+    #if SLHDSA_MAX_FORS_NODE_DEPTH < SLHDSA_MAX_A-1
+        /* Step 6: More than MAX_DEPTH levels above leaf node. */
+        else if (ret == 0) {
+            ret = slhdsakey_fors_node_x4_high(key, sk_seed, i, z, pk_seed,
+                adrs, node, state);
+        }
+    #endif
+        WC_FREE_VAR_EX(state, key->heap, DYNAMIC_TYPE_SLHDSA);
     }
-#endif
 
     return ret;
 }
