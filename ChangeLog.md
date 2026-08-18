@@ -531,6 +531,11 @@ PR stands for Pull Request, and PR <NUMBER> references a GitHub pull request num
   streaming two updates into it for every hash. by @Frauschi
 * Use the 8-way AVX512 Keccak permutation for the SLH-DSA WOTS+ chains on
   capable CPUs, which the four-way AVX2 path had to itself. by @Frauschi
+* Extended the 8-way AVX512 Keccak permutation to the SLH-DSA FORS subtrees.
+  by @Frauschi
+* Give each SLH-DSA WOTS+ public key and FORS subtree one Keccak state to
+  reuse, instead of allocating one per group of hashes. A SHAKE-128s
+  signature now makes about twelve times fewer allocations. by @Frauschi
 
 ## TLS/DTLS
 
