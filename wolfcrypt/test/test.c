@@ -6211,8 +6211,7 @@ exit:
 #undef LARGE_HASH_TEST_INPUT_SZ
 #endif /* NO_LARGE_HASH_TEST */
 
-#if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_FULL_HASH) && \
-    !defined(WOLF_CRYPTO_CB_ONLY_SHA256)
+#ifdef WOLFSSL_HAVE_SHA256_HASH_BLOCK
 static wc_test_ret_t sha256_lms_test(wc_Sha256* sha)
 {
     byte      hash[WC_SHA256_DIGEST_SIZE];
@@ -6249,7 +6248,7 @@ exit:
     wc_Sha256Free(sha);
     return ret;
 }
-#endif /* WOLFSSL_HAVE_LMS && !WOLFSSL_LMS_FULL_HASH */
+#endif /* WOLFSSL_HAVE_SHA256_HASH_BLOCK */
 
 #if !defined(HAVE_SELFTEST) && (!defined(HAVE_FIPS) || FIPS_VERSION_GE(7, 0))
 static wc_test_ret_t sha256_copy_test(wc_Sha256* sha, wc_Sha256* shaCopy)
@@ -6305,8 +6304,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t sha256_test(void)
     if ((ret = sha256_large_hash_test(&sha)) != 0)
         return ret;
 #endif
-#if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_FULL_HASH) && \
-    !defined(WOLF_CRYPTO_CB_ONLY_SHA256)
+#ifdef WOLFSSL_HAVE_SHA256_HASH_BLOCK
     if ((ret = sha256_lms_test(&sha)) != 0)
         return ret;
 #endif
