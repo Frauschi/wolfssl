@@ -10411,7 +10411,19 @@ int wc_GetKeyOID(byte* key, word32 keySz, const byte** curveOID, word32* oidSz,
             return MEMORY_E;
 
         if (wc_falcon_init(falcon) == 0) {
-            if ((*algoID == 0) && (wc_falcon_set_level(falcon, 1) == 0)) {
+            int lvlRet;
+
+            /* A level that was not built gives BAD_FUNC_ARG and means "try the
+             * next one", but with WOLFSSL_FALCON_DYNAMIC_KEYS the setter can
+             * also report MEMORY_E, which must not be reported as "not a
+             * Falcon key". */
+            lvlRet = wc_falcon_set_level(falcon, 1);
+            if (lvlRet == WC_NO_ERR_TRACE(MEMORY_E)) {
+                wc_falcon_free(falcon);
+                XFREE(falcon, heap, DYNAMIC_TYPE_TMP_BUFFER);
+                return MEMORY_E;
+            }
+            if ((*algoID == 0) && (lvlRet == 0)) {
                 tmpIdx = 0;
                 if (wc_Falcon_PrivateKeyDecode(key, &tmpIdx, falcon, keySz)
                     == 0) {
@@ -10421,7 +10433,15 @@ int wc_GetKeyOID(byte* key, word32 keySz, const byte** curveOID, word32* oidSz,
                     WOLFSSL_MSG("Not Falcon Level 1 DER key");
                 }
             }
-            if ((*algoID == 0) && (wc_falcon_set_level(falcon, 5) == 0)) {
+            if (*algoID == 0) {
+                lvlRet = wc_falcon_set_level(falcon, 5);
+                if (lvlRet == WC_NO_ERR_TRACE(MEMORY_E)) {
+                    wc_falcon_free(falcon);
+                    XFREE(falcon, heap, DYNAMIC_TYPE_TMP_BUFFER);
+                    return MEMORY_E;
+                }
+            }
+            if ((*algoID == 0) && (lvlRet == 0)) {
                 tmpIdx = 0;
                 if (wc_Falcon_PrivateKeyDecode(key, &tmpIdx, falcon, keySz)
                     == 0) {
