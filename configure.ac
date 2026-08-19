@@ -2030,10 +2030,9 @@ AC_ARG_WITH([liboqs],
 #   cache-basis - keep the decoded and completed secret basis (f, g, F, G) in
 #            the key structure, saving the private-key decode and the G
 #            recomputation on every signature after the first. Costs 4*n bytes
-#            per key. Implied by cache-key.
-#            Neither cache is synchronized: a key signed with concurrently from
-#            several threads must either not use them or have its first
-#            signature made before the key is shared.
+#            per key. An alternative to cache-key, not implied by it.
+#   Neither cache is synchronized: a key signed with from several threads at
+#            once must either not use them or be signed with before sharing.
 AC_ARG_ENABLE([falcon],
     [AS_HELP_STRING([--enable-falcon@<:@=OPTS@:>@],[Enable Falcon post-quantum signatures (native, no liboqs; requires --enable-experimental). OPTS is a comma-separated list: fpr/FFT backends asm, double, avx2, neon, plus small-mem, cache-key/cache-basis, level1/level5 and dynamic-keys (default: disabled)])],
     [ ENABLED_FALCON=$enableval ],

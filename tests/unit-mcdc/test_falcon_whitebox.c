@@ -351,6 +351,9 @@ static void wb_complete_private(void)
 {
     unsigned logn = 2;          /* n = 4 */
     sword8 G[4], f[4], g[4], F[4];
+    /* FALCON_COMPLETE_PRIV_TMP_FPR(2) = 3 << 2. Sized from the documented
+     * contract so the borrow path below is exercised at its real size. */
+    fpr scratch[3 << 2];
     int r;
 
     XMEMSET(f, 0, sizeof(f)); f[0] = 1;
@@ -362,6 +365,13 @@ static void wb_complete_private(void)
     r = falcon_complete_private(G, f, g, F, logn, NULL, NULL);
     if (r != 0) {
         WB_NOTE("complete_private(in-range) expected 0");
+    }
+    /* scratch != NULL: the borrow half of the scratch decision, which is the
+     * one the signer uses. Same inputs, so the result must be unchanged. */
+    XMEMSET(scratch, 0, sizeof(scratch));
+    r = falcon_complete_private(G, f, g, F, logn, NULL, scratch);
+    if (r != 0) {
+        WB_NOTE("complete_private(borrowed scratch) expected 0");
     }
     /* z > 127 (cond1 TRUE): a*b+q = 12290. */
     g[0] = 1; F[0] = 1;
@@ -457,6 +467,13 @@ static void wb_expand_and_ffsampling_guards(void)
     fpr    edummy[8];
     sword8 f8[4], g8[4], F8[4], G8[4];
     fpr    z0[4], z1[4], tree[4], t0[4], t1[4], tmp[4];
+    /* Full-size buffers for the one call that is allowed to run to completion:
+     * an expanded key at logn 2 and the scratch its documented contract asks
+     * for. FALCON_EXPANDED_KEY_FPR(2) = (2+5)<<2, FALCON_EXPAND_PRIV_TMP_FPR(2)
+     * = 6<<2. */
+    fpr    ereal[(2 + 5) << 2];
+    fpr    escratch[6 << 2];
+    int    r;
 
     XMEMSET(f8, 0, sizeof(f8));
     XMEMSET(g8, 0, sizeof(g8));
@@ -478,6 +495,23 @@ static void wb_expand_and_ffsampling_guards(void)
     (void)falcon_expand_privkey(edummy, f8, g8, F8, NULL, 2, NULL, NULL);
     (void)falcon_expand_privkey(edummy, f8, g8, F8, G8, 0, NULL, NULL);
     (void)falcon_expand_privkey(edummy, f8, g8, F8, G8, 11, NULL, NULL);
+
+    /* Both halves of the scratch decision, with the guard all-FALSE. Only the
+     * allocate half was covered before; the borrow half (scratch != NULL) is
+     * what the signer uses. A basis of all ones keeps the FFT operands finite
+     * -- the values are irrelevant, the decision is the point. */
+    f8[0] = 1; g8[0] = 1; F8[0] = 1; G8[0] = 1;
+    XMEMSET(ereal, 0, sizeof(ereal));
+    XMEMSET(escratch, 0, sizeof(escratch));
+    r = falcon_expand_privkey(ereal, f8, g8, F8, G8, 2, NULL, NULL);
+    if (r != 0) {
+        WB_NOTE("expand_privkey(allocated scratch) expected 0");
+    }
+    XMEMSET(ereal, 0, sizeof(ereal));
+    r = falcon_expand_privkey(ereal, f8, g8, F8, G8, 2, NULL, escratch);
+    if (r != 0) {
+        WB_NOTE("expand_privkey(borrowed scratch) expected 0");
+    }
 
     /* falcon_ffSampling_fft logn guard (returns before touching buffers). */
     falcon_ffSampling_fft(falcon_sampler_z, NULL, z0, z1, tree, t0, t1, 0, tmp);
