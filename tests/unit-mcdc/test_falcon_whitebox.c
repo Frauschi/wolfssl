@@ -36,7 +36,7 @@
  *      guards, NULL/logn defensive guards, poly_big_to_small, complete_private)
  *      with bounded, correctly-sized stack/heap buffers -- driving the TRUE and
  *      FALSE half of each guard deterministically.
- *   2. A single real native make/sign/verify round-trip at Falcon-512, which is
+ *   2. A real native make/sign/verify round-trip at each built level, which is
  *      the exact production path and exercises the "success"/FALSE half of the
  *      deep keygen/solve_NTRU/make_fg/expand/sign decisions that tests/api does
  *      not reach (the measured baseline never runs keygen).
@@ -52,6 +52,7 @@
  */
 
 #include <wolfcrypt/src/falcon.c>
+#include "mcdc_fault_alloc.h"
 
 #include <stdio.h>
 
@@ -350,7 +351,7 @@ static void wb_make_fg(void)
 static void wb_complete_private(void)
 {
     unsigned logn = 2;          /* n = 4 */
-    sword8 G[4], f[4], g[4], F[4];
+    sword8 G[4], f[4], g[4], F[4], Gref[4];
     /* FALCON_COMPLETE_PRIV_TMP_FPR(2) = 3 << 2. Sized from the documented
      * contract so the borrow path below is exercised at its real size. */
     fpr scratch[3 << 2];
@@ -367,11 +368,18 @@ static void wb_complete_private(void)
         WB_NOTE("complete_private(in-range) expected 0");
     }
     /* scratch != NULL: the borrow half of the scratch decision, which is the
-     * one the signer uses. Same inputs, so the result must be unchanged. */
+     * one the signer uses. Same inputs, so the output must match the allocate
+     * half byte for byte; compare it rather than only checking the status. */
+    XMEMCPY(Gref, G, sizeof(G));
+    XMEMSET(G, 0, sizeof(G));
     XMEMSET(scratch, 0, sizeof(scratch));
     r = falcon_complete_private(G, f, g, F, logn, NULL, scratch);
     if (r != 0) {
         WB_NOTE("complete_private(borrowed scratch) expected 0");
+    }
+    else if (XMEMCMP(G, Gref, sizeof(G)) != 0) {
+        WB_NOTE("complete_private(borrowed scratch) output differs from the "
+                "allocated-scratch output");
     }
     /* z > 127 (cond1 TRUE): a*b+q = 12290. */
     g[0] = 1; F[0] = 1;
@@ -470,9 +478,10 @@ static void wb_expand_and_ffsampling_guards(void)
     /* Full-size buffers for the one call that is allowed to run to completion:
      * an expanded key at logn 2 and the scratch its documented contract asks
      * for. FALCON_EXPANDED_KEY_FPR(2) = (2+5)<<2, FALCON_EXPAND_PRIV_TMP_FPR(2)
-     * = 6<<2. */
+     * = 5<<2. */
     fpr    ereal[(2 + 5) << 2];
-    fpr    escratch[6 << 2];
+    fpr    eref[(2 + 5) << 2];
+    fpr    escratch[5 << 2];
     int    r;
 
     XMEMSET(f8, 0, sizeof(f8));
@@ -507,10 +516,15 @@ static void wb_expand_and_ffsampling_guards(void)
     if (r != 0) {
         WB_NOTE("expand_privkey(allocated scratch) expected 0");
     }
+    XMEMCPY(eref, ereal, sizeof(ereal));
     XMEMSET(ereal, 0, sizeof(ereal));
     r = falcon_expand_privkey(ereal, f8, g8, F8, G8, 2, NULL, escratch);
     if (r != 0) {
         WB_NOTE("expand_privkey(borrowed scratch) expected 0");
+    }
+    else if (XMEMCMP(ereal, eref, sizeof(ereal)) != 0) {
+        WB_NOTE("expand_privkey(borrowed scratch) output differs from the "
+                "allocated-scratch output");
     }
 
     /* falcon_ffSampling_fft logn guard (returns before touching buffers). */
@@ -681,9 +695,10 @@ static void wb_native_guards(WC_RNG* rng)
 }
 
 /* ------------------------------------------------------------------ *
- * Real native make/sign/verify round-trip at Falcon-512. This is the
- * production path; it drives the "success"/FALSE half of the deep file-static
- * decisions that the measured baseline never reaches (keygen never runs there):
+ * Real native make/sign/verify round-trip at every level the build has. This
+ * is the production path; it drives the "success"/FALSE half of the deep
+ * file-static decisions that the measured baseline never reaches (keygen never
+ * runs there):
  *   - falcon_keygen guards (both-FALSE) + coeff-range guard all-FALSE + the
  *     Gaussian sampler / norm / invertibility / NTRU-solve success path;
  *   - make_fg with depth==logn (depth!=0, the cond0 FALSE half);
@@ -694,7 +709,7 @@ static void wb_native_guards(WC_RNG* rng)
  *   - hash_to_point loop (ret==0 TRUE, i<n both), comp/modq decode success.
  * ------------------------------------------------------------------ */
 #ifndef WOLFSSL_FALCON_VERIFY_ONLY
-static void wb_native_roundtrip(WC_RNG* rng)
+static void wb_native_roundtrip_level(WC_RNG* rng, byte level)
 {
     falcon_key key;
     byte   sig[FALCON_MAX_SIG_SIZE];
@@ -713,7 +728,7 @@ static void wb_native_roundtrip(WC_RNG* rng)
         WB_NOTE("falcon_init failed; deep keygen paths skipped");
         return;
     }
-    if (wc_falcon_set_level(&key, FALCON_MAX_LEVEL) != 0) {
+    if (wc_falcon_set_level(&key, level) != 0) {
         WB_NOTE("falcon_set_level failed; deep keygen paths skipped");
         wc_falcon_free(&key);
         return;
@@ -736,6 +751,18 @@ static void wb_native_roundtrip(WC_RNG* rng)
         WB_NOTE("native_verify_msg did not accept a self-signed message");
     }
     wc_falcon_free(&key);
+}
+
+/* Every level the build has, so neither level's keygen and sign paths are
+ * dropped by a single-level choice here. */
+static void wb_native_roundtrip(WC_RNG* rng)
+{
+#ifndef WOLFSSL_NO_FALCON_LEVEL1
+    wb_native_roundtrip_level(rng, FALCON_LEVEL1);
+#endif
+#ifndef WOLFSSL_NO_FALCON_LEVEL5
+    wb_native_roundtrip_level(rng, FALCON_LEVEL5);
+#endif
     WB_OK("native make/sign/verify round-trip (deep static paths) exercised");
 }
 #endif /* !WOLFSSL_FALCON_VERIFY_ONLY */
@@ -870,26 +897,43 @@ static int wb_check_key_case(falcon_key* key, sword8* poly, word16* h,
     const unsigned logn = 9;      /* FALCON_LEVEL1 -> n = 512 */
     const size_t   n    = (size_t)1 << 9;
 
-    XMEMSET(key, 0, sizeof(*key));
+    int ret = 1;
+
     XMEMSET(poly, 0, 3 * n);              /* f = g = F = 0 */
     XMEMSET(h, 0, n * sizeof(word16));
     poly[0] = f0;                         /* constant term of f */
     h[0]    = h0;                         /* constant term of h */
 
-    key->level = FALCON_LEVEL1;
-    key->heap  = NULL;
+    /* k and p are heap buffers under WOLFSSL_FALCON_DYNAMIC_KEYS, so the level
+     * has to be set through the API that allocates them rather than assigned. */
+    XMEMSET(key, 0, sizeof(*key));
+    if (wc_falcon_init(key) != 0) {
+        WB_NOTE("check_key: init failed");
+        return 1;
+    }
+    if (wc_falcon_set_level(key, FALCON_LEVEL1) != 0) {
+        WB_NOTE("check_key: set_level failed");
+        wc_falcon_free(key);
+        return 1;
+    }
+
     if (falcon_privkey_encode(key->k, FALCON_LEVEL1_KEY_SIZE, poly, poly + n,
             poly + 2 * n, logn) != FALCON_LEVEL1_KEY_SIZE) {
         WB_NOTE("check_key: privkey_encode did not fill the blob");
-        return 1;
     }
-    key->p[0] = (byte)(FALCON_PUB_HEAD | logn);
-    if (falcon_modq_encode(key->p + 1, FALCON_LEVEL1_PUB_KEY_SIZE - 1, h,
-            logn) == 0) {
-        WB_NOTE("check_key: modq_encode failed");
-        return 1;
+    else {
+        key->p[0] = (byte)(FALCON_PUB_HEAD | logn);
+        if (falcon_modq_encode(key->p + 1, FALCON_LEVEL1_PUB_KEY_SIZE - 1, h,
+                logn) == 0) {
+            WB_NOTE("check_key: modq_encode failed");
+        }
+        else {
+            ret = falcon_native_check_key(key);
+        }
     }
-    return falcon_native_check_key(key);
+
+    wc_falcon_free(key);
+    return ret;
 }
 
 static void wb_check_key_ntt_slots(void)
@@ -1372,6 +1416,74 @@ static void wb_sign_dyn_core_err(WC_RNG* rng)
 #endif /* !WOLFSSL_FALCON_VERIFY_ONLY */
 
 /* ------------------------------------------------------------------ *
+ * wc_falcon_set_level allocation failure (WOLFSSL_FALCON_DYNAMIC_KEYS).
+ * The old buffers are released before the new ones are obtained, so a failed
+ * allocation must leave the key reading as empty: every accessor gates on
+ * level plus pubKeySet/prvKeySet and then dereferences p/k.
+ * ------------------------------------------------------------------ */
+#if defined(WOLFSSL_FALCON_DYNAMIC_KEYS) && !defined(MCDC_FA_UNAVAILABLE)
+static void wb_set_level_alloc_fail(void)
+{
+    falcon_key key;
+    byte   pub[FALCON_MAX_PUB_KEY_SIZE];
+    byte   out[FALCON_MAX_PUB_KEY_SIZE];
+    word32 outLen = (word32)sizeof(out);
+    byte   lvl = FALCON_MAX_LEVEL;
+    int    n;
+
+    XMEMSET(&key, 0, sizeof(key));
+    XMEMSET(pub, 0xAB, sizeof(pub));
+
+    if (wc_falcon_init(&key) != 0 || wc_falcon_set_level(&key, lvl) != 0) {
+        WB_NOTE("set_level alloc-fail setup failed; invariant not exercised");
+        return;
+    }
+    if (wc_falcon_import_public(pub, (word32)FALCON_MAX_PUB_KEY_SIZE,
+            &key) != 0) {
+        wc_falcon_free(&key);
+        WB_NOTE("set_level alloc-fail setup import failed");
+        return;
+    }
+
+    mcdc_fa_install();
+    /* Both buffers are allocated here, so sweeping two positions covers the
+     * first-allocation and second-allocation failures. */
+    for (n = 1; n <= 2; n++) {
+        mcdc_fa_arm(n);
+        if (wc_falcon_set_level(&key, lvl) != WC_NO_ERR_TRACE(MEMORY_E)) {
+            WB_NOTE("set_level under allocation failure expected MEMORY_E");
+        }
+        mcdc_fa_disarm();
+
+        if (key.level != 0 || key.pubKeySet != 0 || key.prvKeySet != 0) {
+            WB_NOTE("set_level left a level or key flag set after a failed "
+                    "allocation");
+        }
+        outLen = (word32)sizeof(out);
+        if (wc_falcon_export_public(&key, out, &outLen) !=
+                WC_NO_ERR_TRACE(BAD_FUNC_ARG)) {
+            WB_NOTE("export_public did not reject the emptied key");
+        }
+        if (wc_falcon_set_level(&key, lvl) != 0) {
+            WB_NOTE("set_level could not recover after an allocation failure");
+            break;
+        }
+        /* set_level cleared pubKeySet, which the next pass has to see set for
+         * the flag half of the check above to mean anything. */
+        if (wc_falcon_import_public(pub, (word32)FALCON_MAX_PUB_KEY_SIZE,
+                &key) != 0) {
+            WB_NOTE("set_level alloc-fail re-import failed");
+            break;
+        }
+    }
+    mcdc_fa_disarm();
+    mcdc_fa_restore();
+    wc_falcon_free(&key);
+    WB_OK("set_level allocation-failure invariant exercised");
+}
+#endif /* WOLFSSL_FALCON_DYNAMIC_KEYS && !MCDC_FA_UNAVAILABLE */
+
+/* ------------------------------------------------------------------ *
  * Documented residuals: decision halves reachable only from a genuine
  * mid-computation error or a degenerate/forbidden operand, which cannot be
  * driven crash-safely from a white-box harness. Their opposite (normal) half is
@@ -1486,6 +1598,9 @@ int main(void)
         }
 #endif
 #endif /* !WOLFSSL_FALCON_VERIFY_ONLY */
+#if defined(WOLFSSL_FALCON_DYNAMIC_KEYS) && !defined(MCDC_FA_UNAVAILABLE)
+        wb_set_level_alloc_fail();
+#endif
         wb_residuals();
 
         if (haveRng) {
