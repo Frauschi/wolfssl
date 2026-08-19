@@ -36889,6 +36889,9 @@ ENDIF
 IFDEF WOLFSSL_HAVE_MLDSA
 wc_masm_cond_2 = 1
 ENDIF
+IFDEF WOLFSSL_HAVE_SLHDSA
+wc_masm_cond_2 = 1
+ENDIF
 IF wc_masm_cond_2
 _DATA SEGMENT
 ALIGN 16
@@ -39954,6 +39957,9 @@ ENDIF
 IFDEF WOLFSSL_HAVE_MLDSA
 wc_masm_cond_3 = 1
 ENDIF
+IFDEF WOLFSSL_HAVE_SLHDSA
+wc_masm_cond_3 = 1
+ENDIF
 IF wc_masm_cond_3
 _TEXT SEGMENT READONLY PARA
 sha3_blocksx8_avx512 PROC
@@ -42842,6 +42848,15 @@ sha3_blocksx8_avx512 PROC
         ret
 sha3_blocksx8_avx512 ENDP
 _TEXT ENDS
+ENDIF
+wc_masm_cond_3b = 0
+IFDEF WOLFSSL_HAVE_MLKEM
+wc_masm_cond_3b = 1
+ENDIF
+IFDEF WOLFSSL_HAVE_MLDSA
+wc_masm_cond_3b = 1
+ENDIF
+IF wc_masm_cond_3b
 _DATA SEGMENT
 ALIGN 16
 L_sha3_128_blocksx8_seed_avx512_end_mark QWORD 8000000000000000h, 8000000000000000h

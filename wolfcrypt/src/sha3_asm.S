@@ -36870,7 +36870,7 @@ _sha3_256_blocksx4_seed_64_avx2:
 #endif /* HAVE_INTEL_AVX512 */
 #endif /* NO_AVX512_SUPPORT */
 #ifdef HAVE_INTEL_AVX512
-#if defined(WOLFSSL_HAVE_FRODOKEM) || defined(WOLFSSL_HAVE_MLKEM) || defined(WOLFSSL_HAVE_MLDSA)
+#if defined(WOLFSSL_HAVE_FRODOKEM) || defined(WOLFSSL_HAVE_MLKEM) || defined(WOLFSSL_HAVE_MLDSA) || defined(WOLFSSL_HAVE_SLHDSA)
 #ifndef __APPLE__
 .data
 #else
@@ -36978,7 +36978,7 @@ L_sha3_x8_avx512_r:
 .quad	0x8000000080008008,0x8000000080008008
 .quad	0x8000000080008008,0x8000000080008008
 .quad	0x8000000080008008,0x8000000080008008
-#endif /* defined(WOLFSSL_HAVE_FRODOKEM) || defined(WOLFSSL_HAVE_MLKEM) || defined(WOLFSSL_HAVE_MLDSA) */
+#endif /* defined(WOLFSSL_HAVE_FRODOKEM) || defined(WOLFSSL_HAVE_MLKEM) || defined(WOLFSSL_HAVE_MLDSA) || defined(WOLFSSL_HAVE_SLHDSA) */
 #ifdef WOLFSSL_HAVE_FRODOKEM
 #ifndef __APPLE__
 .text
@@ -39922,7 +39922,7 @@ L_sha3_blocksx8_out_avx512_done:
 .size	sha3_blocksx8_out_avx512,.-sha3_blocksx8_out_avx512
 #endif /* __APPLE__ */
 #endif /* WOLFSSL_HAVE_FRODOKEM */
-#if defined(WOLFSSL_HAVE_MLKEM) || defined(WOLFSSL_HAVE_MLDSA)
+#if defined(WOLFSSL_HAVE_MLKEM) || defined(WOLFSSL_HAVE_MLDSA) || defined(WOLFSSL_HAVE_SLHDSA)
 #ifndef __APPLE__
 .text
 .globl	sha3_blocksx8_avx512
@@ -42801,6 +42801,8 @@ _sha3_blocksx8_avx512:
 #ifndef __APPLE__
 .size	sha3_blocksx8_avx512,.-sha3_blocksx8_avx512
 #endif /* __APPLE__ */
+#endif /* defined(WOLFSSL_HAVE_MLKEM) || defined(WOLFSSL_HAVE_MLDSA) || defined(WOLFSSL_HAVE_SLHDSA) */
+#if defined(WOLFSSL_HAVE_MLKEM) || defined(WOLFSSL_HAVE_MLDSA)
 #ifndef __APPLE__
 .data
 #else

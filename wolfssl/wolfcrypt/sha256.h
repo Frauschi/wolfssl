@@ -114,24 +114,32 @@
 
 /* Ports that replace Update and Final with hardware calls do not build
  * wc_Sha256HashBlock(). The list is negative on purpose: naming a port that
- * has it only costs the fast path, missing one is a link error. */
+ * has it only costs the fast path, missing one is a link error. A macro a
+ * port sets only in its own .c reads as undefined here and excludes nothing.
+ * A FIPS v1 build skips this whole region, leaving the macro undefined and the
+ * callers on the streaming path, which is the safe direction. */
 #if (defined(WOLFSSL_HAVE_LMS) || defined(WOLFSSL_HAVE_SLHDSA)) && \
     !defined(WOLFSSL_NO_HASH_RAW) && \
     !defined(WOLFSSL_TI_HASH) && \
     !defined(WOLFSSL_CRYPTOCELL) && \
-    !defined(MAX3266X_SHA) && \
+    !defined(WOLFSSL_MAX3266X) && \
+    !defined(WOLFSSL_MAX3266X_OLD) && \
     !defined(FREESCALE_LTC_SHA) && \
     !defined(WOLFSSL_PIC32MZ_HASH) && \
     !defined(STM32_HASH_SHA2) && \
-    !(defined(WOLFSSL_IMX6_CAAM) && !defined(NO_IMX6_CAAM_HASH)) && \
+    !(defined(WOLFSSL_IMX6_CAAM) && !defined(NO_IMX6_CAAM_HASH) && \
+      !defined(WOLFSSL_QNX_CAAM)) && \
     !(defined(WOLFSSL_SE050) && defined(WOLFSSL_SE050_HASH)) && \
     !defined(WOLFSSL_AFALG_HASH) && \
     !defined(WOLFSSL_DEVCRYPTO_HASH) && \
-    !defined(WOLFSSL_USE_ESP32_CRYPT_HASH_HW) && \
-    !defined(WOLFSSL_RENESAS_TSIP_TLS) && \
-    !defined(WOLFSSL_RENESAS_TSIP_CRYPTONLY) && \
-    !defined(WOLFSSL_RENESAS_SCEPROTECT) && \
-    !defined(WOLFSSL_RENESAS_RSIP) && \
+    !(defined(WOLFSSL_ESP32_CRYPT) && \
+      !defined(NO_WOLFSSL_ESP32_CRYPT_HASH)) && \
+    !((defined(WOLFSSL_RENESAS_TSIP_TLS) || \
+       defined(WOLFSSL_RENESAS_TSIP_CRYPTONLY)) && \
+      !defined(NO_WOLFSSL_RENESAS_TSIP_CRYPT_HASH)) && \
+    !((defined(WOLFSSL_RENESAS_SCEPROTECT) || \
+       defined(WOLFSSL_RENESAS_RSIP)) && \
+      !defined(NO_WOLFSSL_RENESAS_FSPSM_HASH)) && \
     !defined(WOLFSSL_RENESAS_RX64_HASH) && \
     !defined(PSOC6_HASH_SHA2) && \
     !defined(WOLFSSL_IMXRT_DCP) && \
