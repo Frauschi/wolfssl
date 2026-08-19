@@ -807,9 +807,16 @@ int test_wc_falcon_error_paths(void)
     return EXPECT_RESULT();
 }
 
+/* The pinned digests only reproduce when wc_RNG_GenerateBlock() really is the
+ * Hash_DRBG seeded through wc_SetSeed_Cb(). Configurations that bypass or
+ * reseed it differently (RDRAND, a caller-supplied generator, a full-entropy
+ * reseed) would fail with an opaque digest mismatch that reads like backend
+ * drift, so they are excluded rather than left to fail. */
 #if defined(WC_FALCON_HAVE_NATIVE_SIGN) && defined(WC_RNG_SEED_CB) && \
     defined(HAVE_HASHDRBG) && !defined(NO_SHA256) && \
-    !defined(HAVE_SELFTEST) && !defined(HAVE_FIPS)
+    !defined(HAVE_SELFTEST) && !defined(HAVE_FIPS) && \
+    !defined(HAVE_INTEL_RDRAND) && !defined(CUSTOM_RAND_GENERATE_BLOCK) && \
+    !defined(WOLFSSL_RNG_USE_FULL_SEED)
 
 /* Fixed seed so the DRBG, and with it key generation and signing, is
  * reproducible. A constant fill would be rejected by the seed health test, so
@@ -863,7 +870,9 @@ int test_wc_falcon_deterministic(void)
     EXPECT_DECLS;
 #if defined(WC_FALCON_HAVE_NATIVE_SIGN) && defined(WC_RNG_SEED_CB) && \
     defined(HAVE_HASHDRBG) && !defined(NO_SHA256) && \
-    !defined(HAVE_SELFTEST) && !defined(HAVE_FIPS)
+    !defined(HAVE_SELFTEST) && !defined(HAVE_FIPS) && \
+    !defined(HAVE_INTEL_RDRAND) && !defined(CUSTOM_RAND_GENERATE_BLOCK) && \
+    !defined(WOLFSSL_RNG_USE_FULL_SEED)
     /* SHA-256 of the encoded public key, private key and signature the fixed
      * seed produces, indexed by level. Verified identical across the emulated,
      * asm, double, avx2 and small-mem builds. */
@@ -906,6 +915,7 @@ int test_wc_falcon_deterministic(void)
     byte* sig = NULL;
     byte dig[WC_SHA256_DIGEST_SIZE];
     int li;
+    int seedCbSet = 0;
 
     buf = (byte*)XMALLOC(FALCON_MAX_PUB_KEY_SIZE + FALCON_MAX_KEY_SIZE +
         FALCON_MAX_SIG_SIZE, NULL, DYNAMIC_TYPE_TMP_BUFFER);
@@ -914,6 +924,18 @@ int test_wc_falcon_deterministic(void)
         pub = buf;
         prv = pub + FALCON_MAX_PUB_KEY_SIZE;
         sig = prv + FALCON_MAX_KEY_SIZE;
+    }
+
+    /* wc_SetSeed_Cb() is process-wide, so the restore below uses DoExpect and
+     * bare calls: ExpectIntEQ evaluates its argument only while no earlier
+     * expectation has failed, so an ExpectIntEQ restore would be skipped by
+     * the very failure it has to clean up after. */
+    /* DoExpect, not ExpectIntEQ: the latter evaluates its argument only while
+     * no earlier expectation has failed, so the restore at the end would be
+     * skipped by the very failure it has to clean up after. */
+    if (buf != NULL) {
+        DoExpectIntEQ(wc_SetSeed_Cb(falcon_det_seed_cb), 0);
+        seedCbSet = 1;
     }
 
     for (li = 0; (buf != NULL) && (li < FALCON_NUM_LEVELS); li++) {
@@ -925,12 +947,16 @@ int test_wc_falcon_deterministic(void)
         word32 prvLen = FALCON_MAX_KEY_SIZE;
         word32 sigLen = FALCON_MAX_SIG_SIZE;
         int res = 0;
+        int rngInited = 0;
 
         XMEMSET(&key, 0, sizeof(key));
         XMEMSET(&rng, 0, sizeof(rng));
 
-        ExpectIntEQ(wc_SetSeed_Cb(falcon_det_seed_cb), 0);
-        ExpectIntEQ(wc_InitRng(&rng), 0);
+        /* Same reason: pair the free with an init that actually ran. */
+        if (wc_InitRng(&rng) == 0) {
+            rngInited = 1;
+        }
+        ExpectIntEQ(rngInited, 1);
         ExpectIntEQ(wc_falcon_init(&key), 0);
         ExpectIntEQ(wc_falcon_set_level(&key, level), 0);
         ExpectIntEQ(wc_falcon_make_key(&key, &rng), 0);
@@ -955,10 +981,20 @@ int test_wc_falcon_deterministic(void)
         ExpectIntEQ(res, 1);
 
         wc_falcon_free(&key);
-        DoExpectIntEQ(wc_FreeRng(&rng), 0);
-        ExpectIntEQ(wc_SetSeed_Cb(WC_GENERATE_SEED_DEFAULT), 0);
+        if (rngInited) {
+            DoExpectIntEQ(wc_FreeRng(&rng), 0);
+        }
     }
 
+    if (seedCbSet) {
+        DoExpectIntEQ(wc_SetSeed_Cb(WC_GENERATE_SEED_DEFAULT), 0);
+    }
+
+    if (buf != NULL) {
+        /* Holds an exported private key. */
+        ForceZero(buf, FALCON_MAX_PUB_KEY_SIZE + FALCON_MAX_KEY_SIZE +
+            FALCON_MAX_SIG_SIZE);
+    }
     XFREE(buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
 #endif
     return EXPECT_RESULT();
@@ -1065,6 +1101,10 @@ int test_wc_falcon_key_reuse(void)
     wc_falcon_free(&key);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
     XFREE(pub, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    if (prv != NULL) {
+        /* Holds an exported private key. */
+        ForceZero(prv, FALCON_MAX_KEY_SIZE);
+    }
     XFREE(prv, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     XFREE(sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
 #endif
