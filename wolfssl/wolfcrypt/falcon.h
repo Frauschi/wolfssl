@@ -64,12 +64,9 @@
     #undef WC_FALCON_CACHE_PRIV_BASIS
 #endif
 
-/* WOLFSSL_FALCON_DYNAMIC_KEYS moves the encoded key buffers to the heap, sized
- * for the level in use rather than for the highest enabled one. It trades two
- * allocations per key for a much smaller falcon_key. */
-#if defined(WOLFSSL_FALCON_DYNAMIC_KEYS) && defined(WOLFSSL_NO_MALLOC)
-    #error "WOLFSSL_FALCON_DYNAMIC_KEYS needs an allocator; not WOLFSSL_NO_MALLOC."
-#endif
+/* Resolve WC_FALCON_CACHE_EXPANDED_KEY to what the selected signer can
+ * actually hold: the expanded key in the tree signer, the secret basis alone
+ * in a small-mem build. */
 #if defined(WC_FALCON_CACHE_EXPANDED_KEY) && \
     !defined(WOLFSSL_FALCON_SIGN_SMALL_MEM)
     /* Internal: the expanded key is really held in the key structure. */
@@ -78,6 +75,13 @@
     #ifndef WC_FALCON_CACHE_PRIV_BASIS
         #define WC_FALCON_CACHE_PRIV_BASIS
     #endif
+#endif
+
+/* WOLFSSL_FALCON_DYNAMIC_KEYS moves the encoded key buffers to the heap, sized
+ * for the level in use rather than for the highest enabled one. It trades two
+ * allocations per key for a much smaller falcon_key. */
+#if defined(WOLFSSL_FALCON_DYNAMIC_KEYS) && defined(WOLFSSL_NO_MALLOC)
+    #error "WOLFSSL_FALCON_DYNAMIC_KEYS needs an allocator; not WOLFSSL_NO_MALLOC."
 #endif
 
 #ifdef __cplusplus
@@ -214,6 +218,10 @@ struct falcon_key {
 WOLFSSL_API
 int wc_falcon_make_key(falcon_key* key, WC_RNG* rng);
 #endif
+/* With WC_FALCON_CACHE_EXPANDED_KEY or WC_FALCON_CACHE_PRIV_BASIS this writes
+ * to 'key': the first call fills the per-key cache, later ones read it. Such a
+ * key must not be signed with from two threads at once, nor freed, re-levelled
+ * or re-imported while a signature is in flight; the cache is unsynchronized. */
 WOLFSSL_API
 int wc_falcon_sign_msg(const byte* in, word32 inLen, byte* out, word32 *outLen,
                        falcon_key* key, WC_RNG* rng);
@@ -221,6 +229,10 @@ WOLFSSL_API
 int wc_falcon_verify_msg(const byte* sig, word32 sigLen, const byte* msg,
                          word32 msgLen, int* res, falcon_key* key);
 
+/* Initialize a falcon_key. The structure may own heap allocations - the
+ * encoded key buffers and the signing caches - so this takes an unused or
+ * already-freed one. Re-initializing a used key without wc_falcon_free()
+ * first orphans those allocations with the secret material still in them. */
 WOLFSSL_API
 int wc_falcon_init(falcon_key* key);
 
