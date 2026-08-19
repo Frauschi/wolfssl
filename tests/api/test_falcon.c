@@ -41,12 +41,14 @@
 #include <tests/api/test_falcon.h>
 
 /*
- * Coverage note: Falcon-512 (NIST L1) and Falcon-1024 (NIST L5) are always both
- * compiled when HAVE_FALCON is set, so every test iterates both levels. Tests
- * that need key generation or signing are gated on WC_FALCON_HAVE_NATIVE_SIGN
- * (undefined in WOLFSSL_FALCON_VERIFY_ONLY / WOLF_CRYPTO_CB_ONLY_FALCON builds).
- * Argument-sanitising (NULL, bad level, buffer-too-small, wrong-size) tests only
- * need the always-present entry points and run under HAVE_FALCON.
+ * Coverage note: which of Falcon-512 (NIST L1) and Falcon-1024 (NIST L5) is
+ * compiled depends on WOLFSSL_NO_FALCON_LEVEL1 / WOLFSSL_NO_FALCON_LEVEL5, so
+ * a test must iterate falcon_levels[] / FALCON_NUM_LEVELS below, and a block
+ * naming one level has to be #ifdef-guarded.
+ *
+ * Tests that need key generation or signing are gated on
+ * WC_FALCON_HAVE_NATIVE_SIGN; argument-sanitising tests only need the
+ * always-present entry points and run under HAVE_FALCON.
  */
 
 #ifdef HAVE_FALCON
@@ -255,8 +257,9 @@ int test_wc_falcon_sign_vfy(void)
     ExpectIntEQ(wc_falcon_init(&key), 0);
     ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[0]), 0);
     res = 0;
-    ExpectIntEQ(wc_falcon_verify_msg(sig, FALCON_LEVEL1_SIG_SIZE, msg,
-        (word32)sizeof(msg), &res, &key), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_falcon_verify_msg(sig, (word32)falcon_exp_sig(
+        falcon_levels[0]), msg, (word32)sizeof(msg), &res, &key),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
     wc_falcon_free(&key);
 
     wc_FreeRng(&rng);
@@ -1411,7 +1414,7 @@ int test_falcon_cb_free(void)
     seen.ret = WC_NO_ERR_TRACE(WC_HW_E);
     XMEMSET(&key, 0, sizeof(key));
     ExpectIntEQ(wc_falcon_init_ex(&key, NULL, TEST_FALCON_CB_FREE_DEVID), 0);
-    ExpectIntEQ(wc_falcon_set_level(&key, 1), 0);
+    ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[0]), 0);
     wc_falcon_free(&key);
     ExpectIntEQ(seen.frees, 2);
     ExpectIntEQ(key.devId, INVALID_DEVID);

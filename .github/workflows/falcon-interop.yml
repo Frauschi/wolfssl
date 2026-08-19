@@ -158,10 +158,11 @@ jobs:
           - { name: 'cache-key',         runner: ubuntu-latest,    opts: '--enable-falcon=cache-key' }
           - { name: 'cache-basis',       runner: ubuntu-latest,    opts: '--enable-falcon=cache-basis' }
           - { name: 'cache-key+small-mem', runner: ubuntu-latest,  opts: '--enable-falcon=cache-key,small-mem' }
-          - { name: 'level1 only',       runner: ubuntu-latest,    opts: '--enable-falcon=level1' }
-          - { name: 'level5 only',       runner: ubuntu-latest,    opts: '--enable-falcon=level5' }
+          - { name: 'level1 only',       runner: ubuntu-latest,    opts: '--enable-falcon=level1', full_suite: true }
+          - { name: 'level5 only',       runner: ubuntu-latest,    opts: '--enable-falcon=level5', full_suite: true }
           - { name: 'dynamic-keys',      runner: ubuntu-latest,    opts: '--enable-falcon=dynamic-keys' }
           - { name: 'level1+dynamic-keys', runner: ubuntu-latest,  opts: '--enable-falcon=level1,dynamic-keys' }
+          - { name: 'cache-key+dynamic-keys', runner: ubuntu-latest, opts: '--enable-falcon=cache-key,dynamic-keys' }
           # verify-only strips keygen/sign, so it is a build/link check only
           # (testwolfcrypt's falcon_test needs signing).
           - { name: 'verify-only',       runner: ubuntu-latest,    opts: '--enable-falcon', cppflags: '-DWOLFSSL_FALCON_VERIFY_ONLY', build_only: true }
@@ -198,3 +199,10 @@ jobs:
       - name: Run Falcon API tests (includes the deterministic vector)
         if: ${{ ! matrix.build_only }}
         run: ./tests/unit.test --group falcon
+
+      # --group falcon covers neither wolfcrypt_test() nor the signature group,
+      # and both hold Falcon tests that name a level directly. Run the full
+      # suite on the level-restricted legs, where that is what breaks.
+      - name: Run the full unit test suite
+        if: ${{ ! matrix.build_only && matrix.full_suite }}
+        run: ./tests/unit.test
