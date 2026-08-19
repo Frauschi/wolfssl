@@ -821,6 +821,7 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
     DerBuffer* der, int* keyFormat, void* heap, byte* keyType, int* keySize)
 {
     int ret;
+    int inited = 0;
     falcon_key* key;
 
     /* Allocate a Falcon key to parse into. */
@@ -833,6 +834,7 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
      * WOLFSSL_FALCON_DYNAMIC_KEYS, so must its encoded-key buffers. */
     ret = wc_falcon_init_ex(key, heap, INVALID_DEVID);
     if (ret == 0) {
+        inited = 1;
         byte level = 0;
         word32 idx;
 
@@ -930,8 +932,6 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
             WOLFSSL_MSG("Falcon private key too small");
             ret = FALCON_KEY_SIZE_E;
         }
-
-        wc_falcon_free(key);
     }
     else if ((ret == WC_NO_ERR_TRACE(ALGO_ID_E)) && (*keyFormat == 0)) {
         WOLFSSL_MSG("Not a Falcon key");
@@ -939,7 +939,11 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
         ret = 0;
     }
 
-    /* Dispose of allocated key. */
+    /* Dispose of allocated key. With WOLFSSL_FALCON_DYNAMIC_KEYS the structure
+     * owns heap buffers, so XFREE alone would leak. */
+    if (inited) {
+        wc_falcon_free(key);
+    }
     XFREE(key, heap, DYNAMIC_TYPE_FALCON);
     return ret;
 }
