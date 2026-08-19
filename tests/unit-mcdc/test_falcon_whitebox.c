@@ -794,6 +794,12 @@ static void wb_mkgauss_range(WC_RNG* rng)
     WB_OK("poly_small_mkgauss s<-127 / s>127 operand pair exercised");
 }
 
+/* Both vectors below are built at Falcon-512, so the whole driver goes away in
+ * a build without level 1: falcon_level_params() has no case for it, and
+ * falcon_native_check_key() would reject the key before reaching the decision.
+ * wb_residuals() carries the operand as an excluded row in that build. */
+#ifndef WOLFSSL_NO_FALCON_LEVEL1
+
 /* ------------------------------------------------------------------ *
  * falcon_native_check_key: if (ft[i] == 0 || barrett(h[i]*ft[i]) != gt[i])
  * cond0's TRUE half needs a private key whose f is NOT invertible mod q, i.e.
@@ -872,6 +878,7 @@ static void wb_check_key_ntt_slots(void)
     XFREE(key, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     WB_OK("falcon_native_check_key ft[i]==0 operand pair exercised");
 }
+#endif /* !WOLFSSL_NO_FALCON_LEVEL1 */
 
 /* ------------------------------------------------------------------ *
  * solve_NTRU_deepest:
@@ -1352,6 +1359,12 @@ static void wb_residuals(void)
             "a 7.9 sigma deviate (~6e-14 per coefficient, ~6e-11 per keygen), "
             "and f is generated inside falcon_keygen from its own falcon_rng, "
             "so no supplied input reaches it");
+#if defined(WOLFSSL_FALCON_VERIFY_ONLY) || defined(WOLFSSL_NO_FALCON_LEVEL1)
+    WB_NOTE("residual: check_key ft[i]==0 half: the vector is a decoded "
+            "Falcon-512 key with a nowhere-invertible f, which this build "
+            "cannot present - it has either no level 1 to encode one at or no "
+            "private-key side at all");
+#endif
     WB_NOTE("residual: sign_msg/verify_msg (ret==0)&&(!key->...Set) cond0 "
             "FALSE half: the preceding argument check returns early, so ret is "
             "invariably 0 at that line");
@@ -1405,7 +1418,9 @@ int main(void)
             wb_berexp_loop(&rng);
             wb_mkgauss_range(&rng);
         }
+#ifndef WOLFSSL_NO_FALCON_LEVEL1
         wb_check_key_ntt_slots();
+#endif
         wb_solve_deepest_overflow();
         if (haveRng) {
             wb_solve_ntru_lim(&rng);
