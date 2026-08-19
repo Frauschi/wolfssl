@@ -537,7 +537,10 @@ PR stands for Pull Request, and PR <NUMBER> references a GitHub pull request num
   reuse, instead of allocating one per group of hashes. A SHAKE-128s
   signature now makes about twelve times fewer allocations. by @Frauschi
 * Use the 8-way AVX512 Keccak permutation when completing the WOTS+ chains of
-  an SLH-DSA signature, which speeds up verification. by @Frauschi
+  an SLH-DSA signature, which speeds up verification. The 8-way verify path
+  holds its Keccak state and chain values on the stack for the length of one
+  WOTS+ public key, so peak stack during verification grows by about 2.3 kB on
+  AVX512 builds; WOLFSSL_SMALL_STACK moves them to the heap. by @Frauschi
 * Give a whole SLH-DSA XMSS subtree one set of WOTS+ buffers to reuse. A
   SHAKE-128s signature now makes about 1000 allocations where it made about
   144000. by @Frauschi

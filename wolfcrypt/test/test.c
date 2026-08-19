@@ -6212,7 +6212,7 @@ exit:
 #endif /* NO_LARGE_HASH_TEST */
 
 #ifdef WOLFSSL_HAVE_SHA256_HASH_BLOCK
-static wc_test_ret_t sha256_lms_test(wc_Sha256* sha)
+static wc_test_ret_t sha256_hash_block_test(wc_Sha256* sha)
 {
     byte      hash[WC_SHA256_DIGEST_SIZE];
     wc_test_ret_t ret = 0;
@@ -6305,7 +6305,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t sha256_test(void)
         return ret;
 #endif
 #ifdef WOLFSSL_HAVE_SHA256_HASH_BLOCK
-    if ((ret = sha256_lms_test(&sha)) != 0)
+    if ((ret = sha256_hash_block_test(&sha)) != 0)
         return ret;
 #endif
 #if !defined(HAVE_SELFTEST) && (!defined(HAVE_FIPS) || FIPS_VERSION_GE(7, 0))

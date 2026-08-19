@@ -283,6 +283,12 @@ typedef struct SlhDsaWotsBufs {
 /* Size of an encoded HashAddress. */
 #define SLHDSA_HA_SZ    32
 
+/* The widest 8-way absorb is H over a tree index - PK.seed, the address and a
+ * 2n-byte message - and it has to fit one SHAKE-256 rate block. */
+wc_static_assert((SLHDSA_MAX_N % 8) == 0);
+wc_static_assert((SLHDSA_HA_SZ % 8) == 0);
+wc_static_assert(3 * SLHDSA_MAX_N + SLHDSA_HA_SZ < WC_SHA3_256_BLOCK_SIZE);
+
 /* Initialize a HashAddress.
  *
  * @param [in] a  HashAddress to initialize.
@@ -764,14 +770,18 @@ static int slhdsakey_hash_shake_4(wc_Shake* shake, const byte* data1,
 #endif
 
 #ifdef SLHDSA_SHA2_BLOCK_HASH
-/* A registered callback expects to see every update, so the direct path is
- * only taken for an object no callback has claimed. The key's own hash objects
- * are always initialised with INVALID_DEVID, so today this is constant true
- * and the direct path always runs; the check is what stops a later change to
- * that initialisation from silently bypassing a registered callback. */
+/* The direct path restores the midstate through wc_Sha256's own digest and
+ * scrubs its block buffer, so a port that changes either layout has to fail
+ * here rather than write out of bounds. */
+wc_static_assert(sizeof(((wc_Sha256*)0)->buffer) == WC_SHA256_BLOCK_SIZE);
+wc_static_assert(sizeof(((wc_Sha256*)0)->digest) == WC_SHA256_DIGEST_SIZE);
+
+/* A registered callback expects to see every update, and holds the state
+ * itself, so a claimed midstate has no digest to restore. */
 #ifdef WOLF_CRYPTO_CB
     #define SLHDSA_SHA256_RAW_OK(key)   \
-        ((key)->hash.sha2.sha256.devId == INVALID_DEVID)
+        (((key)->hash.sha2.sha256.devId == INVALID_DEVID) && \
+         ((key)->hash.sha2.sha256_mid.devId == INVALID_DEVID))
 #else
     #define SLHDSA_SHA256_RAW_OK(key)   1
 #endif
@@ -873,8 +883,6 @@ wc_static_assert(SLHDSA_HAC_SZ + 32 + 1 + 8 <= WC_SHA256_BLOCK_SIZE);
  * @param [in]  m2_len    Length of second message part.
  * @param [out] hash      Buffer to hold hash output.
  * @param [in]  hash_len  Number of bytes of hash to output.
- * @param [in]  zeroize   Track the working buffers as secret for the memory
- *                        zeroization check. They are wiped either way.
  * @return  0 on success.
  * @return  BUFFER_E when the message does not fit the block with its padding.
  */
@@ -907,6 +915,12 @@ static int slhdsakey_sha256_block_hash(SlhDsaKey* key, const byte* address,
     c32toa(0, block + WC_SHA256_BLOCK_SIZE - 8);
     c32toa(bits, block + WC_SHA256_BLOCK_SIZE - 4);
 
+    /* Registered while the data is still live, so an early return is caught. */
+#ifdef WOLFSSL_CHECK_MEM_ZERO
+    wc_MemZero_Add("slhdsa sha256 block", block, WC_SHA256_BLOCK_SIZE);
+    wc_MemZero_Add("slhdsa sha256 digest", digest, sizeof(digest));
+#endif
+
     /* Restore the midstate and compress. */
     XMEMCPY(key->hash.sha2.sha256.digest, key->hash.sha2.sha256_mid.digest,
         WC_SHA256_DIGEST_SIZE);
@@ -915,10 +929,6 @@ static int slhdsakey_sha256_block_hash(SlhDsaKey* key, const byte* address,
         XMEMCPY(hash, digest, hash_len);
     }
 
-#ifdef WOLFSSL_CHECK_MEM_ZERO
-    wc_MemZero_Add("slhdsa sha256 block", block, WC_SHA256_BLOCK_SIZE);
-    wc_MemZero_Add("slhdsa sha256 digest", digest, sizeof(digest));
-#endif
     /* Cleared unconditionally rather than per call site. */
     ForceZero(block, WC_SHA256_BLOCK_SIZE);
     ForceZero(digest, sizeof(digest));
@@ -950,7 +960,12 @@ static int slhdsakey_sha256_api_hash(SlhDsaKey* key, const byte* address,
     int ret;
     byte digest[WC_SHA256_DIGEST_SIZE];
 
-    /* Restore the midstate. wc_Sha256Copy() releases the destination. */
+    /* Only the generic wc_Sha256Copy() frees its destination; the KCAPI, AF_ALG
+     * and crypto callback copies would strand a handle per hash. */
+    if (key->hash.sha2.sha256_inited) {
+        wc_Sha256Free(&key->hash.sha2.sha256);
+        key->hash.sha2.sha256_inited = 0;
+    }
     ret = wc_Sha256Copy(&key->hash.sha2.sha256_mid, &key->hash.sha2.sha256);
     if (ret == 0) {
         key->hash.sha2.sha256_inited = 1;
@@ -1025,7 +1040,11 @@ static int slhdsakey_sha512_hash(SlhDsaKey* key, const byte* address,
     int ret;
     byte digest[WC_SHA512_DIGEST_SIZE];
 
-    /* Restore the midstate. wc_Sha512Copy() releases the destination. */
+    /* Release the previous state first - see slhdsakey_sha256_api_hash(). */
+    if (key->hash.sha2.sha512_inited) {
+        wc_Sha512Free(&key->hash.sha2.sha512);
+        key->hash.sha2.sha512_inited = 0;
+    }
     ret = wc_Sha512Copy(&key->hash.sha2.sha512_mid, &key->hash.sha2.sha512);
     if (ret == 0) {
         key->hash.sha2.sha512_inited = 1;
@@ -1212,6 +1231,10 @@ static int slhdsakey_hash_start_addr_sha2(SlhDsaKey* key,
     if (n == WC_SLHDSA_N_128) {
         /* Category 1: SHA-256 -- use sha256_2 (T_l must not collide with
          * sha256 which is used by F and H). */
+        if (key->hash.sha2.sha256_2_inited) {
+            wc_Sha256Free(&key->hash.sha2.sha256_2);
+            key->hash.sha2.sha256_2_inited = 0;
+        }
         ret = wc_Sha256Copy(&key->hash.sha2.sha256_mid,
             &key->hash.sha2.sha256_2);
         if (ret == 0) {
@@ -1223,6 +1246,10 @@ static int slhdsakey_hash_start_addr_sha2(SlhDsaKey* key,
     else {
         /* Categories 3, 5: SHA-512 -- use sha512_2 (T_l must not collide
          * with sha512 which is used by H). */
+        if (key->hash.sha2.sha512_2_inited) {
+            wc_Sha512Free(&key->hash.sha2.sha512_2);
+            key->hash.sha2.sha512_2_inited = 0;
+        }
         ret = wc_Sha512Copy(&key->hash.sha2.sha512_mid,
             &key->hash.sha2.sha512_2);
         if (ret == 0) {
@@ -2710,6 +2737,7 @@ static void slhdsakey_shake256_set_chain_addr_idx_x8(word64* state, word32 o,
  * @param [in]      fixed    Caller owned state head, already filled.
  * @param [in]      state    Caller owned x8 Keccak state.
  * @return  0 on success.
+ * @return  Error code from saving the vector registers.
  */
 static int slhdsakey_chain_idx_x8(byte* sk, word32 i, word32 s, byte n,
     word32 o, word64* fixed, word64* state)
@@ -2768,7 +2796,7 @@ static int slhdsakey_chain_idx_x8(byte* sk, word32 i, word32 s, byte n,
  * @param [in]  n        Number of bytes in hash output.
  * @param [in]  ca       Chain address start index.
  * @param [out] sk       Buffer to hold hash output.
- * @param [in]      state    Caller owned Keccak state.
+ * @param [in, out] state    Caller owned Keccak state.
  * @return  0 on success.
  * @return  SHAKE-256 error return code on digest failure.
  */
@@ -2810,8 +2838,8 @@ static int slhdsakey_hash_prf_x4(const byte* pk_seed, const byte* sk_seed,
  * @param [in]      pk_seed  Public key seed.
  * @param [in]      addr     Encoded HashAddress.
  * @param [in]      ca       Chain address start index.
- * @param [in]      fixed    Caller owned buffer for the unchanging state head.
- * @param [in]      state    Caller owned Keccak state.
+ * @param [in, out] fixed    Caller owned buffer for the unchanging state head.
+ * @param [in, out] state    Caller owned Keccak state.
  * @return  0 on success.
  */
 static int slhdsakey_chain_x4_16(byte* sk, const byte* pk_seed, byte* addr,
@@ -2864,8 +2892,8 @@ static int slhdsakey_chain_x4_16(byte* sk, const byte* pk_seed, byte* addr,
  * @param [in]      pk_seed  Public key seed.
  * @param [in]      addr     Encoded HashAddress.
  * @param [in]      ca       Chain address start index.
- * @param [in]      fixed    Caller owned buffer for the unchanging state head.
- * @param [in]      state    Caller owned Keccak state.
+ * @param [in, out] fixed    Caller owned buffer for the unchanging state head.
+ * @param [in, out] state    Caller owned Keccak state.
  * @return  0 on success.
  */
 static int slhdsakey_chain_x4_24(byte* sk, const byte* pk_seed, byte* addr,
@@ -2918,8 +2946,8 @@ static int slhdsakey_chain_x4_24(byte* sk, const byte* pk_seed, byte* addr,
  * @param [in]      pk_seed  Public key seed.
  * @param [in]      addr     Encoded HashAddress.
  * @param [in]      ca       Chain address start index.
- * @param [in]      fixed    Caller owned buffer for the unchanging state head.
- * @param [in]      state    Caller owned Keccak state.
+ * @param [in, out] fixed    Caller owned buffer for the unchanging state head.
+ * @param [in, out] state    Caller owned Keccak state.
  * @return  0 on success.
  */
 static int slhdsakey_chain_x4_32(byte* sk, const byte* pk_seed, byte* addr,
@@ -3322,7 +3350,7 @@ static int slhdsakey_wots_pkgen_chain_x4_16(SlhDsaKey* key, const byte* sk_seed,
      * with public chain values. The x4 PRF fills up to a 4-lane multiple
      * (beyond len), so wipe the whole buffer. */
     if (ret != 0) {
-        ForceZero(sk, (SLHDSA_MAX_MSG_SZ + 3) * 16);
+        ForceZero(sk, SLHDSA_WOTS_SK_SZ);
     }
     return ret;
 }
@@ -3395,7 +3423,7 @@ static int slhdsakey_wots_pkgen_chain_x4_24(SlhDsaKey* key, const byte* sk_seed,
      * with public chain values. The x4 PRF fills up to a 4-lane multiple
      * (beyond len), so wipe the whole buffer. */
     if (ret != 0) {
-        ForceZero(sk, (SLHDSA_MAX_MSG_SZ + 3) * 24);
+        ForceZero(sk, SLHDSA_WOTS_SK_SZ);
     }
     return ret;
 }
@@ -3467,7 +3495,7 @@ static int slhdsakey_wots_pkgen_chain_x4_32(SlhDsaKey* key, const byte* sk_seed,
     /* On error sk still holds secret WOTS+ leaves, and the x4 PRF fills past
      * len to a 4-lane multiple, so wipe the whole buffer. */
     if (ret != 0) {
-        ForceZero(sk, (SLHDSA_MAX_MSG_SZ + 3) * 32);
+        ForceZero(sk, SLHDSA_WOTS_SK_SZ);
     }
     return ret;
 }
@@ -3589,9 +3617,10 @@ static int slhdsakey_hash_prf_x8(const byte* pk_seed, const byte* sk_seed,
  * @param [in]      addr     Encoded HashAddress.
  * @param [in]      ca       Chain address start index.
  * @param [in]      n        Number of bytes in each hash.
- * @param [in]      fixed    Caller owned buffer for the unchanging state head.
+ * @param [in, out] fixed    Caller owned buffer for the unchanging state head.
  * @param [in]      state    Caller owned x8 Keccak state.
  * @return  0 on success.
+ * @return  Error code from saving the vector registers.
  */
 static int slhdsakey_chain_x8(byte* sk, const byte* pk_seed, byte* addr,
     byte ca, byte n, word64* fixed, word64* state)
@@ -5178,8 +5207,9 @@ static int slhdsakey_wots_pk_from_sig(SlhDsaKey* key, const byte* sig,
  * @param [in, out]  adrs     HashAddress - WOTS HASH.
  * @param [out]      node     Root node.
  * @param [in]       bufs     Buffers shared by the WOTS+ public keys of one
- *                            subtree.
+ *                            subtree. bufs->sk holds SLHDSA_WOTS_SK_SZ bytes.
  * @return  0 on success.
+ * @return  MEMORY_E on dynamic memory allocation failure.
  * @return  SHAKE-256 error return code on digest failure.
  */
 static int slhdsakey_xmss_node(SlhDsaKey* key, const byte* sk_seed, int i,
@@ -5290,8 +5320,9 @@ static int slhdsakey_xmss_node(SlhDsaKey* key, const byte* sk_seed, int i,
  * @param [in, out]  adrs     HashAddress - WOTS HASH.
  * @param [out]      node     Root node.
  * @param [in]       bufs     Buffers shared by the WOTS+ public keys of one
- *                            subtree.
+ *                            subtree. bufs->sk holds SLHDSA_WOTS_SK_SZ bytes.
  * @return  0 on success.
+ * @return  MEMORY_E on dynamic memory allocation failure.
  * @return  SHAKE-256 error return code on digest failure.
  */
 static int slhdsakey_xmss_node(SlhDsaKey* key, const byte* sk_seed, int i,
@@ -5361,6 +5392,7 @@ static int slhdsakey_root_from_seed(SlhDsaKey* key, byte* root)
     WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_STATE_W, key->heap);
 #endif
 
+    XMEMSET(&bufs, 0, sizeof(bufs));
 #ifdef SLHDSA_NEED_WOTS_SK_BUF
     WC_ALLOC_VAR_EX(sk, byte, SLHDSA_WOTS_SK_SZ, key->heap,
         DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
@@ -5446,6 +5478,7 @@ static int slhdsakey_xmss_sign(SlhDsaKey* key, const byte* m,
     WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_STATE_W, key->heap);
 #endif
 
+    XMEMSET(&bufs, 0, sizeof(bufs));
 #ifdef SLHDSA_NEED_WOTS_SK_BUF
     WC_ALLOC_VAR_EX(sk, byte, SLHDSA_WOTS_SK_SZ, key->heap,
         DYNAMIC_TYPE_SLHDSA, ret = MEMORY_E);
@@ -5844,7 +5877,7 @@ static int slhdsakey_fors_sk_gen(SlhDsaKey* key, const byte* sk_seed,
  * @param [in]  n        Number of bytes in hash output.
  * @param [in]  ti       Tree index start value.
  * @param [out] node     Buffer to hold hash output.
- * @param [in]      state    Caller owned Keccak state.
+ * @param [in, out] state    Caller owned Keccak state.
  * @return  0 on success.
  */
 static int slhdsakey_hash_prf_ti_x4(const byte* pk_seed, const byte* sk_seed,
@@ -5885,7 +5918,7 @@ static int slhdsakey_hash_prf_ti_x4(const byte* pk_seed, const byte* sk_seed,
  * @param [in, out] node     On in, n-byte messages. On out, n-byte outputs.
  * @param [in]      n        Number of bytes in hash output.
  * @param [in]      ti       Tree index start value.
- * @param [in]      state    Caller owned Keccak state.
+ * @param [in, out] state    Caller owned Keccak state.
  * @return  0 on success.
  */
 static int slhdsakey_hash_f_ti_x4(const byte* pk_seed, byte* addr, byte* node,
@@ -5935,7 +5968,7 @@ static int slhdsakey_hash_f_ti_x4(const byte* pk_seed, byte* addr, byte* node,
  * @param [in]  n        Number of bytes in hash output.
  * @param [in]  ti       Tree index start value.
  * @param [out] hash     Buffer to hold hash output.
- * @param [in]      state    Caller owned Keccak state.
+ * @param [in, out] state    Caller owned Keccak state.
  * @return  0 on success.
  */
 static int slhdsakey_hash_h_ti_x4(const byte* pk_seed, byte* addr,
@@ -5977,7 +6010,7 @@ static int slhdsakey_hash_h_ti_x4(const byte* pk_seed, byte* addr,
  * @param [in]  n        Number of bytes in each hash.
  * @param [in]  ti       Tree index start value.
  * @param [out] node     Eight n-byte outputs.
- * @param [in]      state    Caller owned Keccak state.
+ * @param [in, out] state    Caller owned Keccak state.
  * @return  0 on success.
  */
 static int slhdsakey_hash_prf_ti_x8(const byte* pk_seed, const byte* sk_seed,
@@ -6009,7 +6042,7 @@ static int slhdsakey_hash_prf_ti_x8(const byte* pk_seed, const byte* sk_seed,
  * @param [in, out] node     On in, eight n-byte messages. On out, the outputs.
  * @param [in]      n        Number of bytes in hash output.
  * @param [in]      ti       Tree index start value.
- * @param [in]      state    Caller owned Keccak state.
+ * @param [in, out] state    Caller owned Keccak state.
  * @return  0 on success.
  */
 static int slhdsakey_hash_f_ti_x8(const byte* pk_seed, byte* addr, byte* node,
@@ -6050,7 +6083,7 @@ static int slhdsakey_hash_f_ti_x8(const byte* pk_seed, byte* addr, byte* node,
  * @param [in]  n        Number of bytes in hash output.
  * @param [in]  ti       Tree index start value.
  * @param [out] hash     Buffer to hold eight n-byte hash outputs.
- * @param [in]      state    Caller owned Keccak state.
+ * @param [in, out] state    Caller owned Keccak state.
  * @return  0 on success.
  */
 static int slhdsakey_hash_h_ti_x8(const byte* pk_seed, byte* addr,
@@ -6375,7 +6408,9 @@ static int slhdsakey_fors_node_x4_low(SlhDsaKey* key, const byte* sk_seed,
         ret = HASH_H(key, pk_seed, adrs, nodes, n, node);
     }
 
-    /* state and nodes hold FORS secret keys and values derived from them. */
+    /* Both hold FORS secret keys or values derived from them. The nodes wipe
+     * uses the buffer size: the Merkle loop leaves m at the width of the level
+     * it stopped on, not the number of entries written. */
     if (WC_VAR_OK(state)) {
         ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_STATE_W);
     }
@@ -6426,7 +6461,7 @@ static int slhdsakey_fors_node_x4_high(SlhDsaKey* key, const byte* sk_seed,
     byte n = key->params->n;
     word32 j;
     word32 z2 = z % SLHDSA_MAX_FORS_NODE_DEPTH;
-    word32 m;
+    word32 m = 0;
     WC_DECLARE_VAR(nodes, byte, (1 << SLHDSA_MAX_FORS_NODE_TOP_DEPTH) *
         SLHDSA_MAX_N, key->heap);
     WC_DECLARE_VAR(state, word64, SLHDSA_SHAKE_STATE_W, key->heap);
@@ -6510,7 +6545,9 @@ static int slhdsakey_fors_node_x4_high(SlhDsaKey* key, const byte* sk_seed,
         ret = HASH_H(key, pk_seed, adrs, nodes, n, node);
     }
 
-    /* state and nodes hold FORS secret keys and values derived from them. */
+    /* Both hold FORS secret keys or values derived from them. The nodes wipe
+     * uses the buffer size: the Merkle loop leaves m at the width of the level
+     * it stopped on, not the number of entries written. */
     if (WC_VAR_OK(state)) {
         ForceZero(state, sizeof(word64) * SLHDSA_SHAKE_STATE_W);
     }
@@ -7608,17 +7645,13 @@ int wc_SlhDsaKey_Init(SlhDsaKey* key, enum SlhDsaParam param, void* heap,
 
 #ifdef WOLFSSL_SLHDSA_SHA2
         if (SLHDSA_IS_SHA2(param)) {
-            /* Initialize SHA2 hash objects. The heap hint is passed on, but
-             * the device id deliberately is not: these objects only ever run
-             * the inner F, H and PRF compressions, which take the direct block
-             * path rather than a callback. See SLHDSA_SHA256_RAW_OK(). */
-            ret = wc_InitSha256_ex(&key->hash.sha2.sha256, key->heap,
-                INVALID_DEVID);
+            /* Same device id as the midstate objects they are copied from,
+             * so SLHDSA_SHA256_RAW_OK() sees a consistent pair. */
+            ret = wc_InitSha256(&key->hash.sha2.sha256);
             if (ret == 0)
                 key->hash.sha2.sha256_inited = 1;
             if ((ret == 0) && (key->params->n > 16)) {
-                ret = wc_InitSha512_ex(&key->hash.sha2.sha512, key->heap,
-                    INVALID_DEVID);
+                ret = wc_InitSha512(&key->hash.sha2.sha512);
                 if (ret == 0)
                     key->hash.sha2.sha512_inited = 1;
             }
