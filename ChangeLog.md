@@ -287,11 +287,15 @@
   `WOLFSSL_SMALL_STACK` still moves the buffer to the heap.
 
 * Added a deterministic Falcon test vector, covering key generation and
-  signing at both levels, which pins the results by digest.  Every Falcon fpr
-  backend implements the same IEEE-754 binary64 arithmetic, so all of them
-  have to reproduce it; the test is what detects one of them drifting.  It
-  needs `WC_RNG_SEED_CB` to make the DRBG reproducible and is skipped
-  otherwise.
+  signing at every built level, which pins the results by digest.  The integer
+  emulation, native double and assembly fpr backends are bit-exact with each
+  other, so the vector detects any of them drifting.  The AVX2 and NEON
+  backends fuse multiply-add and are not required to be bit-identical to the
+  scalar path; they reproduce the same digests in practice because key
+  generation rounds back to integers and the sampler comparisons have wide
+  margins, so a mismatch seen only there is a rounding change rather than a
+  defect.  The test needs `WC_RNG_SEED_CB` and the SHA-512 Hash DRBG to make
+  the stream reproducible, and is skipped otherwise.
 
 ## Fixes
 
