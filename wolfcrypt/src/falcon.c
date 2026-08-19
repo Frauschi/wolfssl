@@ -8280,33 +8280,27 @@ static int falcon_level_params(byte level, unsigned* logn, int* n, word32* pubSz
 
 #if defined(WC_FALCON_CACHE_TREE) || defined(WC_FALCON_CACHE_PRIV_BASIS)
 /* Release every cached copy of secret key material held by the key. Call this
- * before changing key->level: the buffer sizes are derived from the level the
- * cache was built for. */
+ * whenever the key stops describing what the cache was built from: a level
+ * change, a new private key, or teardown. Each buffer is wiped at its own
+ * recorded length, so an out-of-range key->level cannot skip or mis-size it. */
 static void falcon_cache_clear(falcon_key* key)
 {
-    unsigned logn = 0;
-    int n = 0;
-    word32 pubSz = 0;
-
-    if (falcon_level_params(key->level, &logn, &n, &pubSz) != 0) {
-        /* No valid level means nothing was ever cached. */
-        return;
-    }
 #ifdef WC_FALCON_CACHE_TREE
     if (key->expanded != NULL) {
-        ForceZero(key->expanded,
-            (word32)(sizeof(fpr) * FALCON_EXPANDED_KEY_FPR(logn)));
+        ForceZero(key->expanded, key->expandedSz);
         XFREE(key->expanded, key->heap, DYNAMIC_TYPE_FALCON);
         key->expanded = NULL;
     }
+    key->expandedSz = 0;
     key->expandedSet = 0;
 #endif
 #ifdef WC_FALCON_CACHE_PRIV_BASIS
     if (key->basis != NULL) {
-        ForceZero(key->basis, (word32)(4 * n));
+        ForceZero(key->basis, key->basisSz);
         XFREE(key->basis, key->heap, DYNAMIC_TYPE_FALCON);
         key->basis = NULL;
     }
+    key->basisSz = 0;
     key->basisSet = 0;
 #endif
 }
@@ -8423,12 +8417,15 @@ static int falcon_sign_key_setup(falcon_key* key, word32 keySz, unsigned logn,
 
 #ifdef WC_FALCON_CACHE_TREE
     if (key->expanded == NULL) {
-        key->expanded = (word64*)XMALLOC(
-            sizeof(fpr) * FALCON_EXPANDED_KEY_FPR(logn), key->heap,
+        word32 expandedSz =
+            (word32)(sizeof(fpr) * FALCON_EXPANDED_KEY_FPR(logn));
+
+        key->expanded = (word64*)XMALLOC(expandedSz, key->heap,
             DYNAMIC_TYPE_FALCON);
         if (key->expanded == NULL) {
             return MEMORY_E;
         }
+        key->expandedSz = expandedSz;
         key->expandedSet = 0;
     }
     *expanded = (fpr*)key->expanded;
@@ -8442,6 +8439,7 @@ static int falcon_sign_key_setup(falcon_key* key, word32 keySz, unsigned logn,
         if (key->basis == NULL) {
             return MEMORY_E;
         }
+        key->basisSz = (word32)(4 * n);
         key->basisSet = 0;
     }
     if (key->basisSet) {

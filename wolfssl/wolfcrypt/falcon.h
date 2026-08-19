@@ -184,16 +184,21 @@ struct falcon_key {
     byte k[FALCON_MAX_KEY_SIZE];
 #endif
 
+    /* Both caches below hold secret material and are zeroized before release.
+     * Their allocated lengths are kept alongside them for the same reason kSz
+     * is. */
 #ifdef WC_FALCON_CACHE_TREE
     /* Expanded key (basis in FFT form plus the normalized ffLDL tree), built on
      * the first sign and reused by every later one. Typed word64 because the
      * internal fpr type is private to falcon.c. Secret: zeroized before free. */
     word64* expanded;
+    word32 expandedSz;
     WC_BITFIELD expandedSet:1;
 #endif
 #ifdef WC_FALCON_CACHE_PRIV_BASIS
     /* Secret basis f | g | F | G, 4n bytes, decoded and completed once. */
     sword8* basis;
+    word32 basisSz;
     WC_BITFIELD basisSet:1;
 #endif
 };
