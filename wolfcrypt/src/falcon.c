@@ -9306,6 +9306,12 @@ static int falcon_keybuf_alloc(falcon_key* key, byte level)
         key->p = NULL;
         return MEMORY_E;
     }
+    /* Zero both halves. wc_falcon_export_private and wc_Falcon_KeyToDer emit
+     * the public key alongside the private one and rely on an unpopulated half
+     * reading back as zeros rather than on pubKeySet, so a fresh allocation
+     * must not hand the caller whatever the allocator last held. */
+    XMEMSET(key->p, 0, pubSz);
+    XMEMSET(key->k, 0, keySz);
     key->kSz = keySz;
     return 0;
 }
@@ -9352,6 +9358,13 @@ int wc_falcon_set_level(falcon_key* key, byte level)
     falcon_keybuf_free(key);
     ret = falcon_keybuf_alloc(key, level);
     if (ret != 0) {
+        /* The old buffers are gone and the new ones were not obtained. Clear
+         * the level and the key-present flags as well, so the key reads as
+         * empty rather than as a valid key whose buffers are NULL: every
+         * accessor gates on those fields and then dereferences p/k. */
+        key->level = 0;
+        key->pubKeySet = 0;
+        key->prvKeySet = 0;
         return ret;
     }
 #else
