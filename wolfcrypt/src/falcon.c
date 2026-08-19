@@ -9234,8 +9234,12 @@ int wc_falcon_init_id(falcon_key* key, const unsigned char* id, int len,
         key->idLen = len;
     }
 
-    /* Set the maximum level here */
-    wc_falcon_set_level(key, 5);
+    /* Set the highest level this build has. It can fail (MEMORY_E with
+     * WOLFSSL_FALCON_DYNAMIC_KEYS), and returning 0 over that would hand back
+     * a key whose level is still 0. */
+    if (ret == 0) {
+        ret = wc_falcon_set_level(key, FALCON_MAX_LEVEL);
+    }
 
     return ret;
 }
@@ -9261,8 +9265,10 @@ int wc_falcon_init_label(falcon_key* key, const char* label, void* heap,
         key->labelLen = labelLen;
     }
 
-    /* Set the maximum level here */
-    wc_falcon_set_level(key, 5);
+    /* Set the highest level this build has; see wc_falcon_init_id. */
+    if (ret == 0) {
+        ret = wc_falcon_set_level(key, FALCON_MAX_LEVEL);
+    }
 
     return ret;
 }

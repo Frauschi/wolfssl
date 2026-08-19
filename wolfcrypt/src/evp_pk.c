@@ -965,7 +965,13 @@ static int d2i_falcon_priv_key_level(falcon_key* falcon, byte level,
     const unsigned char* mem, long memSz)
 {
     word32 idx = 0;
-    return (wc_falcon_set_level(falcon, level) == 0) &&
+    int lvlRet = wc_falcon_set_level(falcon, level);
+
+    if (lvlRet == WC_NO_ERR_TRACE(MEMORY_E)) {
+        WOLFSSL_MSG("Falcon set level out of memory");
+        return 0;
+    }
+    return (lvlRet == 0) &&
            (wc_Falcon_PrivateKeyDecode(mem, &idx, falcon,
                                         (word32)memSz) == 0);
 }
@@ -983,7 +989,13 @@ static int d2i_falcon_priv_key_level(falcon_key* falcon, byte level,
 static int d2i_falcon_pub_key_level(falcon_key* falcon, byte level,
     const unsigned char* mem, long memSz)
 {
-    return (wc_falcon_set_level(falcon, level) == 0) &&
+    int lvlRet = wc_falcon_set_level(falcon, level);
+
+    if (lvlRet == WC_NO_ERR_TRACE(MEMORY_E)) {
+        WOLFSSL_MSG("Falcon set level out of memory");
+        return 0;
+    }
+    return (lvlRet == 0) &&
            (wc_falcon_import_public(mem, (word32)memSz, falcon) == 0);
 }
 

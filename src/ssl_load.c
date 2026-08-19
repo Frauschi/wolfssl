@@ -853,26 +853,44 @@ static int ProcessBufferTryDecodeFalcon(WOLFSSL_CTX* ctx, WOLFSSL* ssl,
             }
         }
         else if (*keyFormat == 0) {
+            int lvlRet;
+
             /* Key format unknown. Try both levels; the expected OID inside
              * wc_Falcon_PrivateKeyDecode rejects non-matching DER. Re-init
              * between attempts so a partial first decode can't leave stale
              * bytes in key->k / key->p. */
             idx = 0;
-            if (wc_falcon_set_level(key, 1) == 0 &&
-                wc_Falcon_PrivateKeyDecode(der->buffer, &idx, key,
-                                           der->length) == 0) {
+            lvlRet = wc_falcon_set_level(key, 1);
+            if (lvlRet == WC_NO_ERR_TRACE(MEMORY_E)) {
+                wc_falcon_free(key);
+                XFREE(key, heap, DYNAMIC_TYPE_FALCON);
+                return MEMORY_E;
+            }
+            if ((lvlRet == 0) &&
+                (wc_Falcon_PrivateKeyDecode(der->buffer, &idx, key,
+                                            der->length) == 0)) {
                 level = 1;
             }
             else {
-                wc_falcon_free(key);
-                if (wc_falcon_init_ex(key, heap, INVALID_DEVID) != 0) {
+                /* Only an attempt that ran can have dirtied the key: a level
+                 * that was not built returns before touching it. */
+                if (lvlRet == 0) {
+                    wc_falcon_free(key);
+                    if (wc_falcon_init_ex(key, heap, INVALID_DEVID) != 0) {
+                        XFREE(key, heap, DYNAMIC_TYPE_FALCON);
+                        return MEMORY_E;
+                    }
+                }
+                idx = 0;
+                lvlRet = wc_falcon_set_level(key, 5);
+                if (lvlRet == WC_NO_ERR_TRACE(MEMORY_E)) {
+                    wc_falcon_free(key);
                     XFREE(key, heap, DYNAMIC_TYPE_FALCON);
                     return MEMORY_E;
                 }
-                idx = 0;
-                if (wc_falcon_set_level(key, 5) == 0 &&
-                    wc_Falcon_PrivateKeyDecode(der->buffer, &idx, key,
-                                               der->length) == 0) {
+                if ((lvlRet == 0) &&
+                    (wc_Falcon_PrivateKeyDecode(der->buffer, &idx, key,
+                                                der->length) == 0)) {
                     level = 5;
                 }
             }
