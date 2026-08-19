@@ -1079,6 +1079,198 @@ int test_wc_falcon_key_reuse(void)
     return EXPECT_RESULT();
 }
 
+#if defined(WOLFSSL_FALCON_DYNAMIC_KEYS) && \
+    defined(WC_FALCON_HAVE_NATIVE_SIGN) && defined(USE_WOLFSSL_MEMORY) && \
+    !defined(WOLFSSL_STATIC_MEMORY) && !defined(WOLFSSL_DEBUG_MEMORY) && \
+    !defined(NO_TLS) && !defined(NO_CERTS) && \
+    (!defined(NO_WOLFSSL_CLIENT) || !defined(NO_WOLFSSL_SERVER))
+#define FALCON_OOM_TEST
+
+static wolfSSL_Malloc_cb  falcon_oom_mf;
+static wolfSSL_Free_cb    falcon_oom_ff;
+static wolfSSL_Realloc_cb falcon_oom_rf;
+static int falcon_oom_failAt = -1;
+static int falcon_oom_kCount;
+static int falcon_oom_live;
+
+/* Only wc_falcon_set_level allocates exactly a level's private key size. */
+static int falcon_oom_is_kbuf(size_t n)
+{
+    int i;
+
+    for (i = 0; i < FALCON_NUM_LEVELS; i++) {
+        if (n == (size_t)falcon_exp_key(falcon_levels[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void* falcon_oom_malloc(size_t n)
+{
+    void* p;
+
+    if (falcon_oom_is_kbuf(n) && (falcon_oom_kCount++ == falcon_oom_failAt)) {
+        return NULL;
+    }
+    p = (falcon_oom_mf != NULL) ? falcon_oom_mf(n) : malloc(n);
+    if (p != NULL) {
+        falcon_oom_live++;
+    }
+    return p;
+}
+
+static void falcon_oom_free(void* p)
+{
+    if (p != NULL) {
+        falcon_oom_live--;
+    }
+    if (falcon_oom_ff != NULL) {
+        falcon_oom_ff(p);
+    }
+    else {
+        free(p);
+    }
+}
+
+static void* falcon_oom_realloc(void* p, size_t n)
+{
+    void* r = (falcon_oom_rf != NULL) ? falcon_oom_rf(p, n) : realloc(p, n);
+
+    if ((p == NULL) && (r != NULL)) {
+        falcon_oom_live++;
+    }
+    return r;
+}
+
+static int falcon_oom_save(void)
+{
+    return wolfSSL_GetAllocators(&falcon_oom_mf, &falcon_oom_ff,
+        &falcon_oom_rf);
+}
+
+/* failAt -1 only counts the private key buffer allocations. */
+static int falcon_oom_install(int failAt)
+{
+    falcon_oom_failAt = failAt;
+    falcon_oom_kCount = 0;
+    falcon_oom_live = 0;
+    return wolfSSL_SetAllocators(falcon_oom_malloc, falcon_oom_free,
+        falcon_oom_realloc);
+}
+
+static void falcon_oom_restore(void)
+{
+    (void)wolfSSL_SetAllocators(falcon_oom_mf, falcon_oom_ff, falcon_oom_rf);
+}
+
+/* Runs one caller of wc_falcon_set_level; returns 1 when it accepted the key. */
+static int falcon_oom_run(int which, const byte* der, word32 derSz,
+    const byte* pub, word32 pubSz)
+{
+    int ok = 0;
+
+    if (which == 0) {
+        WOLFSSL_CTX* ctx;
+
+    #ifndef NO_WOLFSSL_CLIENT
+        ctx = wolfSSL_CTX_new(wolfSSLv23_client_method());
+    #elif !defined(NO_WOLFSSL_SERVER)
+        ctx = wolfSSL_CTX_new(wolfSSLv23_server_method());
+    #endif
+        if (ctx != NULL) {
+            ok = (wolfSSL_CTX_use_PrivateKey_buffer(ctx, der, (long)derSz,
+                WOLFSSL_FILETYPE_ASN1) == WOLFSSL_SUCCESS);
+            wolfSSL_CTX_free(ctx);
+        }
+    }
+#ifdef OPENSSL_EXTRA
+    else {
+        const unsigned char* p = pub;
+        WOLFSSL_EVP_PKEY* pkey = wolfSSL_d2i_PUBKEY(NULL, &p, (long)pubSz);
+
+        ok = (pkey != NULL);
+        wolfSSL_EVP_PKEY_free(pkey);
+    }
+#endif
+#if defined(OPENSSL_EXTRA) || defined(DEBUG_WOLFSSL_VERBOSE)
+    wolfSSL_ERR_clear_error();
+#endif
+    (void)pub;
+    (void)pubSz;
+    return ok;
+}
+#endif
+
+/* A failed wc_falcon_set_level allocation must fail its caller outright:
+ * nothing leaked, and no further level tried. */
+int test_wc_falcon_set_level_oom_callers(void)
+{
+    EXPECT_DECLS;
+#ifdef FALCON_OOM_TEST
+    falcon_key key;
+    WC_RNG rng;
+    byte* der = NULL;
+    byte pub[FALCON_MAX_PUB_KEY_SIZE];
+    word32 pubSz;
+    int derSz = 0;
+    int li;
+    int which;
+    int n;
+    int total;
+    int ok;
+    const word32 derMax = 2 * FALCON_MAX_PRV_KEY_SIZE;
+#ifdef OPENSSL_EXTRA
+    const int numCallers = 2;
+#else
+    const int numCallers = 1;
+#endif
+
+    XMEMSET(&rng, 0, sizeof(rng));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectNotNull(der = (byte*)XMALLOC(derMax, NULL, DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(falcon_oom_save(), 0);
+
+    for (li = 0; EXPECT_SUCCESS() && (li < FALCON_NUM_LEVELS); li++) {
+        XMEMSET(&key, 0, sizeof(key));
+        ExpectIntEQ(wc_falcon_init(&key), 0);
+        ExpectIntEQ(wc_falcon_set_level(&key, falcon_levels[li]), 0);
+        ExpectIntEQ(wc_falcon_make_key(&key, &rng), 0);
+        ExpectIntGT(derSz = wc_Falcon_KeyToDer(&key, der, derMax), 0);
+        pubSz = (word32)sizeof(pub);
+        ExpectIntEQ(wc_falcon_export_public(&key, pub, &pubSz), 0);
+        wc_falcon_free(&key);
+
+        for (which = 0; EXPECT_SUCCESS() && (which < numCallers); which++) {
+            ExpectIntEQ(falcon_oom_install(-1), 0);
+            ok = falcon_oom_run(which, der, (word32)derSz, pub, pubSz);
+            total = falcon_oom_kCount;
+            falcon_oom_restore();
+            ExpectIntEQ(ok, 1);
+            ExpectIntGT(total, 0);
+            ExpectIntEQ(falcon_oom_live, 0);
+
+            for (n = 0; EXPECT_SUCCESS() && (n < total); n++) {
+                ExpectIntEQ(falcon_oom_install(n), 0);
+                ok = falcon_oom_run(which, der, (word32)derSz, pub, pubSz);
+                falcon_oom_restore();
+                ExpectIntEQ(ok, 0);
+                ExpectIntEQ(falcon_oom_kCount, n + 1);
+                ExpectIntEQ(falcon_oom_live, 0);
+            }
+        }
+    }
+
+    falcon_oom_failAt = -1;
+    if (der != NULL) {
+        ForceZero(der, derMax);
+    }
+    XFREE(der, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+#endif
+    return EXPECT_RESULT();
+}
+
 /*
  * MC/DC decision coverage for the public wc_falcon_* wrapper decisions that the
  * functional tests above leave with an unshown independence pair. Each block
