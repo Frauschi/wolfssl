@@ -8534,6 +8534,7 @@ then
     AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_FALCON_DYNAMIC_KEYS"
 fi
 
+
 # XMSS CFLAG processing (after FIPS section for sandwich pattern)
 if test "$ENABLED_XMSS" != "no"
 then
@@ -11795,6 +11796,49 @@ then
         AM_CFLAGS="$AM_CFLAGS -DWC_TEST_NO_CRYPTOCB_SW_TEST"
 fi
 
+# Sub-option list for the summary. The parse loop above collapses ENABLED_FALCON
+# to "yes", so without this a level restriction or dynamic keys is invisible,
+# and both change sizeof(falcon_key) and which levels a peer can negotiate.
+# Built here rather than beside the option because falcon.h drops both caches
+# under WOLF_CRYPTO_CB_ONLY_FALCON, which is only decided above.
+FALCON_SUMMARY="$ENABLED_FALCON"
+if test "$ENABLED_FALCON" != "no"; then
+    falcon_opts=
+    test "$ENABLED_FALCON_ASM" = "yes" && falcon_opts="$falcon_opts,asm"
+    test "$ENABLED_FALCON_DOUBLE" = "yes" && falcon_opts="$falcon_opts,double"
+    test "$ENABLED_FALCON_AVX2" = "yes" && falcon_opts="$falcon_opts,avx2"
+    test "$ENABLED_FALCON_NEON" = "yes" && falcon_opts="$falcon_opts,neon"
+    test "$ENABLED_FALCON_SMALL_MEM" = "yes" && falcon_opts="$falcon_opts,small-mem"
+    # falcon.h resolves the cache request to what the selected signer can hold,
+    # so mirror that here: the summary has to name what was built, not what was
+    # asked for.
+    falcon_cache_key=$ENABLED_FALCON_CACHE_KEY
+    falcon_cache_basis=$ENABLED_FALCON_CACHE_BASIS
+    if test "$ENABLED_CRYPTOCB_ONLY" = "yes"; then
+        falcon_cache_key=no
+        falcon_cache_basis=no
+    elif test "$ENABLED_FALCON_CACHE_KEY" = "yes"; then
+        if test "$ENABLED_FALCON_SMALL_MEM" = "yes"; then
+            falcon_cache_key=no
+            falcon_cache_basis=yes
+        else
+            falcon_cache_basis=no
+        fi
+    fi
+    test "$falcon_cache_key" = "yes" && falcon_opts="$falcon_opts,cache-key"
+    test "$falcon_cache_basis" = "yes" && falcon_opts="$falcon_opts,cache-basis"
+    # Naming both levels builds both, exactly as the CFLAG block above reads it.
+    test "$ENABLED_FALCON_LEVEL1" = "yes" && test "$ENABLED_FALCON_LEVEL5" = "no" \
+        && falcon_opts="$falcon_opts,level1-only"
+    test "$ENABLED_FALCON_LEVEL5" = "yes" && test "$ENABLED_FALCON_LEVEL1" = "no" \
+        && falcon_opts="$falcon_opts,level5-only"
+    test "$ENABLED_FALCON_DYNAMIC_KEYS" = "yes" && falcon_opts="$falcon_opts,dynamic-keys"
+    if test -n "$falcon_opts"; then
+        falcon_opts=`echo "$falcon_opts" | sed 's/^,//'`
+        FALCON_SUMMARY="yes ($falcon_opts)"
+    fi
+fi
+
 # Crypto Callbacks Utils (Copy/Free/etc)
 AC_ARG_ENABLE([cryptocbutils],
     [AS_HELP_STRING([--enable-cryptocbutils@<:@=copy,free,setkey,export,...@:>@],
@@ -14119,7 +14163,7 @@ echo "   * XMSS:                       $ENABLED_XMSS"
 echo "   * SLH-DSA                     $ENABLED_SLHDSA"
 echo "   * MLKEM:                      $ENABLED_MLKEM"
 echo "   * ML-DSA:                     $ENABLED_MLDSA"
-echo "   * Falcon:                     $ENABLED_FALCON"
+echo "   * Falcon:                     $FALCON_SUMMARY"
 echo "   * ECCSI                       $ENABLED_ECCSI"
 echo "   * SAKKE                       $ENABLED_SAKKE"
 echo "   * ASN:                        $ENABLED_ASN"
@@ -14177,7 +14221,7 @@ echo "   * Persistent session cache:   $ENABLED_SAVESESSION"
 echo "   * Persistent cert    cache:   $ENABLED_SAVECERT"
 echo "   * Atomic User Record Layer:   $ENABLED_ATOMICUSER"
 echo "   * Public Key Callbacks:       $ENABLED_PKCALLBACKS"
-echo "   * Falcon:                     $ENABLED_FALCON"
+echo "   * Falcon:                     $FALCON_SUMMARY"
 echo "   * Whitewood netRandom:        $ENABLED_WNR"
 echo "   * Server Name Indication:     $ENABLED_SNI"
 echo "   * ALPN:                       $ENABLED_ALPN"
