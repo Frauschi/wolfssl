@@ -71,6 +71,10 @@
     !defined(WOLFSSL_FALCON_SIGN_SMALL_MEM)
     /* Internal: the expanded key is really held in the key structure. */
     #define WC_FALCON_CACHE_TREE
+    /* The expanded key already contains the basis, and the basis cache is read
+     * only until the expansion exists. Asking for both would keep a second
+     * copy of secret material alive that nothing reads again. */
+    #undef WC_FALCON_CACHE_PRIV_BASIS
 #elif defined(WC_FALCON_CACHE_EXPANDED_KEY)
     #ifndef WC_FALCON_CACHE_PRIV_BASIS
         #define WC_FALCON_CACHE_PRIV_BASIS

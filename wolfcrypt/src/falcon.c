@@ -592,18 +592,14 @@ static int falcon_keygen(WC_RNG* rng, sword8* f, sword8* g,
 #define FALCON_SIGN_TMP_FPR(logn)        ((size_t)6 << (logn))
 
 /* Scratch, in fpr elements, that falcon_complete_private and
- * falcon_expand_privkey each need. A caller lending its own buffer (the signer
- * does, to keep these off the peak) must supply at least this much: both
- * helpers write the whole region and wc_ForceZero it on the way out, so a
- * short buffer overruns silently. FALCON_ASSERT_SCRATCH_FITS below checks the
- * two in-tree lenders at compile time. */
+ * falcon_expand_privkey each need. Both write the whole region and
+ * wc_ForceZero it on the way out, so a lender supplying less than this
+ * overruns silently. The static assertions below check the in-tree lenders. */
 #define FALCON_COMPLETE_PRIV_TMP_FPR(logn) ((size_t)3 << (logn))
-#define FALCON_EXPAND_PRIV_TMP_FPR(logn)   ((size_t)6 << (logn))
+#define FALCON_EXPAND_PRIV_TMP_FPR(logn)   ((size_t)5 << (logn))
 
-/* The default signer lends its own scratch to the key setup, so its arena has
- * to cover what those helpers use. Its margin over falcon_expand_privkey is
- * exactly zero, which is why this is asserted rather than left to a comment.
- * The ratios are constant in logn, so one logn checks them all. */
+/* The signer lends its own scratch to the key setup. The ratios are constant
+ * in logn, so one logn checks them all. */
 wc_static_assert(FALCON_SIGN_TMP_FPR(1) >= FALCON_EXPAND_PRIV_TMP_FPR(1));
 wc_static_assert(FALCON_SIGN_TMP_FPR(1) >= FALCON_COMPLETE_PRIV_TMP_FPR(1));
 
@@ -6833,7 +6829,6 @@ int falcon_expand_privkey(fpr* expanded, const sword8* f, const sword8* g,
     fpr* b11;
     fpr* g00;
     fpr* g01;
-    fpr* g11;
     fpr* gxx;
     fpr* tree;
     fpr* tmp;
@@ -6846,9 +6841,10 @@ int falcon_expand_privkey(fpr* expanded, const sword8* f, const sword8* g,
 
     n = MKN(logn);
 
-    /* Internal scratch: six polynomials (matches the reference 48*2^logn).
-     * Taken from the caller's scratch when it has some idle, which is what
-     * keeps this off the signer's peak. */
+    /* Internal scratch: FALCON_EXPAND_PRIV_TMP_FPR(logn) == five polynomials -
+     * three for g00/g01/gxx plus the two ffLDL_fft carves out of gxx. The
+     * reference asks for six; the g11 slot it counts is not kept here. Taken
+     * from the caller's scratch when it has some idle. */
     if (scratch != NULL) {
         tmp = scratch;
     }
@@ -6886,11 +6882,12 @@ int falcon_expand_privkey(fpr* expanded, const sword8* f, const sword8* g,
     falcon_poly_neg(rf, logn);
     falcon_poly_neg(rF, logn);
 
-    /* Gram matrix G = B*B^* (upper triangle: g00, g01, g11). */
+    /* Gram matrix G = B*B^* (upper triangle: g00, g01). No slot for g11: the
+     * root derives D11 from g00 and no other level reads it. gxx is the
+     * working polynomial below plus the three ffLDL_fft needs. */
     g00 = tmp;
     g01 = g00 + n;
-    g11 = g01 + n;
-    gxx = g11 + n;
+    gxx = g01 + n;
 
     XMEMCPY(g00, b00, n * sizeof(*b00));
     falcon_poly_mulselfadj_fft(g00, logn);
@@ -6903,9 +6900,6 @@ int falcon_expand_privkey(fpr* expanded, const sword8* f, const sword8* g,
     XMEMCPY(gxx, b01, n * sizeof(*b01));
     falcon_poly_muladj_fft(gxx, b11, logn);
     falcon_poly_add(g01, gxx, logn);
-
-    /* g11 is deliberately not formed: ffLDL_fft derives the root D11 from
-     * det(G) = q^2 and g00, and no other level reads it. */
 
     /* Falcon tree, then normalization. */
     ffLDL_fft(tree, g00, g01, logn, gxx);
@@ -9047,6 +9041,13 @@ int wc_falcon_make_key(falcon_key* key, WC_RNG* rng)
         return BAD_FUNC_ARG;
     }
 
+#if defined(WC_FALCON_CACHE_TREE) || defined(WC_FALCON_CACHE_PRIV_BASIS)
+    /* Drop the caches here rather than in falcon_native_make_key, which a
+     * crypto callback servicing the keygen never reaches. A cache left behind
+     * would sign under the replaced private key. */
+    falcon_cache_clear(key);
+#endif
+
 #ifdef WOLF_CRYPTO_CB
     #ifndef WOLF_CRYPTO_CB_FIND
     if (key->devId != INVALID_DEVID)
@@ -9942,6 +9943,8 @@ int wc_Falcon_PrivateKeyDecode(const byte* input, word32* inOutIdx,
         }
     }
 
+    /* privKey holds the decoded secret polynomials. */
+    ForceZero(privKey, FALCON_MAX_PRV_KEY_SIZE);
     XFREE(privKey, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
     XFREE(pubKey, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
     return ret;
