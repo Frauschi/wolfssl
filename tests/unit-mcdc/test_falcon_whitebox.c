@@ -663,31 +663,45 @@ static void wb_native_guards(WC_RNG* rng)
 static void wb_native_roundtrip(WC_RNG* rng)
 {
     falcon_key key;
-    byte   sig[FALCON_LEVEL1_SIG_SIZE];
+    byte   sig[FALCON_MAX_SIG_SIZE];
     word32 sigLen = sizeof(sig);
     byte   msg[32];
     int    res = 0;
     int    r;
 
     XMEMSET(&key, 0, sizeof(key));
-    key.level = FALCON_LEVEL1;
-    key.heap  = NULL;
     XMEMSET(msg, 0x5A, sizeof(msg));
+
+    /* Set the level through the API rather than by assigning key.level: with
+     * WOLFSSL_FALCON_DYNAMIC_KEYS that assignment is what allocates the
+     * encoded key buffers, and the keygen below writes straight into them. */
+    if (wc_falcon_init(&key) != 0) {
+        WB_NOTE("falcon_init failed; deep keygen paths skipped");
+        return;
+    }
+    if (wc_falcon_set_level(&key, FALCON_MAX_LEVEL) != 0) {
+        WB_NOTE("falcon_set_level failed; deep keygen paths skipped");
+        wc_falcon_free(&key);
+        return;
+    }
 
     r = falcon_native_make_key(&key, rng);
     if (r != 0) {
-        WB_NOTE("native_make_key(Falcon-512) failed; deep keygen paths skipped");
+        WB_NOTE("native_make_key failed; deep keygen paths skipped");
+        wc_falcon_free(&key);
         return;
     }
     r = falcon_native_sign_msg(msg, sizeof(msg), sig, &sigLen, &key, rng);
     if (r != 0) {
         WB_NOTE("native_sign_msg failed; deep sign paths skipped");
+        wc_falcon_free(&key);
         return;
     }
     r = falcon_native_verify_msg(sig, sigLen, msg, sizeof(msg), &res, &key);
     if ((r != 0) || (res != 1)) {
         WB_NOTE("native_verify_msg did not accept a self-signed message");
     }
+    wc_falcon_free(&key);
     WB_OK("native make/sign/verify round-trip (deep static paths) exercised");
 }
 #endif /* !WOLFSSL_FALCON_VERIFY_ONLY */
