@@ -45017,6 +45017,7 @@ TEST_CASE testCases[] = {
     TEST_DECL(test_TLSX_SupportedCurve_intersection),
     TEST_DECL(test_TLSX_SupportedCurve_check_priority),
     TEST_DECL(test_TLSX_SupportedFFDHE_Set),
+    TEST_DECL(test_TLSX_PointFormat_list),
     TEST_DECL(test_TLSX_MaxFragment_value),
     TEST_DECL(test_TLSX_PointFormat_uncompressed_required),
     TEST_DECL(test_wolfSSL_CTX_add_client_custom_ext),
