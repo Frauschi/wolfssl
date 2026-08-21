@@ -5395,55 +5395,58 @@ int TLSX_SupportedCurve_Parse(const WOLFSSL* ssl, const byte* input,
         }
     }
     else {
-        /* Find the intersection with what the user has set */
-        SupportedCurves* ourCurves = (SupportedCurves*)extension->data;
-        SupportedCurves* commonCurves = NULL;
+        /* Keep the intersection with what the user has set. The groups both
+         * sides have are moved to the front of our own list, in the peer's
+         * order, so no second list is allocated. */
+        SupportedCurves* curves = (SupportedCurves*)extension->data;
+        word16 common = 0;
         word16 i;
 
-        for (; (ourCurves != NULL) && (offset < length);
+        for (; (curves != NULL) && (offset < length);
                 offset += OPAQUE16_LEN) {
             ato16(input + offset, &name);
 
-            for (i = 0; i < ourCurves->count; i++) {
-                if (ourCurves->name[i] == name)
+            for (i = 0; i < curves->count; i++) {
+                if (curves->name[i] == name)
                     break;
             }
-
-            if (i < ourCurves->count) {
-                ret = commonCurves == NULL ?
-                      TLSX_SupportedCurve_New(&commonCurves, name, ssl->heap) :
-                      TLSX_SupportedCurve_Append(&commonCurves, name,
-                                                 ssl->heap);
-                if (ret != 0)
-                    break;
+            if (i < curves->count) {
+                /* A name already inside the kept range is a repeat in the
+                 * peer list and moves nothing. */
+                if (i >= common) {
+                    curves->name[i] = curves->name[common];
+                    curves->name[common++] = name;
+                }
             }
 #if !defined(NO_DH) && !defined(WOLFSSL_NO_TLS12) && \
     !defined(NO_WOLFSSL_SERVER)
-            /* RFC 7919 Section 4 (see comment above). */
+            /* RFC 7919 Section 4 (see comment above). The codepoint names no
+             * group this build has, so it is not in our list and has to be
+             * appended before it can be kept. */
             else if (isRequest && WOLFSSL_NAMED_GROUP_IS_FFDHE(name) &&
                     !TLSX_IsGroupSupported(name, ssl->options.side)) {
-                ret = commonCurves == NULL ?
-                      TLSX_SupportedCurve_New(&commonCurves, name, ssl->heap) :
-                      TLSX_SupportedCurve_Append(&commonCurves, name,
-                                                 ssl->heap);
+                ret = TLSX_SupportedCurve_Append(&curves, name, ssl->heap);
                 if (ret != 0)
                     break;
+                extension->data = curves;
+                curves->name[curves->count - 1] = curves->name[common];
+                curves->name[common++] = name;
             }
 #endif /* !NO_DH && !WOLFSSL_NO_TLS12 && !NO_WOLFSSL_SERVER */
         }
-        /* If no common curves return error. In TLS 1.3 we can still try to save
-         * this by using HRR. */
-        if (ret == 0 && commonCurves == NULL &&
-                !IsAtLeastTLSv1_3(ssl->version))
-            ret = ECC_CURVE_ERROR;
+        /* Commit only on success, so an allocation failure above keeps its own
+         * error code and leaves the configured list as it was rather than
+         * truncating it to a partial intersection.
+         * No common curve below TLS 1.3 is fatal, and nothing was moved in
+         * that case, so leaving the count alone keeps our configured list as
+         * it was. TLS 1.3 can still save the handshake with a HelloRetryRequest
+         * and takes the empty intersection. */
         if (ret == 0) {
-            /* Now swap out the curves in the extension */
-            TLSX_SupportedCurve_FreeAll((SupportedCurves*)extension->data,
-                                        ssl->heap);
-            extension->data = commonCurves;
-            commonCurves = NULL;
+            if (common == 0 && !IsAtLeastTLSv1_3(ssl->version))
+                ret = ECC_CURVE_ERROR;
+            else if (curves != NULL)
+                curves->count = common;
         }
-        TLSX_SupportedCurve_FreeAll(commonCurves, ssl->heap);
     }
 
     return ret;

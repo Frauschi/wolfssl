@@ -2151,6 +2151,153 @@ int test_TLSX_SupportedCurve_append(void)
     return EXPECT_RESULT();
 }
 
+/* Growing the supported groups list past its initial capacity.
+ *
+ * The list starts as one allocation and doubles when it fills, copying the
+ * names it already holds into the new block. Reaching that path needs more
+ * names than a build's own curves supply, so it is driven through the RFC 7919
+ * rule instead: a codepoint in the FFDHE range is kept even when this build has
+ * no such group, which is the one way a peer can put an arbitrary number of
+ * names into the list.
+ */
+int test_TLSX_SupportedCurve_grow(void)
+{
+    EXPECT_DECLS;
+#if !defined(NO_WOLFSSL_CLIENT) && !defined(NO_TLS) && \
+    defined(HAVE_SUPPORTED_CURVES) && defined(HAVE_TLS_EXTENSIONS) && \
+    !defined(NO_DH) && !defined(WOLFSSL_NO_TLS12) && \
+    !defined(NO_WOLFSSL_SERVER)
+    /* 20 codepoints inside the FFDHE range (256..511) that name no group any
+     * build implements, so every one of them takes the RFC 7919 keep path.
+     * More than the 16 names the first allocation holds. */
+    #define TEST_GROW_CNT 20
+    #define TEST_GROW_FIRST 0x0140
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL* ssl = NULL;
+    Suites* suites = NULL;
+    TLSX* extension = NULL;
+    SupportedCurves* curves = NULL;
+    byte peerList[6 + TEST_GROW_CNT * 2];
+    word16 i;
+
+    /* supported_groups (0x000a), extension length, list length, names. */
+    peerList[0] = 0x00;
+    peerList[1] = 0x0a;
+    peerList[2] = (byte)(((2 + TEST_GROW_CNT * 2) >> 8) & 0xff);
+    peerList[3] = (byte)((2 + TEST_GROW_CNT * 2) & 0xff);
+    peerList[4] = (byte)(((TEST_GROW_CNT * 2) >> 8) & 0xff);
+    peerList[5] = (byte)((TEST_GROW_CNT * 2) & 0xff);
+    for (i = 0; i < TEST_GROW_CNT; i++) {
+        peerList[6 + i * 2] = (byte)(((TEST_GROW_FIRST + i) >> 8) & 0xff);
+        peerList[7 + i * 2] = (byte)((TEST_GROW_FIRST + i) & 0xff);
+    }
+
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method()));
+    /* No list of our own, so the peer's names are the ones stored. */
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    if (ssl != NULL)
+        suites = (Suites*)WOLFSSL_SUITES(ssl);
+    ExpectIntEQ(TLSX_Parse(ssl, peerList, (word16)sizeof(peerList),
+                           client_hello, suites), 0);
+
+    if (ssl != NULL)
+        extension = TLSX_Find(ssl->extensions, TLSX_SUPPORTED_GROUPS);
+    ExpectNotNull(extension);
+    if (extension != NULL)
+        curves = (SupportedCurves*)extension->data;
+    ExpectNotNull(curves);
+
+    /* Every name survived the doubling, in order and without duplication. */
+    ExpectIntEQ(curves == NULL ? -1 : (int)curves->count, TEST_GROW_CNT);
+    ExpectIntGE(curves == NULL ? -1 : (int)curves->cap, TEST_GROW_CNT);
+    for (i = 0; (curves != NULL) && (i < TEST_GROW_CNT); i++) {
+        ExpectIntEQ(curves->name[i], TEST_GROW_FIRST + i);
+    }
+
+    wolfSSL_free(ssl);
+    wolfSSL_CTX_free(ctx);
+    #undef TEST_GROW_CNT
+    #undef TEST_GROW_FIRST
+#endif
+    return EXPECT_RESULT();
+}
+
+/* The supported_groups intersection a server keeps when it has its own list.
+ *
+ * The groups common to both sides are kept in the peer's order, repeats and
+ * groups the server does not have are dropped, and a TLS 1.2 handshake with no
+ * common group is rejected.
+ */
+int test_TLSX_SupportedCurve_intersection(void)
+{
+    EXPECT_DECLS;
+#if !defined(NO_WOLFSSL_CLIENT) && !defined(NO_TLS) && \
+    defined(HAVE_SUPPORTED_CURVES) && !defined(WOLFSSL_NO_TLS12) && \
+    defined(HAVE_ECC) && !defined(NO_ECC_SECP) && ECC_MIN_KEY_SZ <= 256 && \
+    (!defined(NO_ECC256) || defined(HAVE_ALL_CURVES)) && \
+    (defined(HAVE_ECC384) || defined(HAVE_ALL_CURVES)) && \
+    (!defined(NO_WOLFSSL_SERVER) || (defined(WOLFSSL_TLS13) && \
+                                     !defined(WOLFSSL_NO_SERVER_GROUPS_EXT)))
+    /* As in test_TLSX_SupportedCurve_empty_or_unsupported(), a client-side
+     * WOLFSSL is the parse vehicle: the code path is chosen by the message
+     * type, not by the side of the object. */
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL* ssl = NULL;
+    Suites* suites = NULL;
+    TLSX* extension = NULL;
+    SupportedCurves* curves = NULL;
+    /* supported_groups (0x000a), ext len 0x000a, list len 0x0008, secp384r1
+     * (0x0018), 0xeeee (private-use value we do not have), secp384r1 again,
+     * secp256r1 (0x0017) */
+    const byte peerList[] = { 0x00, 0x0a, 0x00, 0x0a, 0x00, 0x08,
+                              0x00, 0x18, 0xee, 0xee, 0x00, 0x18, 0x00, 0x17 };
+    /* supported_groups (0x000a), ext len 0x0004, list len 0x0002, 0xeeee */
+    const byte noCommon[] = { 0x00, 0x0a, 0x00, 0x04, 0x00, 0x02, 0xee, 0xee };
+
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method()));
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    /* Our own list, least preferred group of the two last. */
+    ExpectIntEQ(wolfSSL_UseSupportedCurve(ssl, WOLFSSL_ECC_SECP256R1),
+                WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_UseSupportedCurve(ssl, WOLFSSL_ECC_SECP384R1),
+                WOLFSSL_SUCCESS);
+    if (ssl != NULL)
+        suites = (Suites*)WOLFSSL_SUITES(ssl);
+    ExpectIntEQ(TLSX_Parse(ssl, peerList, (word16)sizeof(peerList),
+                           client_hello, suites), 0);
+    if (ssl != NULL)
+        extension = TLSX_Find(ssl->extensions, TLSX_SUPPORTED_GROUPS);
+    ExpectNotNull(extension);
+    if (extension != NULL)
+        curves = (SupportedCurves*)extension->data;
+    ExpectNotNull(curves);
+    /* Both common groups kept, in the peer's order, the repeat dropped. */
+    ExpectIntEQ(curves == NULL ? -1 : (int)curves->count, 2);
+    ExpectIntEQ(curves == NULL ? 0 : curves->name[0], WOLFSSL_ECC_SECP384R1);
+    ExpectIntEQ(curves == NULL ? 0 : curves->name[1], WOLFSSL_ECC_SECP256R1);
+    wolfSSL_free(ssl);
+    ssl = NULL;
+
+    /* No group in common is fatal before TLS 1.3, which has no HRR to fall
+     * back on. */
+    extension = NULL;
+    curves = NULL;
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectIntEQ(wolfSSL_UseSupportedCurve(ssl, WOLFSSL_ECC_SECP256R1),
+                WOLFSSL_SUCCESS);
+    if (ssl != NULL)
+        suites = (Suites*)WOLFSSL_SUITES(ssl);
+    ExpectIntEQ(TLSX_Parse(ssl, noCommon, (word16)sizeof(noCommon),
+                           client_hello, suites),
+                WC_NO_ERR_TRACE(ECC_CURVE_ERROR));
+    wolfSSL_free(ssl);
+    ssl = NULL;
+
+    wolfSSL_CTX_free(ctx);
+#endif
+    return EXPECT_RESULT();
+}
+
 /* RFC 8422 Section 5.1.2: a client that sends the ec_point_formats extension
  * MUST include the uncompressed (0) point format. When the uncompressed format
  * is omitted the server records this (ssl->options.peerNoUncompPF) during

@@ -188,6 +188,12 @@
   sixteen names and doubles, so a build that advertises more than that takes
   one grow-and-copy rather than an allocation per group.
 
+* **Enhancement (supported groups intersection without a second list)**: a
+  server that has its own supported groups list built a second list for the
+  groups it has in common with the client, swapped it in and freed the
+  original.  The common groups are now moved to the front of the server's own
+  list, in the client's order, so the intersection costs no allocation.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:
