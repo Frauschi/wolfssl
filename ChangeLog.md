@@ -201,6 +201,13 @@
   are now walked in preference order without a list, so the list is built only
   in the case that actually sends it back to the client.
 
+* **Enhancement (handshake arrays and pre-master secret in one allocation)**:
+  the pre-master secret buffer was allocated separately from the handshake
+  arrays that hold it, in up to four places depending on the key exchange, and
+  released separately again.  It now sits at the end of the arrays allocation,
+  so the pair is created and wiped together.  A TLS 1.2 only build reserves the
+  buffer when the arrays are created rather than at the key exchange.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:

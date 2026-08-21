@@ -4077,8 +4077,6 @@ static void CleanPreMaster(WOLFSSL* ssl)
     wc_MemZero_Check(ssl->arrays->preMasterSecret, sz);
 #endif
 
-    XFREE(ssl->arrays->preMasterSecret, ssl->heap, DYNAMIC_TYPE_SECRET);
-    ssl->arrays->preMasterSecret = NULL;
     ssl->arrays->preMasterSz = 0;
 }
 
