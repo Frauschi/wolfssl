@@ -215,6 +215,10 @@
   path now releases the entry with `FreeAltNames()` so the ipString and
   ridString buffers go with it.
 
+* **Enhancement (server name indication stored in one allocation)**: the SNI
+  object and the host name it points at were allocated separately.  The name
+  now lives in the object's allocation.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:
