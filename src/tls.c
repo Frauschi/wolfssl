@@ -2245,40 +2245,31 @@ int TLSX_ALPN_GetRequest(TLSX* extensions, void** data, word16 *dataSz)
 
 #ifdef HAVE_SNI
 
-/** Creates a new SNI object. */
+/** Creates a new SNI object. The name is stored in the same allocation. */
 static SNI* TLSX_SNI_New(byte type, const void* data, word16 size, void* heap)
 {
-    SNI* sni = (SNI*)XMALLOC(sizeof(SNI), heap, DYNAMIC_TYPE_TLSX);
+    SNI* sni;
 
     (void)heap;
 
-    if (sni) {
-        sni->type = type;
-        sni->next = NULL;
+    if (type != WOLFSSL_SNI_HOST_NAME) /* invalid type */
+        return NULL;
 
-    #ifndef NO_WOLFSSL_SERVER
-        sni->options = 0;
-        sni->status  = WOLFSSL_SNI_NO_MATCH;
-    #endif
+    sni = (SNI*)XMALLOC(sizeof(SNI) + size + 1, heap, DYNAMIC_TYPE_TLSX);
+    if (sni == NULL)
+        return NULL;
 
-        switch (sni->type) {
-            case WOLFSSL_SNI_HOST_NAME:
-                sni->data.host_name = (char*)XMALLOC(size + 1, heap,
-                                                     DYNAMIC_TYPE_TLSX);
-                if (sni->data.host_name) {
-                    XSTRNCPY(sni->data.host_name, (const char*)data, size);
-                    sni->data.host_name[size] = '\0';
-                } else {
-                    XFREE(sni, heap, DYNAMIC_TYPE_TLSX);
-                    sni = NULL;
-                }
-            break;
+    sni->type = type;
+    sni->next = NULL;
 
-            default: /* invalid type */
-                XFREE(sni, heap, DYNAMIC_TYPE_TLSX);
-                sni = NULL;
-        }
-    }
+#ifndef NO_WOLFSSL_SERVER
+    sni->options = 0;
+    sni->status  = WOLFSSL_SNI_NO_MATCH;
+#endif
+
+    sni->data.host_name = (char*)sni + sizeof(SNI);
+    XSTRNCPY(sni->data.host_name, (const char*)data, size);
+    sni->data.host_name[size] = '\0';
 
     return sni;
 }
@@ -2287,12 +2278,7 @@ static SNI* TLSX_SNI_New(byte type, const void* data, word16 size, void* heap)
 static void TLSX_SNI_Free(SNI* sni, void* heap)
 {
     if (sni) {
-        switch (sni->type) {
-            case WOLFSSL_SNI_HOST_NAME:
-                XFREE(sni->data.host_name, heap, DYNAMIC_TYPE_TLSX);
-            break;
-        }
-
+        /* The name is part of the same allocation. */
         XFREE(sni, heap, DYNAMIC_TYPE_TLSX);
     }
     (void)heap;
