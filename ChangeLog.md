@@ -179,6 +179,15 @@
   signature_algorithms_cert already did, and writes the algorithm list from
   the suites so `wolfSSL_set1_sigalgs_list()` is still honored.
 
+* **Enhancement (supported groups held in one allocation)**: the supported
+  groups extension kept a linked list with one heap node per two byte group
+  identifier, so a handshake made an allocation per group advertised, and the
+  server made a second set for the intersection with the client list.  The
+  groups now live in a block that holds a count and a flat array of names,
+  which also removes the list walk that each insert did.  The block starts at
+  sixteen names and doubles, so a build that advertises more than that takes
+  one grow-and-copy rather than an allocation per group.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:
