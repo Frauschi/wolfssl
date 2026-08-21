@@ -2298,6 +2298,81 @@ int test_TLSX_SupportedCurve_intersection(void)
     return EXPECT_RESULT();
 }
 
+/* The max fragment length code is stored in the extension itself rather than
+ * in a one byte allocation. Check that a requested code is what the object
+ * reports, that the client accepts a matching server response, and that it
+ * rejects a mismatched one with UNKNOWN_MAX_FRAG_LEN_E.
+ */
+int test_TLSX_MaxFragment_value(void)
+{
+    EXPECT_DECLS;
+/* A TLS 1.2 client is the vehicle: the server's response travels in the
+ * ServerHello there, and in EncryptedExtensions from TLS 1.3 on. What is under
+ * test, where the code is held, does not depend on the version. */
+#if defined(HAVE_MAX_FRAGMENT) && !defined(NO_WOLFSSL_CLIENT) && \
+    !defined(NO_TLS) && defined(HAVE_TLS_EXTENSIONS) && \
+    !defined(WOLFSSL_NO_TLS12)
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL* ssl = NULL;
+    TLSX* extension = NULL;
+    Suites* suites = NULL;
+    /* max_fragment_length (0x0001), ext len 0x0001, code 2 (2^10 bytes) */
+    const byte match[] = { 0x00, 0x01, 0x00, 0x01, 0x02 };
+    /* Same extension carrying a code the client never asked for. */
+    const byte differs[] = { 0x00, 0x01, 0x00, 0x01, 0x03 };
+
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method()));
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectIntEQ(wolfSSL_UseMaxFragment(ssl, WOLFSSL_MFL_2_10),
+                WOLFSSL_SUCCESS);
+
+    if (ssl != NULL)
+        extension = TLSX_Find(ssl->extensions, TLSX_MAX_FRAGMENT_LENGTH);
+    ExpectNotNull(extension);
+    /* The code lives in the extension, which therefore holds no data. */
+    ExpectIntEQ(extension == NULL ? -1 : (int)(byte)extension->val,
+                WOLFSSL_MFL_2_10);
+    ExpectNull(extension == NULL ? (void*)1 : extension->data);
+
+    /* A server response carrying the requested code is accepted. */
+    if (ssl != NULL)
+        suites = (Suites*)WOLFSSL_SUITES(ssl);
+    ExpectIntEQ(TLSX_Parse(ssl, match, (word16)sizeof(match), server_hello,
+                           suites), 0);
+    wolfSSL_free(ssl);
+    ssl = NULL;
+
+    /* One carrying a different code is rejected. */
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectIntEQ(wolfSSL_UseMaxFragment(ssl, WOLFSSL_MFL_2_10),
+                WOLFSSL_SUCCESS);
+    if (ssl != NULL)
+        suites = (Suites*)WOLFSSL_SUITES(ssl);
+    ExpectIntEQ(TLSX_Parse(ssl, differs, (word16)sizeof(differs), server_hello,
+                           suites),
+                WC_NO_ERR_TRACE(UNKNOWN_MAX_FRAG_LEN_E));
+    wolfSSL_free(ssl);
+    ssl = NULL;
+    wolfSSL_CTX_free(ctx);
+    ctx = NULL;
+
+    /* A request configured on the context is found by the same lookup, so an
+     * object that never asked for itself still accepts the matching code. */
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method()));
+    ExpectIntEQ(wolfSSL_CTX_UseMaxFragment(ctx, WOLFSSL_MFL_2_10),
+                WOLFSSL_SUCCESS);
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    if (ssl != NULL)
+        suites = (Suites*)WOLFSSL_SUITES(ssl);
+    ExpectIntEQ(TLSX_Parse(ssl, match, (word16)sizeof(match), server_hello,
+                           suites), 0);
+    wolfSSL_free(ssl);
+
+    wolfSSL_CTX_free(ctx);
+#endif
+    return EXPECT_RESULT();
+}
+
 /* RFC 8422 Section 5.1.2: a client that sends the ec_point_formats extension
  * MUST include the uncompressed (0) point format. When the uncompressed format
  * is omitted the server records this (ssl->options.peerNoUncompPF) during

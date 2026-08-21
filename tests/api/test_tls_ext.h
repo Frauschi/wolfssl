@@ -46,6 +46,7 @@ int test_TLSX_SupportedCurve_empty_or_unsupported(void);
 int test_TLSX_SupportedCurve_append(void);
 int test_TLSX_SupportedCurve_grow(void);
 int test_TLSX_SupportedCurve_intersection(void);
+int test_TLSX_MaxFragment_value(void);
 int test_TLSX_PointFormat_uncompressed_required(void);
 int test_wolfSSL_CTX_add_client_custom_ext(void);
 int test_wolfSSL_custom_ext_handshake(void);

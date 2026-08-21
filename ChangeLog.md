@@ -232,6 +232,10 @@
   identifier now lives in the object's allocation, and the type and size are
   validated before anything is allocated.
 
+* **Enhancement (max fragment length needs no allocation)**: the extension
+  allocated one byte of heap to hold the negotiated length code.  The code is
+  kept in the extension's own value field instead.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:
