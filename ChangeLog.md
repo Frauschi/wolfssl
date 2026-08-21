@@ -227,6 +227,11 @@
   object and the ticket bytes it points at were allocated separately.  The
   bytes now live in the object's allocation.
 
+* **Enhancement (trusted CA indication stored in one allocation)**: the trusted
+  CA object and the identifier it points at were allocated separately.  The
+  identifier now lives in the object's allocation, and the type and size are
+  validated before anything is allocated.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:
