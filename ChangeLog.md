@@ -219,6 +219,10 @@
   object and the host name it points at were allocated separately.  The name
   now lives in the object's allocation.
 
+* **Enhancement (ALPN protocol name stored in one allocation)**: the ALPN
+  object and the protocol name it points at were allocated separately.  The
+  name now lives in the object's allocation.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:

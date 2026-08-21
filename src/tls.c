@@ -1797,7 +1797,9 @@ static ALPN* TLSX_ALPN_New(char *protocol_name, word16 protocol_nameSz,
         return NULL;
     }
 
-    alpn = (ALPN*)XMALLOC(sizeof(ALPN), heap, DYNAMIC_TYPE_TLSX);
+    /* The protocol name is stored in the same allocation. */
+    alpn = (ALPN*)XMALLOC(sizeof(ALPN) + protocol_nameSz + 1, heap,
+                          DYNAMIC_TYPE_TLSX);
     if (alpn == NULL) {
         WOLFSSL_MSG("Memory failure");
         return NULL;
@@ -1807,14 +1809,7 @@ static ALPN* TLSX_ALPN_New(char *protocol_name, word16 protocol_nameSz,
     alpn->negotiated = 0;
     alpn->options = 0;
 
-    alpn->protocol_name = (char*)XMALLOC(protocol_nameSz + 1,
-                                         heap, DYNAMIC_TYPE_TLSX);
-    if (alpn->protocol_name == NULL) {
-        WOLFSSL_MSG("Memory failure");
-        XFREE(alpn, heap, DYNAMIC_TYPE_TLSX);
-        return NULL;
-    }
-
+    alpn->protocol_name = (char*)alpn + sizeof(ALPN);
     XMEMCPY(alpn->protocol_name, protocol_name, protocol_nameSz);
     alpn->protocol_name[protocol_nameSz] = 0;
 
@@ -1828,10 +1823,7 @@ static void TLSX_ALPN_Free(ALPN *alpn, void* heap)
 {
     (void)heap;
 
-    if (alpn == NULL)
-        return;
-
-    XFREE(alpn->protocol_name, heap, DYNAMIC_TYPE_TLSX);
+    /* The protocol name is part of the same allocation. */
     XFREE(alpn, heap, DYNAMIC_TYPE_TLSX);
 }
 
