@@ -2918,52 +2918,43 @@ int TLSX_SNI_GetFromBuffer(const byte* clientHello, word32 helloSz,
 /** Creates a new TCA object. */
 static TCA* TLSX_TCA_New(byte type, const byte* id, word16 idSz, void* heap)
 {
-    TCA* tca = (TCA*)XMALLOC(sizeof(TCA), heap, DYNAMIC_TYPE_TLSX);
-
-    if (tca) {
-        XMEMSET(tca, 0, sizeof(TCA));
-        tca->type = type;
-
-        switch (type) {
-            case WOLFSSL_TRUSTED_CA_PRE_AGREED:
-                break;
-
-            #ifndef NO_SHA
-            case WOLFSSL_TRUSTED_CA_KEY_SHA1:
-            case WOLFSSL_TRUSTED_CA_CERT_SHA1:
-                if (idSz == WC_SHA_DIGEST_SIZE &&
-                        (tca->id =
-                            (byte*)XMALLOC(idSz, heap, DYNAMIC_TYPE_TLSX))) {
-                    XMEMCPY(tca->id, id, idSz);
-                    tca->idSz = idSz;
-                }
-                else {
-                    XFREE(tca, heap, DYNAMIC_TYPE_TLSX);
-                    tca = NULL;
-                }
-                break;
-            #endif
-
-            case WOLFSSL_TRUSTED_CA_X509_NAME:
-                if (idSz > 0 &&
-                        (tca->id =
-                            (byte*)XMALLOC(idSz, heap, DYNAMIC_TYPE_TLSX))) {
-                    XMEMCPY(tca->id, id, idSz);
-                    tca->idSz = idSz;
-                }
-                else {
-                    XFREE(tca, heap, DYNAMIC_TYPE_TLSX);
-                    tca = NULL;
-                }
-                break;
-
-            default: /* invalid type */
-                XFREE(tca, heap, DYNAMIC_TYPE_TLSX);
-                tca = NULL;
-        }
-    }
+    TCA* tca;
 
     (void)heap;
+
+    switch (type) {
+        case WOLFSSL_TRUSTED_CA_PRE_AGREED:
+            idSz = 0;
+            break;
+
+        #ifndef NO_SHA
+        case WOLFSSL_TRUSTED_CA_KEY_SHA1:
+        case WOLFSSL_TRUSTED_CA_CERT_SHA1:
+            if (idSz != WC_SHA_DIGEST_SIZE)
+                return NULL;
+            break;
+        #endif
+
+        case WOLFSSL_TRUSTED_CA_X509_NAME:
+            if (idSz == 0)
+                return NULL;
+            break;
+
+        default: /* invalid type */
+            return NULL;
+    }
+
+    tca = (TCA*)XMALLOC(sizeof(TCA) + idSz, heap, DYNAMIC_TYPE_TLSX);
+    if (tca == NULL)
+        return NULL;
+
+    XMEMSET(tca, 0, sizeof(TCA));
+    tca->type = type;
+    if (idSz > 0) {
+        tca->id = (byte*)tca + sizeof(TCA);
+        XMEMCPY(tca->id, id, idSz);
+        tca->idSz = idSz;
+    }
 
     return tca;
 }
@@ -2974,7 +2965,7 @@ static void TLSX_TCA_Free(TCA* tca, void* heap)
     (void)heap;
 
     if (tca) {
-        XFREE(tca->id, heap, DYNAMIC_TYPE_TLSX);
+        /* The identifier is part of the same allocation. */
         XFREE(tca, heap, DYNAMIC_TYPE_TLSX);
     }
 }
