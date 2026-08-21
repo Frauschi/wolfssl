@@ -4992,20 +4992,76 @@ static int TLSX_SupportedCurve_New(SupportedCurves** curves, word16 name,
     return 0;
 }
 
-static int TLSX_PointFormat_New(PointFormat** point, byte format, void* heap)
+/* Number of formats the first allocation holds. More than the formats that
+ * are defined, so a list is a single allocation. */
+#define POINT_FORMATS_INIT_CNT 4
+/* Most formats a list can hold. The capacity is kept in a byte, so the
+ * doubling must not reach 256. */
+#define POINT_FORMATS_MAX_CNT  128
+/* Append() grows with (byte)(count + 1), so a full list at 0xFF would wrap to
+ * zero and silently reset the list instead of failing. */
+wc_static_assert(POINT_FORMATS_MAX_CNT < 0xFFU);
+
+/* Make room for the requested number of point formats, allocating the list
+ * when it doesn't exist yet.
+ *
+ * formats  The list to grow. *formats is updated when a new block is
+ *          allocated.
+ * cnt      The number of formats the list has to hold.
+ * heap     The heap used for allocation.
+ * returns 0 on success, otherwise failure.
+ */
+static int TLSX_PointFormat_Grow(PointFormats** formats, byte cnt, void* heap)
 {
-    if (point == NULL)
+    PointFormats* list = *formats;
+    PointFormats* newList;
+    word16 cap = POINT_FORMATS_INIT_CNT;
+
+    if ((list != NULL) && (cnt <= list->cap))
+        return 0;
+    if (cnt > POINT_FORMATS_MAX_CNT)
         return BAD_FUNC_ARG;
 
-    (void)heap;
+    while (cap < cnt)
+        cap *= 2;
+    /* The doubling can overshoot the byte the capacity is kept in. */
+    if (cap > POINT_FORMATS_MAX_CNT)
+        cap = POINT_FORMATS_MAX_CNT;
 
-    *point = (PointFormat*)XMALLOC(sizeof(PointFormat), heap,
-                                                             DYNAMIC_TYPE_TLSX);
-    if (*point == NULL)
+    newList = (PointFormats*)XMALLOC(sizeof(PointFormats) + cap, heap,
+                                     DYNAMIC_TYPE_TLSX);
+    if (newList == NULL)
         return MEMORY_E;
 
-    (*point)->format = format;
-    (*point)->next = NULL;
+    newList->count = 0;
+    newList->cap = (byte)cap;
+
+    if (list != NULL) {
+        newList->count = list->count;
+        XMEMCPY(newList->format, list->format, list->count);
+        XFREE(list, heap, DYNAMIC_TYPE_TLSX);
+    }
+
+    *formats = newList;
+
+    return 0;
+}
+
+static int TLSX_PointFormat_New(PointFormats** formats, byte format,
+                                                                     void* heap)
+{
+    PointFormats* list = NULL;
+    int ret;
+
+    if (formats == NULL)
+        return BAD_FUNC_ARG;
+
+    ret = TLSX_PointFormat_Grow(&list, 1, heap);
+    if (ret != 0)
+        return ret;
+
+    list->format[list->count++] = format;
+    *formats = list;
 
     return 0;
 }
@@ -5019,14 +5075,11 @@ static void TLSX_SupportedCurve_FreeAll(SupportedCurves* list, void* heap)
     (void)heap;
 }
 
-static void TLSX_PointFormat_FreeAll(PointFormat* list, void* heap)
+static void TLSX_PointFormat_FreeAll(PointFormats* list, void* heap)
 {
-    PointFormat* point;
-
-    while ((point = list)) {
-        list = point->next;
-        XFREE(point, heap, DYNAMIC_TYPE_TLSX);
-    }
+    /* Guarded like TLSX_SupportedCurve_FreeAll(), so the two agree. */
+    if (list != NULL)
+        XFREE(list, heap, DYNAMIC_TYPE_TLSX);
     (void)heap;
 }
 
@@ -5056,25 +5109,30 @@ static int TLSX_SupportedCurve_Append(SupportedCurves** curves, word16 name,
     return 0;
 }
 
-static int TLSX_PointFormat_Append(PointFormat* list, byte format, void* heap)
+static int TLSX_PointFormat_Append(PointFormats** formats, byte format,
+                                                                     void* heap)
 {
-    int ret = WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    PointFormats* list;
+    int ret;
+    byte i;
 
-    while (list) {
-        if (list->format == format) {
-            ret = 0; /* format already in use */
-            break;
-        }
+    if ((formats == NULL) || (*formats == NULL))
+        return BAD_FUNC_ARG;
 
-        if (list->next == NULL) {
-            ret = TLSX_PointFormat_New(&list->next, format, heap);
-            break;
-        }
-
-        list = list->next;
+    list = *formats;
+    for (i = 0; i < list->count; i++) {
+        if (list->format[i] == format)
+            return 0; /* format already in use */
     }
 
-    return ret;
+    ret = TLSX_PointFormat_Grow(formats, (byte)(list->count + 1), heap);
+    if (ret != 0)
+        return ret;
+
+    list = *formats;
+    list->format[list->count++] = format;
+
+    return 0;
 }
 
 #if defined(WOLFSSL_TLS13) || !defined(NO_WOLFSSL_CLIENT)
@@ -5236,15 +5294,12 @@ static word16 TLSX_SupportedCurve_GetSize(SupportedCurves* list)
 
 #endif
 
-static word16 TLSX_PointFormat_GetSize(PointFormat* list)
+static word16 TLSX_PointFormat_GetSize(PointFormats* list)
 {
-    PointFormat* point;
     word16 length = ENUM_LEN; /* list length */
 
-    while ((point = list)) {
-        list = point->next;
-        length += ENUM_LEN; /* format length */
-    }
+    if (list != NULL)
+        length = (word16)(length + list->count * ENUM_LEN);
 
     return length;
 }
@@ -5270,13 +5325,14 @@ static word16 TLSX_SupportedCurve_Write(SupportedCurves* list, byte* output)
 
 #endif
 
-static word16 TLSX_PointFormat_Write(PointFormat* list, byte* output)
+static word16 TLSX_PointFormat_Write(PointFormats* list, byte* output)
 {
     word16 offset = ENUM_LEN;
+    byte i;
 
-    while (list) {
-        output[offset++] = list->format;
-        list = list->next;
+    if (list != NULL) {
+        for (i = 0; i < list->count; i++)
+            output[offset++] = list->format[i];
     }
 
     output[0] = (byte)(offset - ENUM_LEN);
@@ -6240,7 +6296,7 @@ int TLSX_UseSupportedCurve(TLSX** extensions, word16 name, void* heap, int side)
 int TLSX_UsePointFormat(TLSX** extensions, byte format, void* heap)
 {
     TLSX* extension = NULL;
-    PointFormat* point = NULL;
+    PointFormats* formats = NULL;
     int ret = 0;
 
     if (extensions == NULL)
@@ -6249,19 +6305,19 @@ int TLSX_UsePointFormat(TLSX** extensions, byte format, void* heap)
     extension = TLSX_Find(*extensions, TLSX_EC_POINT_FORMATS);
 
     if (!extension) {
-        ret = TLSX_PointFormat_New(&point, format, heap);
+        ret = TLSX_PointFormat_New(&formats, format, heap);
         if (ret != 0)
             return ret;
 
-        ret = TLSX_Push(extensions, TLSX_EC_POINT_FORMATS, point, heap);
+        ret = TLSX_Push(extensions, TLSX_EC_POINT_FORMATS, formats, heap);
         if (ret != 0) {
-            XFREE(point, heap, DYNAMIC_TYPE_TLSX);
+            XFREE(formats, heap, DYNAMIC_TYPE_TLSX);
             return ret;
         }
     }
     else {
-        ret = TLSX_PointFormat_Append((PointFormat*)extension->data, format,
-                                                                          heap);
+        ret = TLSX_PointFormat_Append((PointFormats**)&extension->data, format,
+                                      heap);
         if (ret != 0)
             return ret;
     }
@@ -15297,7 +15353,7 @@ void TLSX_FreeAll(TLSX* list, void* heap)
 
             case TLSX_EC_POINT_FORMATS:
                 WOLFSSL_MSG("Point Formats extension free");
-                PF_FREE_ALL((PointFormat*)extension->data, heap);
+                PF_FREE_ALL((PointFormats*)extension->data, heap);
                 break;
 
             case TLSX_STATUS_REQUEST:
@@ -15539,7 +15595,7 @@ static int TLSX_GetSize(TLSX* list, byte* semaphore, byte msgType,
                 break;
 
             case TLSX_EC_POINT_FORMATS:
-                length += PF_GET_SIZE((PointFormat*)extension->data);
+                length += PF_GET_SIZE((PointFormats*)extension->data);
                 break;
 
             case TLSX_STATUS_REQUEST:
@@ -15816,7 +15872,7 @@ static int TLSX_Write(TLSX* list, byte* output, byte* semaphore,
 
             case TLSX_EC_POINT_FORMATS:
                 WOLFSSL_MSG("Point Formats extension to write");
-                offset += PF_WRITE((PointFormat*)extension->data,
+                offset += PF_WRITE((PointFormats*)extension->data,
                                     output + offset);
                 break;
 

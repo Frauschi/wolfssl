@@ -236,6 +236,11 @@
   allocated one byte of heap to hold the negotiated length code.  The code is
   kept in the extension's own value field instead.
 
+* **Enhancement (EC point formats held in one allocation)**: the point formats
+  extension kept a linked list with one heap node per one byte format value,
+  the same shape the supported groups extension used to have.  The formats now
+  live in a single block holding a count and a flat array.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:
