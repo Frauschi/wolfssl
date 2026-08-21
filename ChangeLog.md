@@ -170,6 +170,15 @@
   configuration now sees neither the prototype nor the `client_cert_cb`
   typedef instead of failing to build; no other configuration changes.
 
+## Enhancements
+
+* **Enhancement (signature_algorithms extension no longer needs a heap node)**:
+  the extension kept a small allocated object whose only purpose was to point
+  back at the SSL object, costing one allocation per handshake on a client and
+  two on a server.  It now stores the SSL object directly, the way
+  signature_algorithms_cert already did, and writes the algorithm list from
+  the suites so `wolfSSL_set1_sigalgs_list()` is still honored.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:
