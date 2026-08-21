@@ -223,6 +223,10 @@
   object and the protocol name it points at were allocated separately.  The
   name now lives in the object's allocation.
 
+* **Enhancement (session ticket stored in one allocation)**: the session ticket
+  object and the ticket bytes it points at were allocated separately.  The
+  bytes now live in the object's allocation.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:

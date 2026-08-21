@@ -6690,16 +6690,13 @@ static int TLSX_SessionTicket_Parse(WOLFSSL* ssl, const byte* input,
 WOLFSSL_TEST_VIS SessionTicket* TLSX_SessionTicket_Create(word32 lifetime,
                                             byte* data, word16 size, void* heap)
 {
-    SessionTicket* ticket = (SessionTicket*)XMALLOC(sizeof(SessionTicket),
-                                                       heap, DYNAMIC_TYPE_TLSX);
+    /* The ticket data is stored in the same allocation. */
+    SessionTicket* ticket = (SessionTicket*)XMALLOC(sizeof(SessionTicket) +
+                                                 size, heap, DYNAMIC_TYPE_TLSX);
     if (ticket) {
-        ticket->data = (byte*)XMALLOC(size, heap, DYNAMIC_TYPE_TLSX);
-        if (ticket->data == NULL) {
-            XFREE(ticket, heap, DYNAMIC_TYPE_TLSX);
-            return NULL;
-        }
-
-        XMEMCPY(ticket->data, data, size);
+        ticket->data = (byte*)ticket + sizeof(SessionTicket);
+        if (size > 0)
+            XMEMCPY(ticket->data, data, size);
         ticket->size     = size;
         ticket->lifetime = lifetime;
     }
@@ -6710,10 +6707,10 @@ WOLFSSL_TEST_VIS SessionTicket* TLSX_SessionTicket_Create(word32 lifetime,
 }
 WOLFSSL_TEST_VIS void TLSX_SessionTicket_Free(SessionTicket* ticket, void* heap)
 {
-    if (ticket) {
-        XFREE(ticket->data, heap, DYNAMIC_TYPE_TLSX);
-        XFREE(ticket,       heap, DYNAMIC_TYPE_TLSX);
-    }
+    /* A blank ticket request has no object, and the ticket data is part of
+     * the same allocation when it does. */
+    if (ticket != NULL)
+        XFREE(ticket, heap, DYNAMIC_TYPE_TLSX);
 
     (void)heap;
 }
