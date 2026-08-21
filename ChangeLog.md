@@ -194,6 +194,13 @@
   original.  The common groups are now moved to the front of the server's own
   list, in the client's order, so the intersection costs no allocation.
 
+* **Enhancement (server no longer builds a throwaway supported groups list)**:
+  before sending EncryptedExtensions, and when picking an FFDHE group for TLS
+  1.2, the server built a full extension list of the groups it offers only to
+  read the first one out of it and then free it.  The groups this build offers
+  are now walked in preference order without a list, so the list is built only
+  in the case that actually sends it back to the client.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:
