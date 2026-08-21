@@ -208,6 +208,13 @@
   so the pair is created and wiped together.  A TLS 1.2 only build reserves the
   buffer when the arrays are created rather than at the key exchange.
 
+* **Enhancement (alternative names parsed with one allocation each)**: parsing
+  a certificate allocated an alt name entry and then its name string, so a
+  chain with six subject alternative names cost twelve allocations.  The new
+  `AltNameNewEx()` stores the name in the entry's allocation, and the failure
+  path now releases the entry with `FreeAltNames()` so the ipString and
+  ridString buffers go with it.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:
