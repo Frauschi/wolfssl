@@ -275,6 +275,17 @@
 
 ## Fixes
 
+* **Fix (DHE-PSK wrote past the pre-master secret buffer)**: the exchange
+  stores a two byte length, the DH shared secret, another two byte length and
+  the PSK in that buffer.  With the largest DH parameters the build accepts,
+  4096 bit by default, and a maximum length PSK that comes to two bytes more
+  than `ENCRYPT_LEN`, which the buffer was sized with, so the last two bytes of
+  the key were written past the end of the allocation.  Both peers do it, the
+  client from `SendClientKeyExchange()` and the server from
+  `DoClientKeyExchange()`.  Sizing the buffer by the key exchanges the build
+  has closes it.  Reaching it needs a DHE-PSK cipher suite, DH parameters at
+  the maximum size the build accepts and a PSK of `MAX_PSK_KEY_LEN` bytes.
+
 * **Fix (certificate manager left pointing at a released store)**:
   `wolfSSL_CTX_set_cert_store()` pairs the store handed to it with the
   context's certificate manager, which keeps a pointer back to that store.
