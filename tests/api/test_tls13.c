@@ -8170,7 +8170,7 @@ int test_tls13_fragmented_session_ticket(void)
         /* The pre-master secret is carried at the end of the same allocation,
          * so it goes with it. Zero before freeing so WOLFSSL_CHECK_MEM_ZERO
          * builds don't abort. */
-        ForceZero(ssl_c->arrays, sizeof(Arrays) + ENCRYPT_LEN);
+        ForceZero(ssl_c->arrays, sizeof(Arrays) + MAX_PREMASTER_SZ);
         XFREE(ssl_c->arrays, ssl_c->heap, DYNAMIC_TYPE_ARRAYS);
         ssl_c->arrays = NULL;
     }

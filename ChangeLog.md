@@ -249,6 +249,30 @@
   without TLS 1.2 now leaves them out: the handshake hashes shrink from 864 to
   352 bytes and no handshake message is hashed with SHA-512 any more.
 
+* **Enhancement (pre-master secret buffer sized by the key exchanges)**: the
+  buffer was sized with `ENCRYPT_LEN`, which also has to hold an RSA signature
+  and is therefore as large as the biggest RSA key the build supports.  The new
+  `MAX_PREMASTER_SZ` is the largest secret the key exchanges in the build can
+  produce instead, plus the length prefixes the PSK suites add.  A build with
+  DH keeps roughly the same size, since the peer's DH parameters can be that
+  large and every named FFDHE group the build offers has to fit; one without it
+  shrinks, for example `--enable-tls13 --disable-dh --disable-psk` with a 4096
+  bit math size goes from 512 to 98 bytes per handshake.  A multicast build
+  keeps room for the `ENCRYPT_LEN` sized secret `wolfSSL_set_secret()`
+  documents, and a `HAVE_PK_CALLBACKS` build keeps the `ENCRYPT_LEN` sized
+  buffer a `GenPreMasterCb` implementation was previously handed, so no
+  existing callback can be overrun; an integration that knows what its callback
+  writes sets `WOLFSSL_MAX_GEN_PREMASTER_SZ` to take the saving.
+
+* **Change (`wolfSSL_[CTX_]SetMaxDhKey_Sz()` rejects a size the build cannot
+  honour)**: the pre-master secret buffer is sized for the largest prime the
+  build's math supports, so a ceiling above that cannot be met.  Both the
+  maximum and the matching minimum setters now return `BAD_FUNC_ARG` for such a
+  request, alongside their existing range checks, rather than storing a value
+  that would not be respected.  Importing a serialized session whose exported
+  minimum exceeds this build's maximum fails for the same reason, instead of
+  lowering the imported connection's floor to match.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:

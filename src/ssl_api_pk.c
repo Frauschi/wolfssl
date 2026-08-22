@@ -1844,6 +1844,9 @@ int wolfSSL_CTX_SetMinDhKey_Sz(WOLFSSL_CTX* ctx, word16 keySz_bits)
 {
     if (ctx == NULL || keySz_bits > 16000 || keySz_bits % 8 != 0)
         return BAD_FUNC_ARG;
+    /* A floor above what the build's math supports can never be met. */
+    if ((keySz_bits / 8) > MAX_DHKEY_SZ)
+        return BAD_FUNC_ARG;
 
 #if defined(WOLFSSL_SYS_CRYPTO_POLICY)
     if (crypto_policy.enabled) {
@@ -1870,6 +1873,9 @@ int wolfSSL_SetMinDhKey_Sz(WOLFSSL* ssl, word16 keySz_bits)
 {
     if (ssl == NULL || keySz_bits > 16000 || keySz_bits % 8 != 0)
         return BAD_FUNC_ARG;
+    /* A floor above what the build's math supports can never be met. */
+    if ((keySz_bits / 8) > MAX_DHKEY_SZ)
+        return BAD_FUNC_ARG;
 
 #if defined(WOLFSSL_SYS_CRYPTO_POLICY)
     if (crypto_policy.enabled) {
@@ -1887,13 +1893,18 @@ int wolfSSL_SetMinDhKey_Sz(WOLFSSL* ssl, word16 keySz_bits)
  *
  * @param [in] ctx         SSL/TLS context object.
  * @param [in] keySz_bits  Maximum DH key size in bits. No more than 16000 and
- *                         a multiple of 8.
+ *                         a multiple of 8, and no more than what the build's
+ *                         math supports.
  * @return  WOLFSSL_SUCCESS on success.
  * @return  BAD_FUNC_ARG when ctx is NULL or keySz_bits is invalid.
  */
 int wolfSSL_CTX_SetMaxDhKey_Sz(WOLFSSL_CTX* ctx, word16 keySz_bits)
 {
     if (ctx == NULL || keySz_bits > 16000 || keySz_bits % 8 != 0)
+        return BAD_FUNC_ARG;
+    /* The pre-master secret buffer is sized for the largest prime the build's
+     * math supports, so a ceiling above that cannot be honoured. */
+    if ((keySz_bits / 8) > MAX_DHKEY_SZ)
         return BAD_FUNC_ARG;
 
 #if defined(WOLFSSL_SYS_CRYPTO_POLICY)
@@ -1912,13 +1923,18 @@ int wolfSSL_CTX_SetMaxDhKey_Sz(WOLFSSL_CTX* ctx, word16 keySz_bits)
  *
  * @param [in] ssl         SSL/TLS object.
  * @param [in] keySz_bits  Maximum DH key size in bits. No more than 16000 and
- *                         a multiple of 8.
+ *                         a multiple of 8, and no more than what the build's
+ *                         math supports.
  * @return  WOLFSSL_SUCCESS on success.
  * @return  BAD_FUNC_ARG when ssl is NULL or keySz_bits is invalid.
  */
 int wolfSSL_SetMaxDhKey_Sz(WOLFSSL* ssl, word16 keySz_bits)
 {
     if (ssl == NULL || keySz_bits > 16000 || keySz_bits % 8 != 0)
+        return BAD_FUNC_ARG;
+    /* The pre-master secret buffer is sized for the largest prime the build's
+     * math supports, so a ceiling above that cannot be honoured. */
+    if ((keySz_bits / 8) > MAX_DHKEY_SZ)
         return BAD_FUNC_ARG;
 
 #if defined(WOLFSSL_SYS_CRYPTO_POLICY)

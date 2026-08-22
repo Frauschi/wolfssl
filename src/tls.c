@@ -140,6 +140,11 @@
 #endif
 #ifdef WOLFSSL_HAVE_MLKEM
     #include <wolfssl/wolfcrypt/wc_mlkem.h>
+    #ifdef WOLFSSL_TLS13
+    /* internal.h sizes the pre-master secret buffer for a hybrid key share
+     * without this header in scope, so pin the two together here. */
+    wc_static_assert(PMS_MLKEM_SZ == WC_ML_KEM_SS_SZ);
+    #endif
 #endif
 
 #if defined(WOLFSSL_RENESAS_TSIP_TLS)
@@ -9632,6 +9637,16 @@ static int TLSX_KeyShare_ProcessDh(WOLFSSL* ssl, KeyShareEntry* keyShareEntry)
         return PEER_KEY_ERROR;
     }
 
+    /* DhAgree() writes the whole prime and takes no capacity, so the group has
+     * to be refused here rather than truncated later. MAX_PREMASTER_SZ covers
+     * every group this build compiled in, making this a guard against a future
+     * sizing mistake, not a reachable rejection. */
+    if (pSz > MAX_PREMASTER_SZ) {
+        WOLFSSL_MSG("FFDHE group larger than the pre-master secret buffer");
+        WOLFSSL_ERROR_VERBOSE(PEER_KEY_ERROR);
+        return PEER_KEY_ERROR;
+    }
+
     /* if DhKey is not setup, do it now */
     if (keyShareEntry->key == NULL) {
         keyShareEntry->key = (DhKey*)XMALLOC(sizeof(DhKey), ssl->heap,
@@ -10542,7 +10557,7 @@ static int TLSX_KeyShare_ProcessPqcHybridClient(WOLFSSL* ssl,
     }
 
     if (ret == 0) {
-        if ((ssl->arrays->preMasterSz + ssSzPqc) > ENCRYPT_LEN) {
+        if ((ssl->arrays->preMasterSz + ssSzPqc) > MAX_PREMASTER_SZ) {
             WOLFSSL_MSG("shared secret is too long.");
             ret = LENGTH_ERROR;
         }
@@ -10574,7 +10589,7 @@ static int TLSX_KeyShare_ProcessPqcHybridClient(WOLFSSL* ssl,
          * intermediate keys in the error case. Do not use preMasterSz
          * here as it may already been set to the ECC shared secret size,
          * which would be too small due to the PQC offset case. */
-        ForceZero(ssl->arrays->preMasterSecret, ENCRYPT_LEN);
+        ForceZero(ssl->arrays->preMasterSecret, MAX_PREMASTER_SZ);
 
         /* Prevent FreeAll from freeing pointers owned by keyShareEntry. */
         if (ecc_kse != NULL)
@@ -10611,7 +10626,7 @@ static int TLSX_KeyShare_Process(WOLFSSL* ssl, KeyShareEntry* keyShareEntry)
 #endif
     /* reset the pre master secret size */
     if (ssl->arrays->preMasterSz == 0)
-        ssl->arrays->preMasterSz = ENCRYPT_LEN;
+        ssl->arrays->preMasterSz = MAX_PREMASTER_SZ;
 
     /* Use Key Share Data from server. */
     if (WOLFSSL_NAMED_GROUP_IS_FFDHE(keyShareEntry->group))
@@ -11309,7 +11324,7 @@ int TLSX_KeyShare_HandlePqcHybridKeyServer(WOLFSSL* ssl,
     #endif
     }
 
-    if (ret == 0 && ssl->arrays->preMasterSz + ssSzPqc > ENCRYPT_LEN) {
+    if (ret == 0 && ssl->arrays->preMasterSz + ssSzPqc > MAX_PREMASTER_SZ) {
         WOLFSSL_MSG("shared secret is too long.");
         ret = LENGTH_ERROR;
     }
@@ -11373,7 +11388,7 @@ int TLSX_KeyShare_HandlePqcHybridKeyServer(WOLFSSL* ssl,
          * intermediate keys in the error case. Do not use preMasterSz
          * here as it may already been set to the ECC shared secret size,
          * which would be too small due to the PQC offset case. */
-        ForceZero(ssl->arrays->preMasterSecret, ENCRYPT_LEN);
+        ForceZero(ssl->arrays->preMasterSecret, MAX_PREMASTER_SZ);
     }
 
     TLSX_KeyShare_FreeAll(ecc_kse, ssl->heap);

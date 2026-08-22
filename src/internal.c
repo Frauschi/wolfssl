@@ -1562,6 +1562,17 @@ static int ImportOptions(WOLFSSL* ssl, const byte* exp, word32 len, byte ver,
     ato16(exp + idx, &(options->minDhKeySz)); idx += OPAQUE16_LEN;
     ato16(exp + idx, &(options->maxDhKeySz)); idx += OPAQUE16_LEN;
     ato16(exp + idx, &(options->dhKeySz));    idx += OPAQUE16_LEN;
+    /* The blob is not trusted to respect what the pre-master secret buffer
+     * was sized for. */
+    if (options->maxDhKeySz > MAX_DHKEY_SZ)
+        options->maxDhKeySz = MAX_DHKEY_SZ;
+    /* Clamping the ceiling must not drag the floor down with it: that would
+     * accept DH keys the exporting peer's policy refused. Fail the import
+     * instead, since this build cannot honour the exported minimum. */
+    if (options->minDhKeySz > options->maxDhKeySz) {
+        WOLFSSL_MSG("Exported minimum DH key size exceeds this build's max");
+        return BAD_FUNC_ARG;
+    }
 #else
     idx += OPAQUE16_LEN;
     idx += OPAQUE16_LEN;
@@ -8217,7 +8228,7 @@ int ReinitSSL(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup)
     if (!writeDup && ssl->arrays == NULL) {
         /* The pre-master secret is carried at the end of the same allocation,
          * so the two are always created and released together. */
-        ssl->arrays = (Arrays*)XMALLOC(sizeof(Arrays) + ENCRYPT_LEN,
+        ssl->arrays = (Arrays*)XMALLOC(sizeof(Arrays) + MAX_PREMASTER_SZ,
                                        ssl->heap, DYNAMIC_TYPE_ARRAYS);
         if (ssl->arrays == NULL) {
             WOLFSSL_MSG("Arrays Memory error");
@@ -8225,11 +8236,11 @@ int ReinitSSL(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup)
         }
 #ifdef WOLFSSL_CHECK_MEM_ZERO
         wc_MemZero_Add("SSL Arrays", ssl->arrays,
-                       sizeof(*ssl->arrays) + ENCRYPT_LEN);
+                       sizeof(*ssl->arrays) + MAX_PREMASTER_SZ);
 #endif
-        XMEMSET(ssl->arrays, 0, sizeof(Arrays) + ENCRYPT_LEN);
+        XMEMSET(ssl->arrays, 0, sizeof(Arrays) + MAX_PREMASTER_SZ);
         ssl->arrays->preMasterSecret = (byte*)ssl->arrays + sizeof(Arrays);
-        ssl->arrays->preMasterSz = ENCRYPT_LEN;
+        ssl->arrays->preMasterSz = MAX_PREMASTER_SZ;
     }
 
     /* RNG */
@@ -8947,7 +8958,7 @@ void FreeArrays(WOLFSSL* ssl, int keep)
             ssl->session->sessionIDSz = ssl->arrays->sessionIDSz;
         }
         /* Clears the arrays struct and the pre-master secret behind it. */
-        ForceZero(ssl->arrays, sizeof(Arrays) + ENCRYPT_LEN);
+        ForceZero(ssl->arrays, sizeof(Arrays) + MAX_PREMASTER_SZ);
     }
     XFREE(ssl->arrays, ssl->heap, DYNAMIC_TYPE_ARRAYS);
     ssl->arrays = NULL;
@@ -36719,8 +36730,8 @@ int SendClientKeyExchange(WOLFSSL* ssl)
             }
             /* The buffer lives with the arrays, so only its contents need
              * to be readied here. */
-            ssl->arrays->preMasterSz = ENCRYPT_LEN;
-            XMEMSET(ssl->arrays->preMasterSecret, 0, ENCRYPT_LEN);
+            ssl->arrays->preMasterSz = MAX_PREMASTER_SZ;
+            XMEMSET(ssl->arrays->preMasterSecret, 0, MAX_PREMASTER_SZ);
 
             switch(ssl->specs.kea)
             {
@@ -36731,11 +36742,16 @@ int SendClientKeyExchange(WOLFSSL* ssl)
                     if (ssl->ctx->GenPreMasterCb) {
                         void* ctx = wolfSSL_GetGenPreMasterCtx(ssl);
                         ret = ssl->ctx->GenPreMasterCb(ssl,
-                            ssl->arrays->preMasterSecret, ENCRYPT_LEN, ctx);
+                            ssl->arrays->preMasterSecret, MAX_PREMASTER_SZ,
+                            ctx);
                         if (ret != 0 &&
                             ret != WC_NO_ERR_TRACE(PROTOCOLCB_UNAVAILABLE)) {
                             goto exit_scke;
                         }
+                        /* The callback owns preMasterSz: it knows how much it
+                         * wrote, and the in-tree Renesas ports set it to their
+                         * own blob size. Only the RNG path below, which builds
+                         * the secret itself, records SECRET_LEN. */
                     }
                     if (!ssl->ctx->GenPreMasterCb ||
                         ret == WC_NO_ERR_TRACE(PROTOCOLCB_UNAVAILABLE))
@@ -36789,7 +36805,7 @@ int SendClientKeyExchange(WOLFSSL* ssl)
                         args->encSecret, &args->encSz);
 
                     /* set the max agree result size */
-                    ssl->arrays->preMasterSz = ENCRYPT_LEN;
+                    ssl->arrays->preMasterSz = MAX_PREMASTER_SZ;
                     break;
                 }
             #endif /* !NO_DH */
@@ -36912,7 +36928,8 @@ int SendClientKeyExchange(WOLFSSL* ssl)
 
                     /* Create shared ECC key leaving room at the beginning
                      * of buffer for size of shared key. */
-                    ssl->arrays->preMasterSz = ENCRYPT_LEN - OPAQUE16_LEN;
+                    ssl->arrays->preMasterSz = MAX_PREMASTER_SZ -
+                                               OPAQUE16_LEN;
                     ret = EcExportHsKey(ssl, args->output, &args->length);
                     break;
                 }
@@ -36921,7 +36938,7 @@ int SendClientKeyExchange(WOLFSSL* ssl)
                                                           defined(HAVE_CURVE448)
                 case ecc_diffie_hellman_kea:
                 {
-                    ssl->arrays->preMasterSz = ENCRYPT_LEN;
+                    ssl->arrays->preMasterSz = MAX_PREMASTER_SZ;
                     ret = EcExportHsKey(ssl, args->encSecret, &args->encSz);
                     break;
                 }
@@ -36985,6 +37002,9 @@ int SendClientKeyExchange(WOLFSSL* ssl)
             #if !defined(NO_DH) && !defined(NO_PSK)
                 case dhe_psk_kea:
                 {
+                    /* The secret goes after the length prefix, so that much
+                     * less of the buffer is available for it. */
+                    ssl->arrays->preMasterSz = MAX_PREMASTER_SZ - OPAQUE16_LEN;
                     ret = DhAgree(ssl, ssl->buffers.serverDH_Key,
                         ssl->buffers.sig.buffer, ssl->buffers.sig.length,
                         ssl->buffers.serverDH_Pub.buffer,
@@ -37389,8 +37409,11 @@ int SendClientKeyExchange(WOLFSSL* ssl)
                 int secretSz = SECRET_LEN;
                 ret = ssl->keyLogCb(ssl, ssl->arrays->masterSecret, &secretSz,
                                                                         NULL);
+                /* Leave through exit_scke: returning here would skip the
+                 * ForceZero that is now the only wipe of the pre-master
+                 * secret on this path. */
                 if (ret != 0 || secretSz != SECRET_LEN)
-                    return SESSION_SECRET_CB_E;
+                    ERROR_OUT(SESSION_SECRET_CB_E, exit_scke);
             }
         #endif /* OPENSSL_EXTRA && HAVE_SECRET_CALLBACK */
             break;
@@ -37416,10 +37439,10 @@ exit_scke:
     }
 #endif
 
-    /* No further need for PMS */
-    if (ssl->arrays->preMasterSecret != NULL) {
-        ForceZero(ssl->arrays->preMasterSecret, ssl->arrays->preMasterSz);
-    }
+    /* No further need for PMS. The buffer is a fixed region inside the arrays
+     * allocation, so wipe all of it rather than the last recorded length: a
+     * GenPreMasterCb may have written more than the secret that was used. */
+    ForceZero(ssl->arrays->preMasterSecret, MAX_PREMASTER_SZ);
     ssl->arrays->preMasterSz = 0;
 
     /* Final cleanup */
@@ -44371,7 +44394,7 @@ static int DefTicketEncCb(WOLFSSL* ssl, byte key_name[WOLFSSL_TICKET_NAME_SZ],
             return BUFFER_ERROR;
 
         if (kea == ecdhe_psk_kea)
-            args->sigSz = ENCRYPT_LEN - OPAQUE16_LEN;
+            args->sigSz = MAX_PREMASTER_SZ - OPAQUE16_LEN;
 
     #ifdef HAVE_CURVE25519
         if (ssl->ecdhCurveOID == ECC_X25519_OID) {
@@ -44647,8 +44670,8 @@ static int DefTicketEncCb(WOLFSSL* ssl, byte key_name[WOLFSSL_TICKET_NAME_SZ],
 
                 /* The buffer lives with the arrays, so only its contents
                  * need to be readied here. */
-                ssl->arrays->preMasterSz = ENCRYPT_LEN;
-                XMEMSET(ssl->arrays->preMasterSecret, 0, ENCRYPT_LEN);
+                ssl->arrays->preMasterSz = MAX_PREMASTER_SZ;
+                XMEMSET(ssl->arrays->preMasterSecret, 0, MAX_PREMASTER_SZ);
 
                 switch (ssl->specs.kea) {
                 #ifndef NO_RSA
@@ -44877,7 +44900,7 @@ static int DefTicketEncCb(WOLFSSL* ssl, byte key_name[WOLFSSL_TICKET_NAME_SZ],
                             ssl->buffers.serverDH_G.length);
 
                         /* set the max agree result size */
-                        ssl->arrays->preMasterSz = ENCRYPT_LEN;
+                        ssl->arrays->preMasterSz = MAX_PREMASTER_SZ;
                         break;
                     }
                 #endif /* !NO_DH */
@@ -45080,6 +45103,10 @@ static int DefTicketEncCb(WOLFSSL* ssl, byte key_name[WOLFSSL_TICKET_NAME_SZ],
                 #if !defined(NO_DH) && !defined(NO_PSK)
                     case dhe_psk_kea:
                     {
+                        /* The secret goes after the length prefix, so that
+                         * much less of the buffer is available for it. */
+                        ssl->arrays->preMasterSz = MAX_PREMASTER_SZ -
+                                                   OPAQUE16_LEN;
                         ret = DhAgree(ssl, ssl->buffers.serverDH_Key,
                             ssl->buffers.serverDH_Priv.buffer,
                             ssl->buffers.serverDH_Priv.length,
@@ -45368,10 +45395,10 @@ static int DefTicketEncCb(WOLFSSL* ssl, byte key_name[WOLFSSL_TICKET_NAME_SZ],
     #endif
 
 
-        /* Cleanup PMS */
-        if (ssl->arrays->preMasterSecret != NULL) {
-            ForceZero(ssl->arrays->preMasterSecret, ssl->arrays->preMasterSz);
-        }
+        /* Cleanup PMS. The buffer is a fixed region inside the arrays
+         * allocation, so wipe all of it rather than the last recorded
+         * length. */
+        ForceZero(ssl->arrays->preMasterSecret, MAX_PREMASTER_SZ);
         ssl->arrays->preMasterSz = 0;
 
         /* Final cleanup */

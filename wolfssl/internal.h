@@ -1879,6 +1879,147 @@ enum Misc {
 };
 
 
+/* Size of the pre-master secret buffer.
+ *
+ * ENCRYPT_LEN is not used for it: that also has to hold an RSA signature, so
+ * it is as large as the biggest RSA key the build supports even when no key
+ * exchange in the build produces a secret anywhere near that size. Each term
+ * below is the largest secret one key exchange can produce, or 0 when it is
+ * not compiled in, and the PSK terms cover the length prefixes and the key
+ * that the PSK suites append. */
+#define PMS_MAX2(a, b) (((a) > (b)) ? (a) : (b))
+
+#ifdef WOLFSSL_STATIC_RSA
+    #define PMS_RSA_SZ      SECRET_LEN
+#else
+    #define PMS_RSA_SZ      0
+#endif
+#ifndef NO_DH
+    /* A named FFDHE group is used at the size the group defines. TLS 1.3
+     * takes the group from the peer's key share and never compares it against
+     * maxDhKeySz, so the largest group compiled in has to fit even when the
+     * ceiling for peer supplied parameters is lower. */
+    #if defined(HAVE_FFDHE_8192)
+        #define PMS_FFDHE_SZ    (8192 / 8)
+    #elif defined(HAVE_FFDHE_6144)
+        #define PMS_FFDHE_SZ    (6144 / 8)
+    #elif defined(HAVE_FFDHE_4096)
+        #define PMS_FFDHE_SZ    (4096 / 8)
+    #elif defined(HAVE_FFDHE_3072)
+        #define PMS_FFDHE_SZ    (3072 / 8)
+    #elif defined(HAVE_FFDHE_2048)
+        #define PMS_FFDHE_SZ    (2048 / 8)
+    #else
+        #define PMS_FFDHE_SZ    0
+    #endif
+    /* TLS 1.2 takes the parameters from the peer, up to this size. */
+    #define PMS_DH_SZ       PMS_MAX2(MAX_DHKEY_SZ, PMS_FFDHE_SZ)
+#else
+    #define PMS_FFDHE_SZ    0
+    #define PMS_DH_SZ       0
+#endif
+#if defined(WOLFSSL_HAVE_MLKEM) && defined(WOLFSSL_TLS13)
+    /* A hybrid key share appends the ML-KEM shared secret, 32 bytes for every
+     * parameter set, to the ECC one. Kept as a literal because wc_mlkem.h is
+     * not in scope here; the assert below pins it to WC_ML_KEM_SS_SZ. */
+    #define PMS_MLKEM_SZ    32
+#else
+    #define PMS_MLKEM_SZ    0
+#endif
+#ifdef HAVE_ECC
+    #define PMS_ECC_SZ      (MAX_ECC_BYTES + PMS_MLKEM_SZ)
+#else
+    #define PMS_ECC_SZ      0
+#endif
+#ifdef HAVE_CURVE25519
+    #define PMS_X25519_SZ   (CURVE25519_KEYSIZE + PMS_MLKEM_SZ)
+#else
+    #define PMS_X25519_SZ   0
+#endif
+#ifdef HAVE_CURVE448
+    #define PMS_X448_SZ     (CURVE448_KEY_SIZE + PMS_MLKEM_SZ)
+#else
+    #define PMS_X448_SZ     0
+#endif
+#ifndef NO_PSK
+    /* A PSK only exchange pads with a zeroed copy of the key. */
+    #define PMS_PSK_SZ      MAX_PSK_KEY_LEN
+    /* Every PSK suite appends a length, the key, and a length for the other
+     * secret. */
+    #define PMS_PSK_EXTRA   (MAX_PSK_KEY_LEN + OPAQUE16_LEN * 2)
+#else
+    #define PMS_PSK_SZ      0
+    #define PMS_PSK_EXTRA   0
+#endif
+#ifdef WOLFSSL_MULTICAST
+    /* wolfSSL_set_secret() takes a secret from the application rather than
+     * from a key exchange, and has always accepted up to ENCRYPT_LEN bytes. */
+    #define PMS_MCAST_SZ    ENCRYPT_LEN
+#else
+    #define PMS_MCAST_SZ    0
+#endif
+#ifdef HAVE_PK_CALLBACKS
+    /* A GenPreMasterCb implementation writes the secret itself, so the buffer
+     * has to hold what the callback produces. The buffer used to be
+     * ENCRYPT_LEN bytes and the size was never worth reading, so that stays
+     * the default: a callback written against the old contract cannot be
+     * overrun. The Renesas TSIP and FSPSM ports need 80, and an integration
+     * that knows what its callback writes sets WOLFSSL_MAX_GEN_PREMASTER_SZ
+     * to opt down. */
+    #ifndef WOLFSSL_MAX_GEN_PREMASTER_SZ
+        #define WOLFSSL_MAX_GEN_PREMASTER_SZ ENCRYPT_LEN
+    #endif
+    #define PMS_GEN_CB_SZ   WOLFSSL_MAX_GEN_PREMASTER_SZ
+#else
+    #define PMS_GEN_CB_SZ   0
+#endif
+
+/* SECRET_LEN is the floor: the RSA key exchange works with a master secret
+ * sized buffer whatever else the build offers. */
+#define MAX_PREMASTER_KX_SZ                                                   \
+    PMS_MAX2(PMS_MAX2(PMS_MAX2(SECRET_LEN, PMS_RSA_SZ),                       \
+                      PMS_MAX2(PMS_DH_SZ, PMS_ECC_SZ)),                       \
+             PMS_MAX2(PMS_MAX2(PMS_X25519_SZ, PMS_X448_SZ),                   \
+                      PMS_MAX2(PMS_MLKEM_SZ, PMS_PSK_SZ)))
+#define MAX_PREMASTER_SZ                                                      \
+    PMS_MAX2(PMS_MAX2(PMS_MCAST_SZ, PMS_GEN_CB_SZ),                           \
+             MAX_PREMASTER_KX_SZ + PMS_PSK_EXTRA)
+
+/* The RSA key exchange works with a master secret sized buffer whatever else
+ * the build offers. */
+wc_static_assert(MAX_PREMASTER_SZ >= SECRET_LEN);
+#if !defined(NO_DH) && defined(HAVE_FFDHE)
+/* A named FFDHE group is chosen by the peer's key share, so every group this
+ * build compiled in has to fit. */
+wc_static_assert(MAX_PREMASTER_SZ >= PMS_FFDHE_SZ);
+#endif
+#ifdef WOLFSSL_TLS13
+/* DeriveHandshakeSecret() reuses this buffer for the handshake secret, which
+ * is one hash long. No TLS 1.3 cipher suite hashes longer than SHA-384. */
+wc_static_assert(MAX_PREMASTER_SZ >= WC_SHA384_DIGEST_SIZE);
+#endif
+#ifdef WOLFSSL_MULTICAST
+/* wolfSSL_set_secret() must keep accepting the secret size it documents. */
+wc_static_assert(MAX_PREMASTER_SZ >= ENCRYPT_LEN);
+#endif
+/* The PSK suites store a length, the other secret, a second length and the
+ * key. That layout, not any single secret, is what decides the size. */
+#if !defined(NO_PSK) && !defined(NO_DH)
+wc_static_assert(MAX_PREMASTER_SZ >=
+    OPAQUE16_LEN + MAX_DHKEY_SZ + OPAQUE16_LEN + MAX_PSK_KEY_LEN);
+#endif
+#if !defined(NO_PSK) && (defined(HAVE_ECC) || defined(HAVE_CURVE25519) || \
+    defined(HAVE_CURVE448))
+wc_static_assert(MAX_PREMASTER_SZ >= OPAQUE16_LEN +
+    PMS_MAX2(PMS_ECC_SZ, PMS_MAX2(PMS_X25519_SZ, PMS_X448_SZ)) +
+    OPAQUE16_LEN + MAX_PSK_KEY_LEN);
+#endif
+#ifndef NO_PSK
+/* A PSK only exchange pads with a zeroed copy of the key. */
+wc_static_assert(MAX_PREMASTER_SZ >=
+    OPAQUE16_LEN + MAX_PSK_KEY_LEN + OPAQUE16_LEN + MAX_PSK_KEY_LEN);
+#endif
+
 /* Size of the data to authenticate */
 #if defined(WOLFSSL_DTLS) && defined(WOLFSSL_DTLS_CID)
 #define AEAD_AUTH_DATA_SZ WOLFSSL_TLS_AEAD_CID_AAD_SZ

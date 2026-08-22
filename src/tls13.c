@@ -13413,8 +13413,10 @@ static int SendTls13Finished(WOLFSSL* ssl)
         /* Can send application data now. */
         if ((ret = DeriveMasterSecret(ssl)) != 0)
             return ret;
-        /* Last use of preMasterSecret - zeroize as soon as possible. */
-        ForceZero(ssl->arrays->preMasterSecret, ssl->arrays->preMasterSz);
+        /* Last use of preMasterSecret - zeroize as soon as possible.
+         * DeriveHandshakeSecret() wrote the handshake secret over this buffer
+         * without updating preMasterSz, so wipe all of it. */
+        ForceZero(ssl->arrays->preMasterSecret, MAX_PREMASTER_SZ);
 #ifdef WOLFSSL_EARLY_DATA
 
 #ifdef WOLFSSL_DTLS13
@@ -15352,9 +15354,10 @@ int DoTls13HandShakeMsgType(WOLFSSL* ssl, byte* input, word32* inOutIdx,
             if (type == finished) {
                 if ((ret = DeriveMasterSecret(ssl)) != 0)
                     return ret;
-                /* Last use of preMasterSecret - zeroize as soon as possible. */
-                ForceZero(ssl->arrays->preMasterSecret,
-                    ssl->arrays->preMasterSz);
+                /* Last use of preMasterSecret - zeroize as soon as possible.
+                 * DeriveHandshakeSecret() wrote the handshake secret over this
+                 * buffer without updating preMasterSz, so wipe all of it. */
+                ForceZero(ssl->arrays->preMasterSecret, MAX_PREMASTER_SZ);
         #ifdef WOLFSSL_EARLY_DATA
         #ifdef WOLFSSL_QUIC
                 if (WOLFSSL_IS_QUIC(ssl) && ssl->earlyData != no_early_data) {

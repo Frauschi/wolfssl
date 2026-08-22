@@ -5817,11 +5817,11 @@ size_t wolfSSL_get_client_random(const WOLFSSL* ssl, unsigned char* out,
          * everything the API can hand it, so only the rest goes. */
         if (ssl->arrays != NULL) {
             if (ssl->arrays->preMasterSecret != NULL) {
-                ForceZero(ssl->arrays->preMasterSecret, ENCRYPT_LEN);
+                ForceZero(ssl->arrays->preMasterSecret, MAX_PREMASTER_SZ);
                 /* The key agreement routines take this as the size of the
                  * buffer they may write, so put back what a freshly
                  * allocated Arrays would carry. */
-                ssl->arrays->preMasterSz = ENCRYPT_LEN;
+                ssl->arrays->preMasterSz = MAX_PREMASTER_SZ;
             }
         #if defined(HAVE_SESSION_TICKET) || !defined(NO_PSK)
             ForceZero(ssl->arrays->psk_key, MAX_PSK_KEY_LEN);

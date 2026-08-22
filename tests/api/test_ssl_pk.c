@@ -259,6 +259,17 @@ int test_wolfSSL_CTX_SetMaxDhKey_Sz(void)
         WC_NO_ERR_TRACE(BAD_FUNC_ARG));
 
     ExpectIntEQ(wolfSSL_CTX_SetMaxDhKey_Sz(ctx, 4096), WOLFSSL_SUCCESS);
+    /* The value asked for is the value stored, not a silently reduced one. */
+    ExpectIntEQ(ctx->maxDhKeySz, 4096 / 8);
+
+    /* A ceiling above what the build's math supports cannot be honoured, so
+     * it is refused rather than accepted and quietly lowered. */
+    if (MAX_DHKEY_SZ < (16000 / 8)) {
+        ExpectIntEQ(wolfSSL_CTX_SetMaxDhKey_Sz(ctx,
+            (word16)((MAX_DHKEY_SZ + 1) * 8)), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+        /* The refused call left the previous ceiling alone. */
+        ExpectIntEQ(ctx->maxDhKeySz, 4096 / 8);
+    }
 
     wolfSSL_CTX_free(ctx);
 #endif
@@ -292,6 +303,17 @@ int test_wolfSSL_SetMaxDhKey_Sz(void)
         WC_NO_ERR_TRACE(BAD_FUNC_ARG));
 
     ExpectIntEQ(wolfSSL_SetMaxDhKey_Sz(ssl, 4096), WOLFSSL_SUCCESS);
+    /* The value asked for is the value stored, not a silently reduced one. */
+    ExpectIntEQ(ssl->options.maxDhKeySz, 4096 / 8);
+
+    /* A ceiling above what the build's math supports cannot be honoured, so
+     * it is refused rather than accepted and quietly lowered. */
+    if (MAX_DHKEY_SZ < (16000 / 8)) {
+        ExpectIntEQ(wolfSSL_SetMaxDhKey_Sz(ssl,
+            (word16)((MAX_DHKEY_SZ + 1) * 8)), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+        /* The refused call left the previous ceiling alone. */
+        ExpectIntEQ(ssl->options.maxDhKeySz, 4096 / 8);
+    }
 
     wolfSSL_free(ssl);
     wolfSSL_CTX_free(ctx);

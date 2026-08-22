@@ -8085,11 +8085,51 @@ int test_wolfSSL_set_secret(void)
     ExpectIntEQ(wolfSSL_CTX_mcast_set_member_id(ctx, 0), WOLFSSL_SUCCESS);
     ExpectNotNull(ssl = wolfSSL_new(ctx));
 
-    /* Invalid arguments take the error path and return WOLFSSL_FATAL_ERROR. */
+    /* Invalid arguments take the error path and return WOLFSSL_FATAL_ERROR.
+     * A NULL object included: the cleanup on the way out must not assume the
+     * argument check passed. */
+    ExpectIntEQ(wolfSSL_set_secret(NULL, 23, preMasterSecret,
+        sizeof(preMasterSecret), clientRandom, serverRandom, suite),
+        WOLFSSL_FATAL_ERROR);
     ExpectIntEQ(wolfSSL_set_secret(ssl, 23, NULL, sizeof(preMasterSecret),
         clientRandom, serverRandom, suite), WOLFSSL_FATAL_ERROR);
     ExpectIntEQ(wolfSSL_set_secret(ssl, 23, preMasterSecret, 0,
         clientRandom, serverRandom, suite), WOLFSSL_FATAL_ERROR);
+
+    /* A secret larger than the buffer is refused rather than copied in. The
+     * buffer is a fixed region of the arrays allocation, so this is the check
+     * standing between an untrusted size and an overflow. */
+    ExpectIntEQ(wolfSSL_set_secret(ssl, 23, preMasterSecret,
+        MAX_PREMASTER_SZ + 1, clientRandom, serverRandom, suite),
+        WOLFSSL_FATAL_ERROR);
+
+    /* The secret is not left in the object once it has been consumed. */
+    ExpectIntEQ(wolfSSL_set_secret(ssl, 23, preMasterSecret,
+        sizeof(preMasterSecret), clientRandom, serverRandom, suite),
+        WOLFSSL_SUCCESS);
+    if ((ssl != NULL) && (ssl->arrays != NULL)) {
+        word32 i;
+        int nonZero = 0;
+
+        for (i = 0; i < MAX_PREMASTER_SZ; i++) {
+            if (ssl->arrays->preMasterSecret[i] != 0)
+                nonZero = 1;
+        }
+        ExpectIntEQ(nonZero, 0);
+        ExpectIntEQ(ssl->arrays->preMasterSz, 0);
+    }
+
+    /* Once the handshake arrays are gone the call reports a bad argument
+     * instead of dereferencing NULL. */
+    if (ssl != NULL) {
+        Arrays* saved = ssl->arrays;
+
+        ssl->arrays = NULL;
+        ExpectIntEQ(wolfSSL_set_secret(ssl, 23, preMasterSecret,
+            sizeof(preMasterSecret), clientRandom, serverRandom, suite),
+            WOLFSSL_FATAL_ERROR);
+        ssl->arrays = saved;
+    }
 
     wolfSSL_free(ssl);
     wolfSSL_CTX_free(ctx);
