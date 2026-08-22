@@ -241,6 +241,14 @@
   the same shape the supported groups extension used to have.  The formats now
   live in a single block holding a count and a flat array.
 
+* **Enhancement (handshake transcript carries only what the build can use)**:
+  the transcript state kept a SHA-512 hash of every handshake message, and
+  space for the TLS 1.2 Finished and CertificateVerify hashes, in every build.
+  TLS 1.3 uses the SHA-512 transcript only with the cipher suites
+  `WOLFSSL_TLS13_SHA512` adds, and never uses those two hash sets, so a build
+  without TLS 1.2 now leaves them out: the handshake hashes shrink from 864 to
+  352 bytes and no handshake message is hashed with SHA-512 any more.
+
 ## Fixes
 
 * **Fix (certificate manager left pointing at a released store)**:

@@ -6118,10 +6118,19 @@ typedef struct MsgsReceived {
 } MsgsReceived;
 
 
+/* The SHA-512 transcript is hashed for the TLS 1.2 signature algorithms and
+ * for the TLS 1.3 cipher suites that WOLFSSL_TLS13_SHA512 adds. */
+#if defined(WOLFSSL_SHA512) && (!defined(WOLFSSL_NO_TLS12) || \
+                                defined(WOLFSSL_TLS13_SHA512))
+    #define WOLFSSL_HS_HASH_SHA512
+#endif
+
 /* Handshake hashes */
 typedef struct HS_Hashes {
+#ifndef WOLFSSL_NO_TLS12
     Hashes          verifyHashes;
     Hashes          certHashes;         /* for cert verify */
+#endif
 #if !defined(NO_SHA) && (!defined(NO_OLD_TLS) || \
                           defined(WOLFSSL_ALLOW_TLS_SHA1))
     wc_Sha          hashSha;            /* sha hash of handshake msgs */
@@ -6135,7 +6144,7 @@ typedef struct HS_Hashes {
 #ifdef WOLFSSL_SHA384
     wc_Sha384       hashSha384;         /* sha384 hash of handshake msgs */
 #endif
-#ifdef WOLFSSL_SHA512
+#ifdef WOLFSSL_HS_HASH_SHA512
     wc_Sha512       hashSha512;         /* sha512 hash of handshake msgs */
 #endif
 #ifdef WOLFSSL_SM3
