@@ -88,6 +88,19 @@
         #define WC_PKCS7_MLDSA_VERIFY
     #endif
 #endif
+#if defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_MLKEM_NO_ASN1) && \
+    !defined(NO_AES) && defined(HAVE_AES_KEYWRAP) && \
+    !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) && \
+    !defined(WOLFSSL_MLKEM_NO_DECAPSULATE) && \
+    defined(HAVE_HKDF) && !defined(NO_HMAC)
+    #include <wolfssl/wolfcrypt/wc_mlkem.h>
+    #include <wolfssl/wolfcrypt/hmac.h>
+    /* gates RFC 9629 KEMRecipientInfo with ML-KEM. A KEM recipient needs both
+     * directions of the KEM, an AES key wrap for the content-encryption key,
+     * and HKDF to derive the key-encryption key, so all are required
+     * together. KMAC is an additional KDF choice, not a requirement. */
+    #define WC_PKCS7_HAVE_MLKEM
+#endif
 #ifdef HAVE_LIBZ
     #include <wolfssl/wolfcrypt/compress.h>
 #endif
@@ -10622,6 +10635,825 @@ int wc_PKCS7_PadData(byte* in, word32 inSz, byte* out, word32 outSz,
 }
 
 
+#ifdef WC_PKCS7_HAVE_MLKEM
+
+/* id-ori-kem, RFC 9629: 1.2.840.113549.1.9.16.13.3 */
+static const byte oriKemOid[] =
+    {42, 134, 72, 134, 247, 13, 1, 9, 16, 13, 3};
+
+/* Map a KEMRecipientInfo KDF OID to the size of the digest it derives with.
+ * Returns 0 on success, negative upon error */
+static int wc_PKCS7_KemriKdfOutMax(int kdfOID, word32* maxOut)
+{
+    int ret = 0;
+
+    switch (kdfOID) {
+    #ifndef NO_SHA256
+        case HKDF_SHA256_OID:
+            *maxOut = WC_SHA256_DIGEST_SIZE;
+            break;
+    #endif
+    #ifdef WOLFSSL_SHA384
+        case HKDF_SHA384_OID:
+            *maxOut = WC_SHA384_DIGEST_SIZE;
+            break;
+    #endif
+    #ifdef WOLFSSL_SHA512
+        case HKDF_SHA512_OID:
+            *maxOut = WC_SHA512_DIGEST_SIZE;
+            break;
+    #endif
+    #ifdef WOLFSSL_KMAC128
+        case KMAC128_OID:
+            *maxOut = 0;    /* KMAC is an XOF, any length */
+            break;
+    #endif
+    #ifdef WOLFSSL_KMAC256
+        case KMAC256_OID:
+            *maxOut = 0;
+            break;
+    #endif
+        default:
+            WOLFSSL_MSG("Unsupported KEMRecipientInfo KDF");
+            ret = BAD_FUNC_ARG;
+            break;
+    }
+
+    return ret;
+}
+
+/* Derive the key-encryption key from a KEM shared secret, RFC 9629 Section 5.
+ * The shared secret keys the KDF and the CMSORIforKEMOtherInfo encoding is the
+ * info (HKDF) or the message (KMAC).
+ *
+ * Return 0 on success, negative upon error */
+static int wc_PKCS7_KemriKdf(int kdfOID, const byte* ss, word32 ssSz,
+                             const byte* info, word32 infoSz, byte* out,
+                             word32 outSz)
+{
+    int ret;
+    word32 maxOut = 0;
+
+    if (ss == NULL || info == NULL || out == NULL || outSz == 0)
+        return BAD_FUNC_ARG;
+
+    ret = wc_PKCS7_KemriKdfOutMax(kdfOID, &maxOut);
+    if (ret != 0)
+        return ret;
+
+    /* HKDF expands to at most 255 times its digest size; KMAC is an XOF and
+     * has no such bound. */
+    if (maxOut != 0 && outSz > maxOut * 255) {
+        WOLFSSL_MSG("KEK longer than the KDF can derive");
+        return BAD_FUNC_ARG;
+    }
+
+    switch (kdfOID) {
+    #ifndef NO_SHA256
+        case HKDF_SHA256_OID:
+            ret = wc_HKDF(WC_SHA256, ss, ssSz, NULL, 0, info, infoSz, out,
+                          outSz);
+            break;
+    #endif
+    #ifdef WOLFSSL_SHA384
+        case HKDF_SHA384_OID:
+            ret = wc_HKDF(WC_SHA384, ss, ssSz, NULL, 0, info, infoSz, out,
+                          outSz);
+            break;
+    #endif
+    #ifdef WOLFSSL_SHA512
+        case HKDF_SHA512_OID:
+            ret = wc_HKDF(WC_SHA512, ss, ssSz, NULL, 0, info, infoSz, out,
+                          outSz);
+            break;
+    #endif
+    #ifdef WOLFSSL_KMAC128
+        case KMAC128_OID:
+            ret = wc_Kmac128Hash(ss, ssSz, NULL, 0, info, infoSz, out, outSz);
+            break;
+    #endif
+    #ifdef WOLFSSL_KMAC256
+        case KMAC256_OID:
+            ret = wc_Kmac256Hash(ss, ssSz, NULL, 0, info, infoSz, out, outSz);
+            break;
+    #endif
+        default:
+            ret = BAD_FUNC_ARG;
+            break;
+    }
+
+    return ret;
+}
+
+/* Encode CMSORIforKEMOtherInfo, RFC 9629 Section 5:
+ *
+ *   CMSORIforKEMOtherInfo ::= SEQUENCE {
+ *     wrap       KeyEncryptionAlgorithmIdentifier,
+ *     kekLength  INTEGER (1..MAX),
+ *     ukm    [0] EXPLICIT UserKeyingMaterial OPTIONAL }
+ *
+ * Pass NULL for out to get the encoded size.
+ *
+ * Returns the encoded size on success, negative upon error */
+static int wc_PKCS7_BuildKemriOtherInfo(int wrapOID, word32 kekLen,
+                                        const byte* ukm, word32 ukmSz,
+                                        byte* out, word32 outSz)
+{
+    byte wrapAlg[MAX_ALGO_SZ];
+    byte kekLenInt[MAX_VERSION_SZ];
+    byte ukmExp[MAX_LENGTH_SZ + 1];
+    byte ukmOct[MAX_OCTET_STR_SZ];
+    byte seq[MAX_SEQ_SZ];
+    word32 wrapAlgSz, kekLenIntSz, seqSz, totalSz;
+    word32 ukmExpSz = 0, ukmOctSz = 0;
+    word32 idx = 0;
+
+    wrapAlgSz = SetAlgoID(wrapOID, wrapAlg, oidKeyWrapType, 0);
+    if (wrapAlgSz == 0)
+        return BAD_FUNC_ARG;
+
+    kekLenIntSz = (word32)SetMyVersion(kekLen, kekLenInt, 0);
+
+    totalSz = wrapAlgSz + kekLenIntSz;
+
+    if (ukm != NULL && ukmSz > 0) {
+        ukmOctSz = SetOctetString(ukmSz, ukmOct);
+        ukmExpSz = SetExplicit(0, ukmOctSz + ukmSz, ukmExp, 0);
+        totalSz += ukmExpSz + ukmOctSz + ukmSz;
+    }
+
+    seqSz = SetSequence(totalSz, seq);
+    totalSz += seqSz;
+
+    if (out == NULL)
+        return (int)totalSz;
+
+    if (outSz < totalSz)
+        return BUFFER_E;
+
+    XMEMCPY(out + idx, seq, seqSz);
+    idx += seqSz;
+    XMEMCPY(out + idx, wrapAlg, wrapAlgSz);
+    idx += wrapAlgSz;
+    XMEMCPY(out + idx, kekLenInt, kekLenIntSz);
+    idx += kekLenIntSz;
+    if (ukm != NULL && ukmSz > 0) {
+        XMEMCPY(out + idx, ukmExp, ukmExpSz);
+        idx += ukmExpSz;
+        XMEMCPY(out + idx, ukmOct, ukmOctSz);
+        idx += ukmOctSz;
+        XMEMCPY(out + idx, ukm, ukmSz);
+        idx += ukmSz;
+    }
+
+    return (int)idx;
+}
+
+/* Derive the KEK from a shared secret and unwrap or wrap the CEK with it.
+ * Shared by the encode and decode paths so both agree on the derivation.
+ *
+ * Return 0 on success, negative upon error */
+static int wc_PKCS7_KemriDeriveKek(int kdfOID, int wrapOID, word32 kekLen,
+                                   const byte* ukm, word32 ukmSz,
+                                   const byte* ss, word32 ssSz, byte* kek,
+                                   void* heap)
+{
+    int ret;
+    int otherInfoSz;
+    byte* otherInfo = NULL;
+
+    otherInfoSz = wc_PKCS7_BuildKemriOtherInfo(wrapOID, kekLen, ukm, ukmSz,
+                                               NULL, 0);
+    if (otherInfoSz < 0)
+        return otherInfoSz;
+
+    otherInfo = (byte*)XMALLOC((word32)otherInfoSz, heap,
+                               DYNAMIC_TYPE_TMP_BUFFER);
+    if (otherInfo == NULL)
+        return MEMORY_E;
+
+    ret = wc_PKCS7_BuildKemriOtherInfo(wrapOID, kekLen, ukm, ukmSz, otherInfo,
+                                       (word32)otherInfoSz);
+    if (ret >= 0) {
+        ret = wc_PKCS7_KemriKdf(kdfOID, ss, ssSz, otherInfo,
+                                (word32)otherInfoSz, kek, kekLen);
+    }
+
+    XFREE(otherInfo, heap, DYNAMIC_TYPE_TMP_BUFFER);
+
+    return ret;
+}
+
+/* Load the recipient's ML-KEM public key out of a parsed certificate.
+ * Return 0 on success, negative upon error */
+static int wc_PKCS7_KemriPubKeyFromCert(DecodedCert* decoded, MlKemKey* key,
+                                        void* heap, int devId)
+{
+    int ret;
+    int level = 0;
+    word32 idx = 0;
+
+    ret = wc_MlKemKey_TypeFromOidSum((int)decoded->keyOID, &level);
+    if (ret != 0) {
+        WOLFSSL_MSG("Recipient certificate does not hold an ML-KEM key");
+        return ret;
+    }
+
+    /* CNSA 2.0 profiles a key establishment certificate with keyUsage marked
+     * critical and keyEncipherment asserted. Refuse to encapsulate when the
+     * extension is present and withholds keyEncipherment. A certificate with
+     * no keyUsage extension at all is unconstrained by X.509 and is left to
+     * the caller's policy. */
+    if (decoded->extKeyUsageSet &&
+            ((decoded->extKeyUsage & KEYUSE_KEY_ENCIPHER) == 0)) {
+        WOLFSSL_MSG("ML-KEM certificate does not assert keyEncipherment");
+        return KEYUSAGE_E;
+    }
+
+    ret = wc_MlKemKey_Init(key, level, heap, devId);
+    if (ret != 0)
+        return ret;
+
+    ret = wc_MlKemKey_DecodePublicKey(key, decoded->publicKey,
+                                      decoded->pubKeySize);
+    if (ret != 0) {
+        /* The certificate carries the SubjectPublicKeyInfo, so fall back to
+         * the wrapped form when the raw key is not what was stored. */
+        idx = 0;
+        ret = wc_MlKemKey_PublicKeyDecode(key, decoded->publicKey,
+                                          decoded->pubKeySize, &idx);
+    }
+    if (ret != 0) {
+        wc_MlKemKey_Free(key);
+    }
+
+    return ret;
+}
+
+
+/* Encode and add a CMS EnvelopedData KEMRecipientInfo, RFC 9629, using the
+ * ML-KEM key in the recipient's certificate.
+ *
+ * The KEMRecipientInfo is carried inside an OtherRecipientInfo whose oriType
+ * is id-ori-kem, which is how RFC 9629 extends a RecipientInfo CHOICE that
+ * cannot take a new alternative.
+ *
+ * pkcs7   - pointer to initialized wc_PKCS7 structure
+ * cert    - recipient certificate holding an ML-KEM public key
+ * certSz  - size of cert, bytes
+ * kdfOID  - KDF to derive the KEK with (HKDF_SHA*_OID or KMAC*_OID)
+ * wrapOID - key wrap algorithm for the content-encryption key
+ * ukm     - optional user keying material, may be NULL
+ * ukmSz   - size of ukm, bytes
+ * options - CMS_SKID or CMS_ISSUER_AND_SERIAL_NUMBER
+ *
+ * Returns the size of the encoded RecipientInfo on success, negative upon
+ * error */
+int wc_PKCS7_AddRecipient_KEMRI(wc_PKCS7* pkcs7, const byte* cert,
+                                word32 certSz, int kdfOID, int wrapOID,
+                                const byte* ukm, word32 ukmSz, int options)
+{
+    Pkcs7EncodedRecip* recip = NULL;
+    Pkcs7EncodedRecip* lastRecip = NULL;
+    DecodedCert* decoded = NULL;
+    MlKemKey* kem = NULL;
+    byte* kemCt = NULL;
+    byte* encKey = NULL;
+    byte* ss = NULL;
+
+    byte ver[MAX_VERSION_SZ];
+    byte issuerSerialSeq[MAX_SEQ_SZ];
+    byte issuerSeq[MAX_SEQ_SZ];
+    byte serial[MAX_SN_SZ];
+    byte issuerSKID[MAX_LENGTH_SZ];
+    byte kemAlg[MAX_ALGO_SZ];
+    byte kdfAlg[MAX_ALGO_SZ];
+    byte wrapAlg[MAX_ALGO_SZ];
+    byte kemCtOct[MAX_OCTET_STR_SZ];
+    byte encKeyOct[MAX_OCTET_STR_SZ];
+    byte kekLenInt[MAX_VERSION_SZ];
+    byte ukmExp[MAX_LENGTH_SZ + 1];
+    byte ukmOct[MAX_OCTET_STR_SZ];
+    byte kemriSeq[MAX_SEQ_SZ];
+    byte oriTypeLen[MAX_LENGTH_SZ];
+    byte recipSeq[MAX_SEQ_SZ];
+    byte kek[MAX_CONTENT_KEY_LEN];
+    WC_RNG rng;
+    int rngInit = 0;
+
+    word32 verSz = 0, issuerSz = 0, issuerSeqSz = 0, issuerSerialSeqSz = 0;
+    word32 kemAlgSz = 0, kdfAlgSz = 0, wrapAlgSz = 0;
+    word32 kemCtSz = 0, kemCtOctSz = 0;
+    word32 encKeySz = 0, encKeyOctSz = 0;
+    word32 kekLenIntSz = 0, ukmExpSz = 0, ukmOctSz = 0;
+    word32 kemriSeqSz = 0, recipSeqSz = 0;
+    word32 issuerSKIDSz = 0, ssSz = 0;
+    word32 kemriLen = 0, totalSz = 0, idx = 0;
+    int snSz = 0, oriTypeLenSz = 0, blockKeySz, kekLen, keyIdSize;
+    int ret = 0;
+    int sidType;
+
+    if (pkcs7 == NULL || cert == NULL || certSz == 0)
+        return BAD_FUNC_ARG;
+
+    /* The KEK is as long as the key the wrap algorithm takes. */
+    kekLen = wc_PKCS7_GetOIDKeySize(wrapOID);
+    if (kekLen <= 0 || (word32)kekLen > sizeof(kek))
+        return BAD_KEYWRAP_ALG_E;
+
+    blockKeySz = wc_PKCS7_GetOIDKeySize(pkcs7->encryptOID);
+    if (blockKeySz < 0)
+        return blockKeySz;
+
+    /* default to IssuerAndSerialNumber if not set */
+    sidType = (pkcs7->sidType != 0) ? pkcs7->sidType :
+                                      CMS_ISSUER_AND_SERIAL_NUMBER;
+    if (options & CMS_SKID)
+        sidType = CMS_SKID;
+    else if (options & CMS_ISSUER_AND_SERIAL_NUMBER)
+        sidType = CMS_ISSUER_AND_SERIAL_NUMBER;
+
+    /* Zero each node as it is allocated, not after the group check: the
+     * cleanup at 'out' dereferences recip to free its encoded output buffer,
+     * so a later allocation failure must not reach it with recip unzeroed. */
+    recip = (Pkcs7EncodedRecip*)XMALLOC(sizeof(Pkcs7EncodedRecip), pkcs7->heap,
+                                        DYNAMIC_TYPE_PKCS7);
+    if (recip != NULL)
+        XMEMSET(recip, 0, sizeof(Pkcs7EncodedRecip));
+
+    decoded = (DecodedCert*)XMALLOC(sizeof(DecodedCert), pkcs7->heap,
+                                    DYNAMIC_TYPE_TMP_BUFFER);
+
+    kem = (MlKemKey*)XMALLOC(sizeof(MlKemKey), pkcs7->heap,
+                             DYNAMIC_TYPE_TMP_BUFFER);
+    if (kem != NULL)
+        XMEMSET(kem, 0, sizeof(MlKemKey));
+
+    if (recip == NULL || decoded == NULL || kem == NULL) {
+        ret = MEMORY_E;
+        goto out;
+    }
+
+    ret = PKCS7_GenerateContentEncryptionKey(pkcs7, (word32)blockKeySz);
+    if (ret < 0)
+        goto out;
+
+    InitDecodedCert(decoded, cert, certSz, pkcs7->heap);
+    ret = ParseCert(decoded, CA_TYPE, NO_VERIFY, 0);
+    if (ret < 0) {
+        FreeDecodedCert(decoded);
+        goto out;
+    }
+
+    ret = wc_PKCS7_KemriPubKeyFromCert(decoded, kem, pkcs7->heap,
+                                       pkcs7->devId);
+    if (ret != 0) {
+        FreeDecodedCert(decoded);
+        goto out;
+    }
+
+    /* Encapsulate to the recipient, producing the ciphertext that travels in
+     * the message and the shared secret that only the recipient recovers. */
+    ret = wc_MlKemKey_CipherTextSize(kem, &kemCtSz);
+    if (ret == 0)
+        ret = wc_MlKemKey_SharedSecretSize(kem, &ssSz);
+    if (ret == 0) {
+        kemCt = (byte*)XMALLOC(kemCtSz, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        ss = (byte*)XMALLOC(ssSz, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        if (kemCt == NULL || ss == NULL)
+            ret = MEMORY_E;
+    }
+    if (ret == 0) {
+        ret = wc_InitRng_ex(&rng, pkcs7->heap, pkcs7->devId);
+        if (ret == 0)
+            rngInit = 1;
+    }
+    if (ret == 0) {
+        ret = wc_MlKemKey_Encapsulate(kem, kemCt, ss, &rng);
+    }
+    if (rngInit) {
+        wc_FreeRng(&rng);
+        rngInit = 0;
+    }
+    wc_MlKemKey_Free(kem);
+
+    if (ret == 0) {
+        ret = wc_PKCS7_KemriDeriveKek(kdfOID, wrapOID, (word32)kekLen, ukm,
+                                      ukmSz, ss, ssSz, kek, pkcs7->heap);
+    }
+    if (ss != NULL) {
+        ForceZero(ss, ssSz);
+    }
+    if (ret != 0) {
+        FreeDecodedCert(decoded);
+        goto out;
+    }
+
+    /* Wrap the content-encryption key under the derived KEK. */
+    encKeySz = pkcs7->cekSz + KEYWRAP_BLOCK_SIZE;
+    encKey = (byte*)XMALLOC(encKeySz, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+    if (encKey == NULL) {
+        FreeDecodedCert(decoded);
+        ret = MEMORY_E;
+        goto out;
+    }
+    ret = wc_AesKeyWrap(kek, (word32)kekLen, pkcs7->cek, pkcs7->cekSz, encKey,
+                        encKeySz, NULL);
+    ForceZero(kek, sizeof(kek));
+    if (ret < 0) {
+        FreeDecodedCert(decoded);
+        goto out;
+    }
+    encKeySz = (word32)ret;
+
+#if defined(WOLFSSL_SM2) && defined(WOLFSSL_SM3)
+    keyIdSize = wc_HashGetDigestSize(wc_HashTypeConvert(HashIdAlg(
+           decoded->signatureOID)));
+#else
+    keyIdSize = KEYID_SIZE;
+#endif
+
+    /* version is always 0 for a KEMRecipientInfo; recip->recipVersion is the
+     * OtherRecipientInfo version and is set with the rest of the node below */
+    verSz = (word32)SetMyVersion(0, ver, 0);
+
+    if (sidType == CMS_ISSUER_AND_SERIAL_NUMBER) {
+        if (decoded->issuerRaw == NULL || decoded->issuerRawLen == 0 ||
+                decoded->serialSz == 0) {
+            WOLFSSL_MSG("DecodedCert lacks an issuer name or serial number");
+            FreeDecodedCert(decoded);
+            ret = ASN_PARSE_E;
+            goto out;
+        }
+        issuerSz = (word32)decoded->issuerRawLen;
+        issuerSeqSz = SetSequence(issuerSz, issuerSeq);
+        snSz = SetSerialNumber(decoded->serial, (word32)decoded->serialSz,
+                               serial, MAX_SN_SZ, MAX_SN_SZ);
+        if (snSz < 0) {
+            FreeDecodedCert(decoded);
+            ret = snSz;
+            goto out;
+        }
+        issuerSerialSeqSz = SetSequence(issuerSeqSz + issuerSz + (word32)snSz,
+                                        issuerSerialSeq);
+    }
+    else {
+        if (decoded->extSubjKeyIdSet == 0) {
+            WOLFSSL_MSG("Recipient certificate has no subject key identifier");
+            FreeDecodedCert(decoded);
+            ret = ASN_PARSE_E;
+            goto out;
+        }
+        issuerSKIDSz = SetLength((word32)keyIdSize, issuerSKID);
+    }
+
+    /* The ML-KEM and KDF AlgorithmIdentifiers carry no parameters. */
+    kemAlgSz = SetAlgoIDEx((int)decoded->keyOID, kemAlg, oidKeyType, 0, TRUE);
+    kdfAlgSz = SetAlgoIDEx(kdfOID, kdfAlg, oidKdfType, 0, TRUE);
+    wrapAlgSz = SetAlgoID(wrapOID, wrapAlg, oidKeyWrapType, 0);
+    if (kemAlgSz == 0 || kdfAlgSz == 0 || wrapAlgSz == 0) {
+        FreeDecodedCert(decoded);
+        ret = BAD_FUNC_ARG;
+        goto out;
+    }
+
+    kemCtOctSz = SetOctetString(kemCtSz, kemCtOct);
+    encKeyOctSz = SetOctetString(encKeySz, encKeyOct);
+    kekLenIntSz = (word32)SetMyVersion((word32)kekLen, kekLenInt, 0);
+
+    /* a NULL ukm carries no length, whatever the caller passed in ukmSz */
+    if (ukm == NULL)
+        ukmSz = 0;
+    if (ukmSz > 0) {
+        ukmOctSz = SetOctetString(ukmSz, ukmOct);
+        ukmExpSz = SetExplicit(0, ukmOctSz + ukmSz, ukmExp, 0);
+    }
+
+    kemriLen = verSz;
+    if (sidType == CMS_ISSUER_AND_SERIAL_NUMBER) {
+        kemriLen += issuerSerialSeqSz + issuerSeqSz + issuerSz + (word32)snSz;
+    }
+    else {
+        kemriLen += ASN_TAG_SZ + issuerSKIDSz + (word32)keyIdSize;
+    }
+    kemriLen += kemAlgSz + kemCtOctSz + kemCtSz + kdfAlgSz + kekLenIntSz;
+    kemriLen += ukmExpSz + ukmOctSz + ukmSz;
+    kemriLen += wrapAlgSz + encKeyOctSz + encKeySz;
+
+    kemriSeqSz = SetSequence(kemriLen, kemriSeq);
+    oriTypeLenSz = (int)SetLength(sizeof(oriKemOid), oriTypeLen);
+
+    totalSz = 1 + (word32)oriTypeLenSz + (word32)sizeof(oriKemOid) +
+              kemriSeqSz + kemriLen;
+    recipSeqSz = SetImplicit(ASN_SEQUENCE, 4, totalSz, recipSeq, 0);
+    totalSz += recipSeqSz;
+
+    ret = wc_PKCS7_AllocRecipBuffer(pkcs7, recip, totalSz);
+    if (ret != 0) {
+        FreeDecodedCert(decoded);
+        goto out;
+    }
+
+    idx = 0;
+    XMEMCPY(recip->recip + idx, recipSeq, recipSeqSz);
+    idx += recipSeqSz;
+    /* oriType */
+    recip->recip[idx] = ASN_OBJECT_ID;
+    idx += 1;
+    XMEMCPY(recip->recip + idx, oriTypeLen, (word32)oriTypeLenSz);
+    idx += (word32)oriTypeLenSz;
+    XMEMCPY(recip->recip + idx, oriKemOid, sizeof(oriKemOid));
+    idx += (word32)sizeof(oriKemOid);
+    /* oriValue, the KEMRecipientInfo */
+    XMEMCPY(recip->recip + idx, kemriSeq, kemriSeqSz);
+    idx += kemriSeqSz;
+    XMEMCPY(recip->recip + idx, ver, verSz);
+    idx += verSz;
+    if (sidType == CMS_ISSUER_AND_SERIAL_NUMBER) {
+        XMEMCPY(recip->recip + idx, issuerSerialSeq, issuerSerialSeqSz);
+        idx += issuerSerialSeqSz;
+        XMEMCPY(recip->recip + idx, issuerSeq, issuerSeqSz);
+        idx += issuerSeqSz;
+        XMEMCPY(recip->recip + idx, decoded->issuerRaw, issuerSz);
+        idx += issuerSz;
+        XMEMCPY(recip->recip + idx, serial, (word32)snSz);
+        idx += (word32)snSz;
+    }
+    else {
+        recip->recip[idx] = ASN_CONTEXT_SPECIFIC;
+        idx += ASN_TAG_SZ;
+        XMEMCPY(recip->recip + idx, issuerSKID, issuerSKIDSz);
+        idx += issuerSKIDSz;
+        XMEMCPY(recip->recip + idx, decoded->extSubjKeyId, (word32)keyIdSize);
+        idx += (word32)keyIdSize;
+    }
+    XMEMCPY(recip->recip + idx, kemAlg, kemAlgSz);
+    idx += kemAlgSz;
+    XMEMCPY(recip->recip + idx, kemCtOct, kemCtOctSz);
+    idx += kemCtOctSz;
+    XMEMCPY(recip->recip + idx, kemCt, kemCtSz);
+    idx += kemCtSz;
+    XMEMCPY(recip->recip + idx, kdfAlg, kdfAlgSz);
+    idx += kdfAlgSz;
+    XMEMCPY(recip->recip + idx, kekLenInt, kekLenIntSz);
+    idx += kekLenIntSz;
+    if (ukmSz > 0) {
+        XMEMCPY(recip->recip + idx, ukmExp, ukmExpSz);
+        idx += ukmExpSz;
+        XMEMCPY(recip->recip + idx, ukmOct, ukmOctSz);
+        idx += ukmOctSz;
+        XMEMCPY(recip->recip + idx, ukm, ukmSz);
+        idx += ukmSz;
+    }
+    XMEMCPY(recip->recip + idx, wrapAlg, wrapAlgSz);
+    idx += wrapAlgSz;
+    XMEMCPY(recip->recip + idx, encKeyOct, encKeyOctSz);
+    idx += encKeyOctSz;
+    XMEMCPY(recip->recip + idx, encKey, encKeySz);
+    idx += encKeySz;
+
+    FreeDecodedCert(decoded);
+
+    if (idx != recip->recipBufSz) {
+        WOLFSSL_MSG("KEMRecipientInfo encoded size does not match allocation");
+        ret = BUFFER_E;
+        goto out;
+    }
+
+    recip->recipSz = idx;
+    /* The KEMRecipientInfo version field is 0, encoded above. This is the
+     * OtherRecipientInfo version, matched to the ORI encoder, and marks the
+     * list as not all-zero so RFC 5652 gives the EnvelopedData version 3. */
+    recip->recipType = PKCS7_ORI;
+    recip->recipVersion = 4;
+
+    if (pkcs7->recipList == NULL) {
+        pkcs7->recipList = recip;
+    }
+    else {
+        lastRecip = pkcs7->recipList;
+        while (lastRecip->next != NULL) {
+            lastRecip = lastRecip->next;
+        }
+        lastRecip->next = recip;
+    }
+    recip = NULL;
+    ret = (int)idx;
+
+out:
+    /* covers every exit, including the allocation failures between deriving
+     * the KEK and wrapping the content-encryption key with it */
+    ForceZero(kek, sizeof(kek));
+
+    if (ss != NULL)
+        XFREE(ss, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(kemCt, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(encKey, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(kem, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(decoded, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+    if (recip != NULL)
+        wc_PKCS7_FreeEncodedRecip(pkcs7, recip);
+
+    return ret;
+}
+
+
+/* Recover the content-encryption key from a KEMRecipientInfo, RFC 9629.
+ *
+ * in/inSz is the oriValue, that is the KEMRecipientInfo SEQUENCE itself.
+ * The recipient's ML-KEM private key is taken from pkcs7->privateKey.
+ *
+ * Return 0 on success, negative upon error */
+static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
+                                 byte* decryptedKey, word32* decryptedKeySz)
+{
+    MlKemKey* kem = NULL;
+    byte* ss = NULL;
+    byte kek[MAX_CONTENT_KEY_LEN];
+    const byte* kemCt = NULL;
+    const byte* ukm = NULL;
+    const byte* encKey = NULL;
+    word32 idx = 0;
+    word32 kemOID = 0, kdfOID = 0, wrapOID = 0;
+    word32 kemCtSz = 0, ukmSz = 0, encKeySz = 0, ssSz = 0;
+    word32 keyIdx = 0;
+    int length = 0, version = 0, kekLen = 0, level = 0;
+    int kemInited = 0;
+    int ret;
+
+    if (pkcs7 == NULL || in == NULL || decryptedKey == NULL ||
+            decryptedKeySz == NULL) {
+        return BAD_FUNC_ARG;
+    }
+    if (pkcs7->privateKey == NULL || pkcs7->privateKeySz == 0) {
+        WOLFSSL_MSG("KEMRecipientInfo needs the recipient private key");
+        return BAD_FUNC_ARG;
+    }
+
+    if (GetSequence(in, &idx, &length, inSz) < 0)
+        return ASN_PARSE_E;
+
+    if (GetMyVersion(in, &idx, &version, inSz) < 0)
+        return ASN_PARSE_E;
+    if (version != 0) {
+        WOLFSSL_MSG("KEMRecipientInfo version must be 0");
+        return ASN_VERSION_E;
+    }
+
+    /* rid, either an IssuerAndSerialNumber SEQUENCE or a [0] key identifier.
+     * Only one recipient is supported, so step over it. */
+    if (idx >= inSz)
+        return ASN_PARSE_E;
+    if (in[idx] == (ASN_CONSTRUCTED | ASN_SEQUENCE)) {
+        if (GetSequence(in, &idx, &length, inSz) < 0)
+            return ASN_PARSE_E;
+        idx += (word32)length;
+    }
+    else if (in[idx] == ASN_CONTEXT_SPECIFIC) {
+        idx++;
+        if (GetLength(in, &idx, &length, inSz) < 0)
+            return ASN_PARSE_E;
+        idx += (word32)length;
+    }
+    else {
+        return ASN_PARSE_E;
+    }
+
+    /* kem, the ML-KEM AlgorithmIdentifier */
+    if (GetAlgoId(in, &idx, &kemOID, oidKeyType, inSz) < 0)
+        return ASN_PARSE_E;
+    ret = wc_MlKemKey_TypeFromOidSum((int)kemOID, &level);
+    if (ret != 0) {
+        WOLFSSL_MSG("KEMRecipientInfo does not name an ML-KEM algorithm");
+        return ret;
+    }
+
+    /* kemct */
+    if (GetOctetString(in, &idx, &length, inSz) < 0)
+        return ASN_PARSE_E;
+    kemCt = in + idx;
+    kemCtSz = (word32)length;
+    idx += kemCtSz;
+
+    /* kdf */
+    if (GetAlgoId(in, &idx, &kdfOID, oidKdfType, inSz) < 0)
+        return ASN_PARSE_E;
+
+    /* kekLength */
+    if (GetMyVersion(in, &idx, &kekLen, inSz) < 0)
+        return ASN_PARSE_E;
+    if (kekLen <= 0 || (word32)kekLen > sizeof(kek)) {
+        WOLFSSL_MSG("KEMRecipientInfo kekLength out of range");
+        return ASN_PARSE_E;
+    }
+
+    /* wrap is parsed below, so the kekLength cross-check happens there */
+
+    /* optional ukm [0] EXPLICIT */
+    if (idx < inSz && in[idx] == (ASN_CONSTRUCTED | ASN_CONTEXT_SPECIFIC)) {
+        idx++;
+        if (GetLength(in, &idx, &length, inSz) < 0)
+            return ASN_PARSE_E;
+        if (GetOctetString(in, &idx, &length, inSz) < 0)
+            return ASN_PARSE_E;
+        ukm = in + idx;
+        ukmSz = (word32)length;
+        idx += ukmSz;
+    }
+
+    /* wrap */
+    if (GetAlgoId(in, &idx, &wrapOID, oidKeyWrapType, inSz) < 0)
+        return ASN_PARSE_E;
+
+    /* An attacker-chosen kekLength that merely fits the buffer would derive a
+     * key of the wrong length for the named wrap algorithm. Require the two to
+     * agree. */
+    if (wc_PKCS7_GetOIDKeySize((int)wrapOID) != kekLen) {
+        WOLFSSL_MSG("KEMRecipientInfo kekLength does not match wrap algorithm");
+        return ASN_PARSE_E;
+    }
+
+    /* encryptedKey */
+    if (GetOctetString(in, &idx, &length, inSz) < 0)
+        return ASN_PARSE_E;
+    encKey = in + idx;
+    encKeySz = (word32)length;
+
+    kem = (MlKemKey*)XMALLOC(sizeof(MlKemKey), pkcs7->heap,
+                             DYNAMIC_TYPE_TMP_BUFFER);
+    if (kem == NULL)
+        return MEMORY_E;
+    XMEMSET(kem, 0, sizeof(MlKemKey));
+
+    /* From here the reader's own key is measured against the parameter set
+     * this KEMRecipientInfo names. Either step can fail simply because the
+     * recipient is somebody else - the build may not carry that parameter set
+     * at all, and a private key for a different one will not decode into it -
+     * so both answer "not mine" rather than "malformed". Anything the caller
+     * would want to see, a parse failure over the KEMRecipientInfo itself or
+     * an allocation failure, still travels back unchanged. */
+    ret = wc_MlKemKey_Init(kem, level, pkcs7->heap, pkcs7->devId);
+    if (ret != 0) {
+        ret = PKCS7_RECIP_E;
+    }
+    else {
+        kemInited = 1;
+        keyIdx = 0;
+        ret = wc_MlKemKey_PrivateKeyDecode(kem, pkcs7->privateKey,
+                                           pkcs7->privateKeySz, &keyIdx);
+        if (ret != 0) {
+            ret = PKCS7_RECIP_E;
+        }
+    }
+    if (ret == 0)
+        ret = wc_MlKemKey_SharedSecretSize(kem, &ssSz);
+    if (ret == 0) {
+        ss = (byte*)XMALLOC(ssSz, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        if (ss == NULL)
+            ret = MEMORY_E;
+    }
+    if (ret == 0)
+        ret = wc_MlKemKey_Decapsulate(kem, ss, kemCt, kemCtSz);
+    /* Only free what was set up. wc_MlKemKey_Init validates the parameter set
+     * before it assigns anything, so a message naming a parameter set this
+     * build does not have leaves an all-zero struct, and freeing that would
+     * hand a zeroed key to a crypto callback registered at device id 0. */
+    if (kemInited) {
+        wc_MlKemKey_Free(kem);
+    }
+    XFREE(kem, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+
+    if (ret == 0) {
+        ret = wc_PKCS7_KemriDeriveKek((int)kdfOID, (int)wrapOID,
+                                      (word32)kekLen, ukm, ukmSz, ss, ssSz,
+                                      kek, pkcs7->heap);
+    }
+    if (ss != NULL) {
+        ForceZero(ss, ssSz);
+        XFREE(ss, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
+    }
+
+    if (ret == 0) {
+        ret = wc_AesKeyUnWrap(kek, (word32)kekLen, encKey, encKeySz,
+                              decryptedKey, *decryptedKeySz, NULL);
+        ForceZero(kek, sizeof(kek));
+        if (ret < 0) {
+            WOLFSSL_MSG("Failed to unwrap the content-encryption key");
+        }
+        else {
+            *decryptedKeySz = (word32)ret;
+            ret = 0;
+        }
+    }
+    else {
+        ForceZero(kek, sizeof(kek));
+    }
+
+    return ret;
+}
+
+#endif /* WC_PKCS7_HAVE_MLKEM */
+
 /* Encode and add CMS EnvelopedData ORI (OtherRecipientInfo) RecipientInfo
  * to CMS/PKCS#7 EnvelopedData structure.
  *
@@ -13114,11 +13946,6 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
     word32 stateIdx = *idx;
 #endif
 
-    if (pkcs7->oriDecryptCb == NULL) {
-        WOLFSSL_MSG("You must register an ORI Decrypt callback");
-        return BAD_FUNC_ARG;
-    }
-
     switch (pkcs7->state) {
 
         case WC_PKCS7_DECRYPT_ORI:
@@ -13167,11 +13994,31 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
 
             *idx += oriValueSz;
 
-            /* pass oriOID and oriValue to user callback, expect back
-               decryptedKey and size */
-            ret = pkcs7->oriDecryptCb(pkcs7, oriOID, (word32)oriOIDSz, oriValue,
-                                      oriValueSz, decryptedKey, decryptedKeySz,
-                                      pkcs7->oriDecryptCtx);
+        #ifdef WC_PKCS7_HAVE_MLKEM
+            /* RFC 9629 carries a KEMRecipientInfo in an OtherRecipientInfo, so
+             * id-ori-kem is handled here rather than in a user callback. An
+             * application that registered its own callback keeps priority, so
+             * this never takes over an oriType it was already handling. */
+            if ((pkcs7->oriDecryptCb == NULL) &&
+                    ((word32)oriOIDSz == (word32)sizeof(oriKemOid)) &&
+                    (XMEMCMP(oriOID, oriKemOid, (word32)oriOIDSz) == 0)) {
+                ret = wc_PKCS7_DecryptKemri(pkcs7, oriValue, oriValueSz,
+                                            decryptedKey, decryptedKeySz);
+            }
+            else
+        #endif /* WC_PKCS7_HAVE_MLKEM */
+            if (pkcs7->oriDecryptCb == NULL) {
+                WOLFSSL_MSG("You must register an ORI Decrypt callback");
+                return BAD_FUNC_ARG;
+            }
+            else {
+                /* pass oriOID and oriValue to user callback, expect back
+                   decryptedKey and size */
+                ret = pkcs7->oriDecryptCb(pkcs7, oriOID, (word32)oriOIDSz,
+                                          oriValue, oriValueSz, decryptedKey,
+                                          decryptedKeySz,
+                                          pkcs7->oriDecryptCtx);
+            }
 
             if (ret != 0 || decryptedKey == NULL || *decryptedKeySz == 0) {
                 /* decrypt operation failed */
