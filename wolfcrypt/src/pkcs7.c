@@ -12182,7 +12182,7 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     }
     if (pkcs7->privateKey == NULL || pkcs7->privateKeySz == 0) {
         WOLFSSL_MSG("KEMRecipientInfo needs the recipient private key");
-        return BAD_FUNC_ARG;
+        return PKCS7_RECIP_E;
     }
 
     if (GetSequence(in, &idx, &length, inSz) < 0)
@@ -12220,7 +12220,7 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     ret = wc_PKCS7_MlKemType((int)kemOID, &level);
     if (ret != 0) {
         WOLFSSL_MSG("KEMRecipientInfo does not name an ML-KEM algorithm");
-        return ret;
+        return PKCS7_RECIP_E;
     }
 
     /* kemct */
@@ -12276,27 +12276,14 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
         return MEMORY_E;
     XMEMSET(kem, 0, sizeof(MlKemKey));
 
-    /* From here the reader's own key is measured against the parameter set
-     * this KEMRecipientInfo names. Either step can fail simply because the
-     * recipient is somebody else - the build may not carry that parameter set
-     * at all, and a private key for a different one will not decode into it -
-     * so both answer "not mine" rather than "malformed". Anything the caller
-     * would want to see, a parse failure over the KEMRecipientInfo itself or
-     * an allocation failure, still travels back unchanged. */
     ret = wc_MlKemKey_Init(kem, level, pkcs7->heap, pkcs7->devId);
-    if (ret != 0) {
-        ret = PKCS7_RECIP_E;
-    }
-    else {
+    if (ret == 0) {
         kemInited = 1;
         keyIdx = 0;
         PRIVATE_KEY_UNLOCK();
         ret = wc_MlKemKey_PrivateKeyDecode(kem, pkcs7->privateKey,
                                            pkcs7->privateKeySz, &keyIdx);
         PRIVATE_KEY_LOCK();
-        if (ret != 0) {
-            ret = PKCS7_RECIP_E;
-        }
     }
     if (ret == 0)
         ret = wc_MlKemKey_SharedSecretSize(kem, &ssSz);
@@ -12330,6 +12317,7 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
                                  encKeySz, decryptedKey, *decryptedKeySz);
         ForceZero(kek, sizeof(kek));
         if (ret < 0) {
+            /* a wrong ML-KEM key still decapsulates and only fails here */
             WOLFSSL_MSG("Failed to unwrap the content-encryption key");
         }
         else {
@@ -14892,8 +14880,10 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
             else
         #endif /* WC_PKCS7_HAVE_MLKEM */
             if (pkcs7->oriDecryptCb == NULL) {
+                /* says nothing about the other RecipientInfos; walk on */
                 WOLFSSL_MSG("You must register an ORI Decrypt callback");
-                return BAD_FUNC_ARG;
+                *recipFound = 0;
+                return PKCS7_RECIP_E;
             }
             else {
                 /* pass oriOID and oriValue to user callback, expect back
@@ -14904,14 +14894,15 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
                                           pkcs7->oriDecryptCtx);
             }
 
+            if (ret == WC_NO_ERR_TRACE(MEMORY_E)) {
+                return ret;
+            }
+
             if (ret != 0 || decryptedKey == NULL || *decryptedKeySz == 0) {
-                /* decrypt operation failed */
                 *recipFound = 0;
                 return PKCS7_RECIP_E;
             }
 
-            /* mark recipFound, since we only support one RecipientInfo for
-             * now */
             *recipFound = 1;
 
         #ifndef NO_PKCS7_STREAM
@@ -15954,8 +15945,45 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                 ret = wc_PKCS7_DecryptOri(pkcs7, in, inSz, idx,
                                           decryptedKey, decryptedKeySz,
                                           recipFound);
-                if (ret != 0)
-                    return ret;
+                if (ret != 0) {
+                    word32 peekIdx = *idx;
+                    byte   nextTag = 0;
+
+                    /* Not this recipient, so move on to the next one if there
+                     * demonstrably is one. wc_PKCS7_DecryptOri has already
+                     * stepped over the whole OtherRecipientInfo, so *idx is
+                     * at whatever follows.
+                     *
+                     * Only the implicitly tagged alternatives are followed.
+                     * A KeyTransRecipientInfo is a bare SEQUENCE and so is the
+                     * EncryptedContentInfo that ends the set, and this loop is
+                     * not told where the set stops, so the two cannot be told
+                     * apart here. Treating a SEQUENCE as another recipient
+                     * would parse the encrypted content as a RecipientInfo and
+                     * report a parse error in place of the recipient error the
+                     * caller expects, so a SEQUENCE stops the search instead.
+                     * Every recipient of a KEM-addressed message is an ori, so
+                     * this covers the case that matters. */
+                    if ((ret != WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E)) &&
+                            (*recipFound == 0) &&
+                            (GetASNTag(pkiMsg, &peekIdx, &nextTag,
+                                       pkiMsgSz) == 0) &&
+                            ((nextTag == (ASN_CONSTRUCTED |
+                                          ASN_CONTEXT_SPECIFIC | 1)) ||
+                             (nextTag == (ASN_CONSTRUCTED |
+                                          ASN_CONTEXT_SPECIFIC | 2)) ||
+                             (nextTag == (ASN_CONSTRUCTED |
+                                          ASN_CONTEXT_SPECIFIC | 3)) ||
+                             (nextTag == (ASN_CONSTRUCTED |
+                                          ASN_CONTEXT_SPECIFIC | 4)))) {
+                        /* savedIdx has to follow, or the "no RecipientInfo
+                         * here" path below would rewind onto the one just
+                         * rejected and spin. */
+                        savedIdx = *idx;
+                        continue; /* try next recipient */
+                    }
+                    return ret; /* no other recipient to try */
+                }
             }
             else {
                 /* failed to find RecipientInfo, restore idx and continue */
