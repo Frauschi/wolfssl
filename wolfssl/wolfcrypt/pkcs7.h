@@ -59,8 +59,12 @@
 #ifndef MAX_ORI_TYPE_SZ
     #define MAX_ORI_TYPE_SZ  MAX_OID_SZ
 #endif
+/* Bound on the oriValue an OtherRecipientInfo encrypt callback may return.
+ * Sized to hold a post-quantum key encapsulation, whose ciphertext alone runs
+ * to 1568 bytes for ML-KEM-1024. Targets that use only classical recipient
+ * types can shrink this. */
 #ifndef MAX_ORI_VALUE_SZ
-    #define MAX_ORI_VALUE_SZ 512
+    #define MAX_ORI_VALUE_SZ 4096
 #endif
 
 /* Bound on the number of signed attributes the encoder can place in a
@@ -155,6 +159,9 @@ enum Pkcs7_Misc {
 #else
     MAX_CONTENT_BLOCK_LEN = DES_BLOCK_SIZE,
 #endif
+    /* Historic bound on one encoded RecipientInfo. The encoder now sizes its
+     * output buffer from the encoding itself, so this is retained only for
+     * source compatibility. */
     MAX_RECIP_SZ          = MAX_VERSION_SZ +
                             MAX_SEQ_SZ + WC_ASN_NAME_MAX + MAX_SN_SZ +
                             MAX_SEQ_SZ + MAX_ALGO_SZ + 1 + MAX_ENCRYPTED_KEY_SZ,
