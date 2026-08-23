@@ -8131,6 +8131,9 @@ static word16 TLSX_SignatureAlgorithmsCert_GetSize(void* data)
 {
     WOLFSSL* ssl = (WOLFSSL*)data;
 
+    if (ssl->certHashSigAlgo == NULL)
+        return OPAQUE16_LEN;
+
     return OPAQUE16_LEN + ssl->certHashSigAlgoSz;
 }
 
@@ -8143,6 +8146,11 @@ static word16 TLSX_SignatureAlgorithmsCert_GetSize(void* data)
 static word16 TLSX_SignatureAlgorithmsCert_Write(void* data, byte* output)
 {
     WOLFSSL* ssl = (WOLFSSL*)data;
+
+    if (ssl->certHashSigAlgo == NULL) {
+        c16toa(0, output);
+        return OPAQUE16_LEN;
+    }
 
     c16toa(ssl->certHashSigAlgoSz, output);
     XMEMCPY(output + OPAQUE16_LEN, ssl->certHashSigAlgo,
@@ -8178,12 +8186,20 @@ static int TLSX_SignatureAlgorithmsCert_Parse(WOLFSSL *ssl, const byte* input,
         return BUFFER_ERROR;
 
     /* truncate hashSigAlgo list if too long */
-    ssl->certHashSigAlgoSz = len;
-    if (ssl->certHashSigAlgoSz > WOLFSSL_MAX_SIGALGO) {
+    if (len > WOLFSSL_MAX_SIGALGO) {
         WOLFSSL_MSG("TLSX SigAlgo list exceeds max, truncating");
-        ssl->certHashSigAlgoSz = WOLFSSL_MAX_SIGALGO;
+        len = WOLFSSL_MAX_SIGALGO;
     }
-    XMEMCPY(ssl->certHashSigAlgo, input, ssl->certHashSigAlgoSz);
+
+    /* Only a peer that sends the extension needs the list stored. */
+    XFREE(ssl->certHashSigAlgo, ssl->heap, DYNAMIC_TYPE_TLSX);
+    ssl->certHashSigAlgoSz = 0;
+    ssl->certHashSigAlgo = (byte*)XMALLOC(len, ssl->heap, DYNAMIC_TYPE_TLSX);
+    if (ssl->certHashSigAlgo == NULL)
+        return MEMORY_E;
+
+    XMEMCPY(ssl->certHashSigAlgo, input, len);
+    ssl->certHashSigAlgoSz = len;
 
     return 0;
 }

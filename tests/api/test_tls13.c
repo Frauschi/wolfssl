@@ -7325,6 +7325,13 @@ int test_tls13_sha1_cert_chain(void)
         wolfSSL_set_verify(ssl_c, WOLFSSL_VERIFY_NONE, NULL);
     ExpectIntEQ(wolfSSL_use_certificate_chain_file(ssl_s, sha1CertFile),
         WOLFSSL_SUCCESS);
+    /* The list lives in the allocation the peer's extension makes, so a test
+     * that sets it has to make one. */
+    if (EXPECT_SUCCESS()) {
+        ssl_c->certHashSigAlgo = (byte*)XMALLOC(2, ssl_c->heap,
+                                                DYNAMIC_TYPE_TLSX);
+    }
+    ExpectNotNull(ssl_c->certHashSigAlgo);
     if (EXPECT_SUCCESS()) {
         ssl_c->certHashSigAlgo[0] = sha_mac;
         ssl_c->certHashSigAlgo[1] = rsa_sa_algo;
@@ -7353,6 +7360,11 @@ int test_tls13_sha1_cert_chain(void)
         ssl_c->suites->hashSigAlgo[ssl_c->suites->hashSigAlgoSz++] = sha_mac;
         ssl_c->suites->hashSigAlgo[ssl_c->suites->hashSigAlgoSz++] =
             rsa_sa_algo;
+        ssl_c->certHashSigAlgo = (byte*)XMALLOC(2, ssl_c->heap,
+                                                DYNAMIC_TYPE_TLSX);
+    }
+    ExpectNotNull(ssl_c->certHashSigAlgo);
+    if (EXPECT_SUCCESS()) {
         ssl_c->certHashSigAlgo[0] = sha256_mac;
         ssl_c->certHashSigAlgo[1] = rsa_sa_algo;
         ssl_c->certHashSigAlgoSz = 2;

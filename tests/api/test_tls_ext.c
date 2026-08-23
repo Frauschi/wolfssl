@@ -2373,6 +2373,68 @@ int test_TLSX_MaxFragment_value(void)
     return EXPECT_RESULT();
 }
 
+/* The signature_algorithms_cert list a peer sends is only stored when it is
+ * actually received, so the buffer holding it is allocated on demand. Check
+ * that a first list is stored, and that a second one (a repeated ClientHello
+ * after a HelloRetryRequest) replaces it without leaking.
+ */
+int test_TLSX_SignatureAlgorithmsCert_parse(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_TLS13) && !defined(NO_WOLFSSL_CLIENT) && \
+    !defined(NO_TLS) && !defined(NO_CERTS) && !defined(WOLFSSL_NO_SIGALG) && \
+    defined(HAVE_TLS_EXTENSIONS)
+    /* As in test_TLSX_SupportedCurve_intersection(), a client-side WOLFSSL is
+     * the parse vehicle: the code path is chosen by the message type, not by
+     * the side of the object. */
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL* ssl = NULL;
+    Suites* suites = NULL;
+    /* signature_algorithms_cert (0x0032), ext len 0x0006, list len 0x0004,
+     * ecdsa_secp256r1_sha256 (0x0403), rsa_pss_rsae_sha256 (0x0804) */
+    const byte first[] = { 0x00, 0x32, 0x00, 0x06, 0x00, 0x04,
+                           0x04, 0x03, 0x08, 0x04 };
+    /* Same extension with a longer list: rsa_pss_rsae_sha256 (0x0804),
+     * ecdsa_secp256r1_sha256 (0x0403), rsa_pkcs1_sha1 (0x0201) */
+    const byte second[] = { 0x00, 0x32, 0x00, 0x08, 0x00, 0x06,
+                            0x08, 0x04, 0x04, 0x03, 0x02, 0x01 };
+
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfTLSv1_3_client_method()));
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    if (ssl != NULL) {
+        /* Nothing is allocated until the extension arrives. */
+        ExpectNull(ssl->certHashSigAlgo);
+        ExpectIntEQ(ssl->certHashSigAlgoSz, 0);
+        suites = (Suites*)WOLFSSL_SUITES(ssl);
+    }
+
+    ExpectIntEQ(TLSX_Parse(ssl, first, (word16)sizeof(first), client_hello,
+                           suites), 0);
+    if (ssl != NULL) {
+        ExpectNotNull(ssl->certHashSigAlgo);
+        ExpectIntEQ(ssl->certHashSigAlgoSz, 4);
+    }
+    if ((ssl != NULL) && (ssl->certHashSigAlgo != NULL)) {
+        ExpectIntEQ(XMEMCMP(ssl->certHashSigAlgo, first + 6, 4), 0);
+    }
+
+    /* A second list replaces the first one. */
+    ExpectIntEQ(TLSX_Parse(ssl, second, (word16)sizeof(second), client_hello,
+                           suites), 0);
+    if (ssl != NULL) {
+        ExpectNotNull(ssl->certHashSigAlgo);
+        ExpectIntEQ(ssl->certHashSigAlgoSz, 6);
+    }
+    if ((ssl != NULL) && (ssl->certHashSigAlgo != NULL)) {
+        ExpectIntEQ(XMEMCMP(ssl->certHashSigAlgo, second + 6, 6), 0);
+    }
+
+    wolfSSL_free(ssl);
+    wolfSSL_CTX_free(ctx);
+#endif
+    return EXPECT_RESULT();
+}
+
 /* RFC 8422 Section 5.1.2: a client that sends the ec_point_formats extension
  * MUST include the uncompressed (0) point format. When the uncompressed format
  * is omitted the server records this (ssl->options.peerNoUncompPF) during

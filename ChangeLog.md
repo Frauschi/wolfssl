@@ -208,6 +208,12 @@
   so the pair is created and wiped together.  A TLS 1.2 only build reserves the
   buffer when the arrays are created rather than at the key exchange.
 
+* **Enhancement (peer signature algorithms cert list allocated on demand)**:
+  every SSL object carried a 128 byte buffer for the `signature_algorithms_cert`
+  list a peer sends, even though only a peer that actually sends the extension
+  fills it.  The buffer is now allocated when the extension is parsed, which
+  takes 128 bytes off every connection that does not receive one.
+
 * **Enhancement (alternative names parsed with one allocation each)**: parsing
   a certificate allocated an alt name entry and then its name string, so a
   chain with six subject alternative names cost twelve allocations.  The new
