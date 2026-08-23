@@ -470,3 +470,109 @@ int wc_MlKemKey_EncodePrivateKey(MlKemKey* key, unsigned char* out,
 */
 int wc_MlKemKey_EncodePublicKey(MlKemKey* key, unsigned char* out,
     word32 len);
+
+/*!
+    \ingroup ML_KEM
+
+    \brief Maps an ML-KEM key OID sum to its parameter set. A caller that
+    parses DER learns the algorithm OID before it can initialize a key
+    object, and ML-KEM cannot detect its parameter set from a zeroed object
+    because WC_ML_KEM_512 is zero.
+
+    \return 0 on success.
+    \return BAD_FUNC_ARG if type is NULL or oidSum is not an ML-KEM key OID.
+
+    \param [in] oidSum Key OID sum, ML_KEM_512k, ML_KEM_768k or ML_KEM_1024k.
+    \param [out] type Receives WC_ML_KEM_512, WC_ML_KEM_768 or
+    WC_ML_KEM_1024.
+
+    \sa wc_MlKemKey_Init
+    \sa wc_MlKemKey_PublicKeyDecode
+*/
+int wc_MlKemKey_TypeFromOidSum(int oidSum, int* type);
+
+/*!
+    \ingroup ML_KEM
+
+    \brief Encodes the ML-KEM public key as a DER SubjectPublicKeyInfo.
+    Pass NULL for output to obtain the required length.
+
+    \return Length of the encoding in bytes on success.
+    \return BAD_FUNC_ARG if key is NULL or its type has no standardised OID.
+    \return MEMORY_E if dynamic memory allocation fails.
+
+    \param [in] key Pointer to an MlKemKey with a public key.
+    \param [out] output Buffer that receives the DER, or NULL for a length.
+    \param [in] len Length of output in bytes.
+    \param [in] withAlg Include the SubjectPublicKeyInfo wrapper when 1, or
+    emit only the raw public key bytes when 0.
+
+    \sa wc_MlKemKey_PublicKeyDecode
+    \sa wc_MlKemKey_PrivateKeyToDer
+*/
+int wc_MlKemKey_PublicKeyToDer(MlKemKey* key, byte* output, word32 len,
+    int withAlg);
+
+/*!
+    \ingroup ML_KEM
+
+    \brief Encodes the ML-KEM private key as a DER PKCS#8 OneAsymmetricKey,
+    carrying the expanded decapsulation key. Pass NULL for output to obtain
+    the required length.
+
+    \return Length of the encoding in bytes on success.
+    \return BAD_FUNC_ARG if key is NULL or its type has no standardised OID.
+    \return MEMORY_E if dynamic memory allocation fails.
+
+    \param [in] key Pointer to an MlKemKey with a private key.
+    \param [out] output Buffer that receives the DER, or NULL for a length.
+    \param [in] len Length of output in bytes.
+
+    \sa wc_MlKemKey_PrivateKeyDecode
+    \sa wc_MlKemKey_PublicKeyToDer
+*/
+int wc_MlKemKey_PrivateKeyToDer(MlKemKey* key, byte* output, word32 len);
+
+/*!
+    \ingroup ML_KEM
+
+    \brief Decodes a DER SubjectPublicKeyInfo into an ML-KEM public key. The
+    key object must already be initialized for a parameter set, and the
+    algorithm OID in the DER must name that same parameter set.
+
+    \return 0 on success.
+    \return BAD_FUNC_ARG if any required pointer is NULL.
+    \return ASN_PARSE_E if the DER is invalid or names another parameter set.
+
+    \param [in,out] key Pointer to an initialized MlKemKey.
+    \param [in] input Buffer holding the DER.
+    \param [in] inSz Length of input in bytes.
+    \param [in,out] inOutIdx On in, index into input; on out, index after.
+
+    \sa wc_MlKemKey_PublicKeyToDer
+    \sa wc_MlKemKey_TypeFromOidSum
+*/
+int wc_MlKemKey_PublicKeyDecode(MlKemKey* key, const byte* input, word32 inSz,
+    word32* inOutIdx);
+
+/*!
+    \ingroup ML_KEM
+
+    \brief Decodes a DER PKCS#8 OneAsymmetricKey into an ML-KEM private key.
+    Only the expanded decapsulation key is accepted. The key object must
+    already be initialized for the parameter set the DER names.
+
+    \return 0 on success.
+    \return BAD_FUNC_ARG if any required pointer is NULL.
+    \return ASN_PARSE_E if the DER is invalid or names another parameter set.
+
+    \param [in,out] key Pointer to an initialized MlKemKey.
+    \param [in] input Buffer holding the DER.
+    \param [in] inSz Length of input in bytes.
+    \param [in,out] inOutIdx On in, index into input; on out, index after.
+
+    \sa wc_MlKemKey_PrivateKeyToDer
+    \sa wc_MlKemKey_TypeFromOidSum
+*/
+int wc_MlKemKey_PrivateKeyDecode(MlKemKey* key, const byte* input, word32 inSz,
+    word32* inOutIdx);

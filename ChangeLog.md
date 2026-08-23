@@ -1,5 +1,11 @@
 # wolfSSL Release (unreleased)
 
+## Post-Quantum Cryptography (PQC)
+
+* Added RFC 9629 KEMRecipientInfo with ML-KEM to PKCS#7/CMS, so an EnvelopedData or AuthEnvelopedData can encapsulate the content-encryption key to a recipient's ML-KEM certificate. Together with the existing RFC 9882 ML-DSA SignedData support this covers both halves of a CNSA 2.0 S/MIME message. by @Frauschi
+* Added ML-KEM key OIDs, SubjectPublicKeyInfo and PKCS#8 encoding, and X.509 certificate support, including issuing an ML-KEM certificate with `wc_MakeCert_ex`. by @Frauschi
+* Fixed the `DecodedCert.pkCurveOID` build guard, which named every signature algorithm that writes the field but neither KEM. A build enabling FrodoKEM or ML-KEM certificates without ECC, Ed25519, Ed448, ML-DSA, Falcon, SLH-DSA, LMS or XMSS failed to compile in `GetCertKey`. by @Frauschi
+
 ## Behavioral Changes
 
 * **Behavioral change (`wc_PufReadSram` health tests the raw SRAM readout)**:
