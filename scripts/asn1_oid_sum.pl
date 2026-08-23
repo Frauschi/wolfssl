@@ -409,16 +409,26 @@ print_mldsa_legacy_aliases("ML_DSA_", "k");
 my @aes128_kw = ( 2, 16, 840, 1, 101, 3, 4, 1, 5 );
 my @aes192_kw = ( 2, 16, 840, 1, 101, 3, 4, 1, 25 );
 my @aes256_kw = ( 2, 16, 840, 1, 101, 3, 4, 1, 45 );
+# RFC 5649 AES key wrap with padding (AES-KWP). Required by the CNSA 2.0
+# S/MIME profile, which mandates id-aes256-wrap-pad for key encryption.
+my @aes128_kwp = ( 2, 16, 840, 1, 101, 3, 4, 1, 8 );
+my @aes192_kwp = ( 2, 16, 840, 1, 101, 3, 4, 1, 28 );
+my @aes256_kwp = ( 2, 16, 840, 1, 101, 3, 4, 1, 48 );
 my @pwri_kek = ( 1, 2, 840, 113549, 1, 9, 16, 3, 9);
 
+# Entries carry their full name because the padded wraps do not share the
+# plain wraps' "_WRAP" suffix position.
 my @key_wraps = (
-    { name => "AES128",     oid => \@aes128_kw },
-    { name => "AES192",     oid => \@aes192_kw },
-    { name => "AES256",     oid => \@aes256_kw },
-    { name => "PWRI_KEK",   oid => \@pwri_kek  },
+    { name => "AES128_WRAP",     oid => \@aes128_kw  },
+    { name => "AES192_WRAP",     oid => \@aes192_kw  },
+    { name => "AES256_WRAP",     oid => \@aes256_kw  },
+    { name => "AES128_WRAP_PAD", oid => \@aes128_kwp },
+    { name => "AES192_WRAP_PAD", oid => \@aes192_kwp },
+    { name => "AES256_WRAP_PAD", oid => \@aes256_kwp },
+    { name => "PWRI_KEK_WRAP",   oid => \@pwri_kek   },
 );
 
-print_sum_enum("KeyWrap", "_WRAP", \@key_wraps);
+print_sum_enum("KeyWrap", "", \@key_wraps);
 
 
 my @dh_sha1 = ( 1, 3, 133, 16, 840, 63, 0, 2 );

@@ -5345,6 +5345,19 @@ static int SlhDsaParamToKeyType(enum SlhDsaParam param)
 #ifdef WOLFSSL_AES_256
     static const byte wrapAes256Oid[] = {96, 134, 72, 1, 101, 3, 4, 1, 45};
 #endif
+#ifdef WOLFSSL_AES_KEYWRAP_PADDING
+/* RFC 5649 AES key wrap with padding (AES-KWP). The CNSA 2.0 S/MIME profile
+ * mandates id-aes256-wrap-pad for wrapping the content-encryption key. */
+#ifdef WOLFSSL_AES_128
+    static const byte wrapAes128PadOid[] = {96, 134, 72, 1, 101, 3, 4, 1, 8};
+#endif
+#ifdef WOLFSSL_AES_192
+    static const byte wrapAes192PadOid[] = {96, 134, 72, 1, 101, 3, 4, 1, 28};
+#endif
+#ifdef WOLFSSL_AES_256
+    static const byte wrapAes256PadOid[] = {96, 134, 72, 1, 101, 3, 4, 1, 48};
+#endif
+#endif /* WOLFSSL_AES_KEYWRAP_PADDING */
 #ifdef HAVE_PKCS7
 /* From RFC 3211 */
 static const byte wrapPwriKekOid[] = {42, 134, 72, 134, 247, 13, 1, 9, 16, 3,9};
@@ -7300,6 +7313,26 @@ const byte* OidFromId(word32 id, word32 type, word32* oidSz)
                     *oidSz = sizeof(wrapAes256Oid);
                     break;
             #endif
+            #ifdef WOLFSSL_AES_KEYWRAP_PADDING
+                #ifdef WOLFSSL_AES_128
+                case AES128_WRAP_PAD:
+                    oid = wrapAes128PadOid;
+                    *oidSz = sizeof(wrapAes128PadOid);
+                    break;
+                #endif
+                #ifdef WOLFSSL_AES_192
+                case AES192_WRAP_PAD:
+                    oid = wrapAes192PadOid;
+                    *oidSz = sizeof(wrapAes192PadOid);
+                    break;
+                #endif
+                #ifdef WOLFSSL_AES_256
+                case AES256_WRAP_PAD:
+                    oid = wrapAes256PadOid;
+                    *oidSz = sizeof(wrapAes256PadOid);
+                    break;
+                #endif
+            #endif /* WOLFSSL_AES_KEYWRAP_PADDING */
             #ifdef HAVE_PKCS7
                 case PWRI_KEK_WRAP:
                     oid = wrapPwriKekOid;

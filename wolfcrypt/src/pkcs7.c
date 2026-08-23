@@ -843,6 +843,9 @@ static int wc_PKCS7_GetOIDKeySize(int oid)
         case AES128CCMb:
         #endif
         case AES128_WRAP:
+    #ifdef WOLFSSL_AES_KEYWRAP_PADDING
+        case AES128_WRAP_PAD:
+    #endif
             blockKeySz = 16;
             break;
     #endif
@@ -857,6 +860,9 @@ static int wc_PKCS7_GetOIDKeySize(int oid)
         case AES192CCMb:
         #endif
         case AES192_WRAP:
+    #ifdef WOLFSSL_AES_KEYWRAP_PADDING
+        case AES192_WRAP_PAD:
+    #endif
             blockKeySz = 24;
             break;
     #endif
@@ -871,6 +877,9 @@ static int wc_PKCS7_GetOIDKeySize(int oid)
         case AES256CCMb:
         #endif
         case AES256_WRAP:
+    #ifdef WOLFSSL_AES_KEYWRAP_PADDING
+        case AES256_WRAP_PAD:
+    #endif
             blockKeySz = 32;
             break;
     #endif
@@ -10745,6 +10754,67 @@ static int wc_PKCS7_KemriKdf(int kdfOID, const byte* ss, word32 ssSz,
     return ret;
 }
 
+/* Returns 1 when the key wrap algorithm is one of the RFC 5649 padded wraps
+ * (AES-KWP), 0 when it is a plain RFC 3394 wrap. The CNSA 2.0 S/MIME profile
+ * mandates id-aes256-wrap-pad, so both families must be supported. */
+static int wc_PKCS7_WrapIsPadded(int wrapOID)
+{
+#ifdef WOLFSSL_AES_KEYWRAP_PADDING
+    switch (wrapOID) {
+    #ifdef WOLFSSL_AES_128
+        case AES128_WRAP_PAD:
+    #endif
+    #ifdef WOLFSSL_AES_192
+        case AES192_WRAP_PAD:
+    #endif
+    #ifdef WOLFSSL_AES_256
+        case AES256_WRAP_PAD:
+    #endif
+    #if defined(WOLFSSL_AES_128) || defined(WOLFSSL_AES_192) || \
+        defined(WOLFSSL_AES_256)
+            return 1;
+    #endif
+        default:
+            break;
+    }
+#else
+    (void)wrapOID;
+#endif
+    return 0;
+}
+
+/* Wrap cek under kek with the algorithm named by wrapOID. Returns the wrapped
+ * length or a negative error code. */
+static int wc_PKCS7_WrapKey(int wrapOID, const byte* kek, word32 kekSz,
+                            const byte* cek, word32 cekSz, byte* out,
+                            word32 outSz)
+{
+    if (wc_PKCS7_WrapIsPadded(wrapOID)) {
+#ifdef WOLFSSL_AES_KEYWRAP_PADDING
+        return wc_AesKeyWrap_Pad(kek, kekSz, cek, cekSz, out, outSz, NULL);
+#else
+        return ALGO_ID_E;
+#endif
+    }
+    return wc_AesKeyWrap(kek, kekSz, cek, cekSz, out, outSz, NULL);
+}
+
+/* Unwrap in under kek with the algorithm named by wrapOID. Returns the
+ * recovered length or a negative error code. */
+static int wc_PKCS7_UnwrapKey(int wrapOID, const byte* kek, word32 kekSz,
+                              const byte* in, word32 inSz, byte* out,
+                              word32 outSz)
+{
+    if (wc_PKCS7_WrapIsPadded(wrapOID)) {
+#ifdef WOLFSSL_AES_KEYWRAP_PADDING
+        return wc_AesKeyUnWrap_Pad(kek, kekSz, in, inSz, out, outSz, NULL);
+#else
+        return ALGO_ID_E;
+#endif
+    }
+    return wc_AesKeyUnWrap(kek, kekSz, in, inSz, out, outSz, NULL);
+}
+
 /* Encode CMSORIforKEMOtherInfo, RFC 9629 Section 5:
  *
  *   CMSORIforKEMOtherInfo ::= SEQUENCE {
@@ -11049,16 +11119,19 @@ int wc_PKCS7_AddRecipient_KEMRI(wc_PKCS7* pkcs7, const byte* cert,
         goto out;
     }
 
-    /* Wrap the content-encryption key under the derived KEK. */
-    encKeySz = pkcs7->cekSz + KEYWRAP_BLOCK_SIZE;
+    /* Wrap the content-encryption key under the derived KEK. RFC 3394 adds one
+     * block to a length that is already a multiple of the block size; RFC 5649
+     * rounds the input up to a block boundary first, so size for that. */
+    encKeySz = ((pkcs7->cekSz + KEYWRAP_BLOCK_SIZE - 1) / KEYWRAP_BLOCK_SIZE)
+               * KEYWRAP_BLOCK_SIZE + KEYWRAP_BLOCK_SIZE;
     encKey = (byte*)XMALLOC(encKeySz, pkcs7->heap, DYNAMIC_TYPE_TMP_BUFFER);
     if (encKey == NULL) {
         FreeDecodedCert(decoded);
         ret = MEMORY_E;
         goto out;
     }
-    ret = wc_AesKeyWrap(kek, (word32)kekLen, pkcs7->cek, pkcs7->cekSz, encKey,
-                        encKeySz, NULL);
+    ret = wc_PKCS7_WrapKey(wrapOID, kek, (word32)kekLen, pkcs7->cek,
+                           pkcs7->cekSz, encKey, encKeySz);
     ForceZero(kek, sizeof(kek));
     if (ret < 0) {
         FreeDecodedCert(decoded);
@@ -11434,8 +11507,8 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     }
 
     if (ret == 0) {
-        ret = wc_AesKeyUnWrap(kek, (word32)kekLen, encKey, encKeySz,
-                              decryptedKey, *decryptedKeySz, NULL);
+        ret = wc_PKCS7_UnwrapKey((int)wrapOID, kek, (word32)kekLen, encKey,
+                                 encKeySz, decryptedKey, *decryptedKeySz);
         ForceZero(kek, sizeof(kek));
         if (ret < 0) {
             WOLFSSL_MSG("Failed to unwrap the content-encryption key");
