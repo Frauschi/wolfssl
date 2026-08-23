@@ -1899,6 +1899,21 @@ int wc_PKCS7_SetOriDecryptCtx(wc_PKCS7* pkcs7, void* ctx);
     \ingroup PKCS7
     \brief Sets originator decryption callback.
 
+    The callback returns 0 once it has written the content-encryption key and
+    its length. Any non-zero return other than MEMORY_E means this
+    OtherRecipientInfo yielded no key; the decoder treats that as "not this
+    recipient" and carries on with the next RecipientInfo in the set, so a
+    message naming several recipients stays readable by each of them. Those
+    values are not passed to the application - a decode that runs out of
+    recipients reports PKCS7_RECIP_E. MEMORY_E is the exception: it says
+    nothing about which recipient this is, so it ends the decode and reaches
+    the application unchanged.
+
+    A callback is consulted for every oriType. RFC 9629 KEMRecipientInfo
+    (id-ori-kem) is handled internally when no callback is registered, so
+    ML-KEM recipients need none; registering one takes priority for every
+    oriType, that one included.
+
     \return 0 on success
     \return negative on error
 

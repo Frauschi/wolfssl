@@ -1,5 +1,10 @@
 # wolfSSL Release (unreleased)
 
+## PKCS#7 / CMS
+
+* Fixed EnvelopedData decoding to try the next recipient when an OtherRecipientInfo is not the reader's, so a message addressed to several KEMRecipientInfo recipients can be opened by each of them rather than only the first. by @Frauschi
+* **Behavioral change (OtherRecipientInfo decode error codes)**: a non-zero return from a `wc_PKCS7_SetOriDecryptCb` callback, and an OtherRecipientInfo for which no callback is registered, now mean "this RecipientInfo is not the reader's" and let the decode try the remaining recipients, where before either ended the decode. An application that ran out of recipients saw `PKCS7_RECIP_E` before and still does; one that registered no callback saw `BAD_FUNC_ARG` and now sees `PKCS7_RECIP_E`. `MEMORY_E` from a callback is the one value still returned unchanged. by @Frauschi
+
 ## Post-Quantum Cryptography (PQC)
 
 * Added ML-KEM (FIPS 203) key OIDs, SubjectPublicKeyInfo and PKCS#8 encoding, and X.509 certificate support, including issuing an ML-KEM certificate with `wc_MakeCert_ex`. A key initialised with the new `WC_ML_KEM_TYPE_UNSET` takes its parameter set from the DER being decoded. by @Frauschi
