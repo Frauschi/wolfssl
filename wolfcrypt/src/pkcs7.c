@@ -11360,8 +11360,11 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
         return BAD_FUNC_ARG;
     }
     if (pkcs7->privateKey == NULL || pkcs7->privateKeySz == 0) {
+        /* No ML-KEM private key to try, so this recipient cannot be ours -
+         * a reader set up for KEKRI or PWRI never sets one. Saying "not mine"
+         * rather than "bad argument" keeps the rest of the set reachable. */
         WOLFSSL_MSG("KEMRecipientInfo needs the recipient private key");
-        return BAD_FUNC_ARG;
+        return PKCS7_RECIP_E;
     }
 
     if (GetSequence(in, &idx, &length, inSz) < 0)
@@ -11398,8 +11401,14 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
         return ASN_PARSE_E;
     ret = wc_MlKemKey_TypeFromOidSum((int)kemOID, &level);
     if (ret != 0) {
+        /* Some other KEM, or an ML-KEM parameter set this build does not
+         * carry. RFC 9629 lets each recipient pick its own KEM, so that is a
+         * statement about this RecipientInfo and not about the message: say
+         * "not mine" so the caller keeps looking. wc_MlKemKey_TypeFromOidSum
+         * reports BAD_FUNC_ARG here, which travels back unchanged otherwise
+         * and would end the search. */
         WOLFSSL_MSG("KEMRecipientInfo does not name an ML-KEM algorithm");
-        return ret;
+        return PKCS7_RECIP_E;
     }
 
     /* kemct */
@@ -11462,22 +11471,16 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     /* From here the reader's own key is measured against the parameter set
      * this KEMRecipientInfo names. Either step can fail simply because the
      * recipient is somebody else - the build may not carry that parameter set
-     * at all, and a private key for a different one will not decode into it -
-     * so both answer "not mine" rather than "malformed". Anything the caller
-     * would want to see, a parse failure over the KEMRecipientInfo itself or
-     * an allocation failure, still travels back unchanged. */
+     * at all, and a private key for a different one will not decode into it.
+     * Report what actually happened; wc_PKCS7_DecryptOri decides in one place
+     * which failures let the caller move on to the next recipient, so an
+     * allocation failure in here is not disguised as one of them. */
     ret = wc_MlKemKey_Init(kem, level, pkcs7->heap, pkcs7->devId);
-    if (ret != 0) {
-        ret = PKCS7_RECIP_E;
-    }
-    else {
+    if (ret == 0) {
         kemInited = 1;
         keyIdx = 0;
         ret = wc_MlKemKey_PrivateKeyDecode(kem, pkcs7->privateKey,
                                            pkcs7->privateKeySz, &keyIdx);
-        if (ret != 0) {
-            ret = PKCS7_RECIP_E;
-        }
     }
     if (ret == 0)
         ret = wc_MlKemKey_SharedSecretSize(kem, &ssSz);
@@ -11512,6 +11515,13 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
                                  encKeySz, decryptedKey, *decryptedKeySz);
         ForceZero(kek, sizeof(kek));
         if (ret < 0) {
+            /* This is where "the message is not for me" actually surfaces
+             * for a KEM recipient. ML-KEM decapsulation applies implicit
+             * rejection, so a KEMRecipientInfo addressed to somebody else at
+             * the same parameter set still yields a shared secret and a
+             * derived key - both succeed, and only the key wrap's integrity
+             * check disagrees. wc_PKCS7_DecryptOri turns that into a move to
+             * the next RecipientInfo. */
             WOLFSSL_MSG("Failed to unwrap the content-encryption key");
         }
         else {
@@ -14082,8 +14092,15 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
             else
         #endif /* WC_PKCS7_HAVE_MLKEM */
             if (pkcs7->oriDecryptCb == NULL) {
+                /* Nothing here can open this oriType. That is a statement
+                 * about this RecipientInfo, not about the message, so let the
+                 * caller move on to the next one - a KEMRecipientInfo further
+                 * down is handled built-in and may well be ours. The message
+                 * above still names the missing callback for the single
+                 * recipient case, where the caller sees PKCS7_RECIP_E. */
                 WOLFSSL_MSG("You must register an ORI Decrypt callback");
-                return BAD_FUNC_ARG;
+                *recipFound = 0;
+                return PKCS7_RECIP_E;
             }
             else {
                 /* pass oriOID and oriValue to user callback, expect back
@@ -14094,14 +14111,42 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
                                           pkcs7->oriDecryptCtx);
             }
 
+            /* Running out of memory is the one answer here that says nothing
+             * about which recipient this is, so it is the one that travels
+             * back. Everything else - a malformed KEMRecipientInfo, an
+             * algorithm this build does not carry, a key this reader does not
+             * hold, whatever a user callback chose to return - means no more
+             * than "this RecipientInfo did not yield a key", and the caller is
+             * free to try the next one.
+             *
+             * Listing what must stop, rather than what may continue, is
+             * deliberate: the error surface reachable from a network-supplied
+             * RecipientInfo is large and grows, and an entry missed from a
+             * list of "these mean not mine" silently breaks the walk, while an
+             * entry missed here merely costs a diagnostic. BAD_FUNC_ARG in
+             * particular is emitted for genuine "not mine" conditions all over
+             * this path - an unsupported KDF or wrap OID, an encryptedKey
+             * whose length the unwrap rejects - so it cannot be told apart
+             * from a caller mistake here, and the caller mistakes worth
+             * reporting are caught before the walk starts. */
+            if (ret == WC_NO_ERR_TRACE(MEMORY_E)) {
+                return ret;
+            }
+
             if (ret != 0 || decryptedKey == NULL || *decryptedKeySz == 0) {
-                /* decrypt operation failed */
+                /* Could not recover a key from this OtherRecipientInfo. A KEM
+                 * recipient holds only a private key, so "the message is not
+                 * for me" and "the key wrap did not verify" are the same
+                 * event: ML-KEM decapsulation always succeeds, and a message
+                 * meant for someone else simply yields a shared secret that
+                 * fails the AES key unwrap. Leaving recipFound clear lets the
+                 * caller move on to the next RecipientInfo, which is what
+                 * makes a message addressed to several recipients readable by
+                 * each of them. */
                 *recipFound = 0;
                 return PKCS7_RECIP_E;
             }
 
-            /* mark recipFound, since we only support one RecipientInfo for
-             * now */
             *recipFound = 1;
 
         #ifndef NO_PKCS7_STREAM
@@ -15074,8 +15119,45 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                 ret = wc_PKCS7_DecryptOri(pkcs7, in, inSz, idx,
                                           decryptedKey, decryptedKeySz,
                                           recipFound);
-                if (ret != 0)
-                    return ret;
+                if (ret != 0) {
+                    word32 peekIdx = *idx;
+                    byte   nextTag = 0;
+
+                    /* Not this recipient, so move on to the next one if there
+                     * demonstrably is one. wc_PKCS7_DecryptOri has already
+                     * stepped over the whole OtherRecipientInfo, so *idx is
+                     * at whatever follows.
+                     *
+                     * Only the implicitly tagged alternatives are followed.
+                     * A KeyTransRecipientInfo is a bare SEQUENCE and so is the
+                     * EncryptedContentInfo that ends the set, and this loop is
+                     * not told where the set stops, so the two cannot be told
+                     * apart here. Treating a SEQUENCE as another recipient
+                     * would parse the encrypted content as a RecipientInfo and
+                     * report a parse error in place of the recipient error the
+                     * caller expects, so a SEQUENCE stops the search instead.
+                     * Every recipient of a KEM-addressed message is an ori, so
+                     * this covers the case that matters. */
+                    if ((ret != WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E)) &&
+                            (*recipFound == 0) &&
+                            (GetASNTag(pkiMsg, &peekIdx, &nextTag,
+                                       pkiMsgSz) == 0) &&
+                            ((nextTag == (ASN_CONSTRUCTED |
+                                          ASN_CONTEXT_SPECIFIC | 1)) ||
+                             (nextTag == (ASN_CONSTRUCTED |
+                                          ASN_CONTEXT_SPECIFIC | 2)) ||
+                             (nextTag == (ASN_CONSTRUCTED |
+                                          ASN_CONTEXT_SPECIFIC | 3)) ||
+                             (nextTag == (ASN_CONSTRUCTED |
+                                          ASN_CONTEXT_SPECIFIC | 4)))) {
+                        /* savedIdx has to follow, or the "no RecipientInfo
+                         * here" path below would rewind onto the one just
+                         * rejected and spin. */
+                        savedIdx = *idx;
+                        continue; /* try next recipient */
+                    }
+                    return ret; /* no other recipient to try */
+                }
             }
             else {
                 /* failed to find RecipientInfo, restore idx and continue */

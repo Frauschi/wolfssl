@@ -70890,6 +70890,173 @@ out_free:
 }
 
 
+
+/* RFC 9936 Section 2 allows ML-KEM "for one or more recipients". Addressing a
+ * message to several recipients only helps if each of them can open it, which
+ * means the decoder has to walk past the KEMRecipientInfo structures that are
+ * not theirs. Decoding as the last recipient is the case that exercises that;
+ * decoding as the first one would pass either way.
+ *
+ * EnvelopedData only. wc_PKCS7_DecodeAuthEnvelopedData does not step over the
+ * RecipientInfo structures left unread after the match, so any
+ * AuthEnvelopedData with more than one recipient fails to parse whatever
+ * follows the set. That is independent of ML-KEM and reproduces with two RSA
+ * recipients, so it belongs to that decoder rather than here. */
+static wc_test_ret_t pkcs7enveloped_mlkem_multi_test(void)
+{
+    wc_test_ret_t ret = 0;
+    wc_PKCS7* pkcs7 = NULL;
+    byte* cert = NULL;
+    byte* key = NULL;
+    byte* out = NULL;
+    byte decoded[FOURK_BUF];
+    word32 certSz, keySz;
+    int i, j, encodedSz, decSz, nRecip = 0;
+    XFILE f = XBADFILE;
+    const char* certFiles[3];
+    const char* keyFiles[3];
+
+    WOLFSSL_SMALL_STACK_STATIC const byte content[] = {
+        0x6D,0x61,0x6E,0x79,0x20,0x74,0x6F,0x20,0x6F,0x6E,0x65  /* many to one */
+    };
+
+#if defined(WOLFSSL_WC_ML_KEM_512) && !defined(WOLFSSL_NO_ML_KEM)
+    certFiles[nRecip] = MLKEM_CERT("512");
+    keyFiles[nRecip]  = MLKEM_KEYF("512");
+    nRecip++;
+#endif
+#if defined(WOLFSSL_WC_ML_KEM_768) && !defined(WOLFSSL_NO_ML_KEM)
+    certFiles[nRecip] = MLKEM_CERT("768");
+    keyFiles[nRecip]  = MLKEM_KEYF("768");
+    nRecip++;
+#endif
+#if defined(WOLFSSL_WC_ML_KEM_1024) && !defined(WOLFSSL_NO_ML_KEM)
+    certFiles[nRecip] = MLKEM_CERT("1024");
+    keyFiles[nRecip]  = MLKEM_KEYF("1024");
+    nRecip++;
+#endif
+
+    /* one recipient proves nothing here */
+    if (nRecip < 2)
+        return 0;
+
+    cert = (byte*)XMALLOC(FOURK_BUF * 4, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    key  = (byte*)XMALLOC(FOURK_BUF * 4, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    out  = (byte*)XMALLOC(FOURK_BUF * 8, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    if (cert == NULL || key == NULL || out == NULL) {
+        ret = WC_TEST_RET_ENC_ERRNO;
+        goto out_multi;
+    }
+
+    for (j = 0; j < 1; j++) {
+        pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+        if (pkcs7 == NULL) {
+            ret = WC_TEST_RET_ENC_ERRNO;
+            goto out_multi;
+        }
+        ret = wc_PKCS7_Init(pkcs7, HEAP_HINT, devId);
+        if (ret != 0) {
+            ret = WC_TEST_RET_ENC_EC(ret);
+            goto out_multi;
+        }
+        pkcs7->content    = (byte*)content;
+        pkcs7->contentSz  = (word32)sizeof(content);
+        pkcs7->contentOID = DATA;
+        pkcs7->encryptOID = AES256CBCb;
+
+        for (i = 0; i < nRecip; i++) {
+            f = XFOPEN(certFiles[i], "rb");
+            if (f == XBADFILE) {
+                ret = WC_TEST_RET_ENC_ERRNO;
+                goto out_multi;
+            }
+            certSz = (word32)XFREAD(cert, 1, FOURK_BUF * 4, f);
+            XFCLOSE(f);
+            f = XBADFILE;
+            if (certSz == 0) {
+                ret = WC_TEST_RET_ENC_NC;
+                goto out_multi;
+            }
+            ret = wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+                    HKDF_SHA512_OID, AES256_WRAP, NULL, 0, 0);
+            if (ret < 0) {
+                ret = WC_TEST_RET_ENC_EC(ret);
+                goto out_multi;
+            }
+        }
+
+        encodedSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, out, FOURK_BUF * 8);
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = NULL;
+        if (encodedSz <= 0) {
+            ret = WC_TEST_RET_ENC_EC(encodedSz);
+            goto out_multi;
+        }
+
+        /* every recipient must be able to open it, last one included */
+        for (i = 0; i < nRecip; i++) {
+            f = XFOPEN(keyFiles[i], "rb");
+            if (f == XBADFILE) {
+                ret = WC_TEST_RET_ENC_ERRNO;
+                goto out_multi;
+            }
+            keySz = (word32)XFREAD(key, 1, FOURK_BUF * 4, f);
+            XFCLOSE(f);
+            f = XBADFILE;
+            if (keySz == 0) {
+                ret = WC_TEST_RET_ENC_NC;
+                goto out_multi;
+            }
+
+            pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+            if (pkcs7 == NULL) {
+                ret = WC_TEST_RET_ENC_ERRNO;
+                goto out_multi;
+            }
+            if (wc_PKCS7_Init(pkcs7, HEAP_HINT, devId) != 0) {
+                ret = WC_TEST_RET_ENC_NC;
+                goto out_multi;
+            }
+            pkcs7->privateKey   = key;
+            pkcs7->privateKeySz = keySz;
+
+            XMEMSET(decoded, 0, sizeof(decoded));
+            decSz = wc_PKCS7_DecodeEnvelopedData(pkcs7, out,
+                    (word32)encodedSz, decoded, sizeof(decoded));
+
+            pkcs7->privateKey = NULL;
+            pkcs7->privateKeySz = 0;
+            wc_PKCS7_Free(pkcs7);
+            pkcs7 = NULL;
+
+            if (decSz <= 0) {
+                ret = WC_TEST_RET_ENC_EC(decSz);
+                goto out_multi;
+            }
+            if ((decSz != (int)sizeof(content)) ||
+                    (XMEMCMP(decoded, content, sizeof(content)) != 0)) {
+                ret = WC_TEST_RET_ENC_NC;
+                goto out_multi;
+            }
+        }
+    }
+    ret = 0;
+
+out_multi:
+    if (f != XBADFILE)
+        XFCLOSE(f);
+    if (pkcs7 != NULL) {
+        pkcs7->privateKey = NULL;
+        pkcs7->privateKeySz = 0;
+        wc_PKCS7_Free(pkcs7);
+    }
+    XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(out, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+
+    return ret;
+}
+
 /* The published vector is ML-KEM-512 with HKDF-SHA-256 and AES-128 key wrap,
  * so it only builds where those three are compiled in. */
 #if defined(WOLFSSL_WC_ML_KEM_512) && !defined(WOLFSSL_NO_ML_KEM) && \
@@ -71313,6 +71480,8 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t pkcs7enveloped_test(void)
     !defined(WOLFSSL_MLKEM_NO_DECAPSULATE) && \
     defined(HAVE_HKDF) && !defined(NO_HMAC) && \
     defined(WOLFSSL_AES_256) && !defined(NO_FILESYSTEM)
+    if (ret >= 0)
+        ret = pkcs7enveloped_mlkem_multi_test();
     if (ret >= 0)
         ret = pkcs7_mlkem_rfc9936_interop_test();
     if (ret >= 0)
