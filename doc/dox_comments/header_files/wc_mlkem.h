@@ -559,12 +559,27 @@ int wc_MlKemKey_PublicKeyDecode(MlKemKey* key, const byte* input, word32 inSz,
     \ingroup ML_KEM
 
     \brief Decodes a DER PKCS#8 OneAsymmetricKey into an ML-KEM private key.
-    Only the expanded decapsulation key is accepted. The key object must
-    already be initialized for the parameter set the DER names.
+    All three RFC 9935 Section 6 CHOICE forms are accepted: the 64-byte seed
+    under an implicit [0], the expanded decapsulation key as an OCTET STRING,
+    and the SEQUENCE carrying both. A seed is expanded with
+    ML-KEM.KeyGen_internal(d,z). For the "both" form the expanded key is
+    regenerated from the seed and the two are compared, so a key whose halves
+    disagree is rejected as malformed, as RFC 9935 Section 8 requires. The key
+    object must already be initialized for the parameter set the DER names.
+
+    A build defining WOLFSSL_MLKEM_NO_MAKE_KEY cannot expand a seed, and so
+    cannot perform the Section 8 comparison either. Such a build rejects every
+    key that carries a seed, the "both" form included, rather than accepting
+    its expanded half unchecked.
 
     \return 0 on success.
     \return BAD_FUNC_ARG if any required pointer is NULL.
-    \return ASN_PARSE_E if the DER is invalid or names another parameter set.
+    \return MEMORY_E if dynamic memory allocation fails.
+    \return ASN_PARSE_E if the DER is invalid, names another parameter set,
+    carries a seed of the wrong length, or pairs a seed with an expanded key
+    that does not match it.
+    \return NOT_COMPILED_IN if the key carries a seed and the build defines
+    WOLFSSL_MLKEM_NO_MAKE_KEY.
 
     \param [in,out] key Pointer to an initialized MlKemKey.
     \param [in] input Buffer holding the DER.

@@ -5,6 +5,8 @@
 * Added RFC 9629 KEMRecipientInfo with ML-KEM to PKCS#7/CMS, so an EnvelopedData or AuthEnvelopedData can encapsulate the content-encryption key to a recipient's ML-KEM certificate. Together with the existing RFC 9882 ML-DSA SignedData support this covers both halves of a CNSA 2.0 S/MIME message. by @Frauschi
 * Added ML-KEM key OIDs, SubjectPublicKeyInfo and PKCS#8 encoding, and X.509 certificate support, including issuing an ML-KEM certificate with `wc_MakeCert_ex`. by @Frauschi
 * Fixed the `DecodedCert.pkCurveOID` build guard, which named every signature algorithm that writes the field but neither KEM. A build enabling FrodoKEM or ML-KEM certificates without ECC, Ed25519, Ed448, ML-DSA, Falcon, SLH-DSA, LMS or XMSS failed to compile in `GetCertKey`. by @Frauschi
+* Accepted the RFC 9935 seed and "both" private-key CHOICE forms when decoding an ML-KEM PKCS#8 key, expanding the 64-byte seed with ML-KEM.KeyGen_internal(d,z). A key carrying both a seed and an expanded key is rejected when the two disagree, per RFC 9935 Section 8. by @Frauschi
+* Tightened the ML-KEM recipient certificate check to require keyEncipherment as the only key usage, per RFC 9935 Section 5. by @Frauschi
 * Added the RFC 5649 AES key wrap with padding (AES-KWP) algorithm identifiers `AES128_WRAP_PAD`, `AES192_WRAP_PAD` and `AES256_WRAP_PAD`, and accepted them as the key wrap in `wc_PKCS7_AddRecipient_KEMRI` and in KEMRecipientInfo decoding. The CNSA 2.0 S/MIME profile mandates `id-aes256-wrap-pad`, so this is what makes a CNSA-compliant message possible. Requires `--enable-aeskeywrap=padding`. by @Frauschi
 
 ## Behavioral Changes
