@@ -1987,8 +1987,15 @@ int wc_PKCS7_SetOriDecryptCb(wc_PKCS7* pkcs7, CallbackOriDecrypt cb);
     \param certSz Size of cert, bytes
     \param kdfOID KDF used to derive the key-encryption key, one of
     HKDF_SHA256_OID, HKDF_SHA384_OID or HKDF_SHA512_OID
-    \param wrapOID Key wrap algorithm for the content-encryption key
-    \param ukm Optional user keying material, may be NULL
+    \param wrapOID Key wrap algorithm for the content-encryption key, one of
+    AES128_WRAP, AES192_WRAP, AES256_WRAP, or, when the build defines
+    WOLFSSL_AES_KEYWRAP_PADDING, the RFC 5649 padded variants AES128_WRAP_PAD,
+    AES192_WRAP_PAD and AES256_WRAP_PAD. The CNSA 2.0 S/MIME profile requires
+    AES256_WRAP_PAD (id-aes256-wrap-pad). Returns BAD_KEYWRAP_ALG_E for a
+    padded wrap in a build without WOLFSSL_AES_KEYWRAP_PADDING.
+    \param ukm Optional user keying material, may be NULL. The CNSA 2.0
+    S/MIME profile forbids user keying material, so pass NULL and 0 for a
+    CNSA-compliant message
     \param ukmSz Size of ukm, bytes, or 0
     \param options Options flags, CMS_SKID or CMS_ISSUER_AND_SERIAL_NUMBER. With
     neither set the rid type follows pkcs7->sidType, IssuerAndSerialNumber when
@@ -1996,8 +2003,9 @@ int wc_PKCS7_SetOriDecryptCb(wc_PKCS7* pkcs7, CallbackOriDecrypt cb);
 
     _Example_
     \code
+    /* the CNSA 2.0 S/MIME combination */
     int ret = wc_PKCS7_AddRecipient_KEMRI(&pkcs7, cert, certSz,
-                                          HKDF_SHA512_OID, AES256_WRAP,
+                                          HKDF_SHA512_OID, AES256_WRAP_PAD,
                                           NULL, 0, 0);
     \endcode
 
