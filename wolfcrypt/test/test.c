@@ -77507,6 +77507,7 @@ typedef struct {
     const byte* ukm;
     word32      ukmSz;
     int         options;      /* CMS_SKID or CMS_ISSUER_AND_SERIAL_NUMBER */
+    int         wrapOID;      /* 0 selects AES256_WRAP */
 } pkcs7KemriVector;
 
 /* Round trip a CMS EnvelopedData and AuthEnvelopedData whose recipient is an
@@ -77533,7 +77534,7 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
     #define MLKEM_CERT(n) CERT_ROOT "mlkem" CERT_PATH_SEP "mlkem" n "-cert.der"
     #define MLKEM_KEYF(n) CERT_ROOT "mlkem" CERT_PATH_SEP "mlkem" n "-key.der"
 
-    pkcs7KemriVector vectors[12];
+    pkcs7KemriVector vectors[16];
     testSz = 0;
     XMEMSET(vectors, 0, sizeof(vectors));
 
@@ -77556,6 +77557,27 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
     vectors[testSz].kdfOID   = HKDF_SHA512_OID;
     vectors[testSz].encryptOID = AES256GCMb;
     vectors[testSz].authEnv  = 1;
+    testSz++;
+    #endif
+    /* The exact CNSA 2.0 S/MIME combination: ML-KEM-1024, HKDF-SHA-512,
+     * id-aes256-wrap-pad for the key wrap and AES-256-GCM authenticated
+     * encryption, with no user keying material. */
+    #if defined(WOLFSSL_AES_KEYWRAP_PADDING) && defined(HAVE_AESGCM)
+    vectors[testSz].certFile = MLKEM_CERT("1024");
+    vectors[testSz].keyFile  = MLKEM_KEYF("1024");
+    vectors[testSz].kdfOID   = HKDF_SHA512_OID;
+    vectors[testSz].encryptOID = AES256GCMb;
+    vectors[testSz].authEnv  = 1;
+    vectors[testSz].wrapOID  = AES256_WRAP_PAD;
+    testSz++;
+    #endif
+    /* the padded wrap over EnvelopedData too, so both encoders see it */
+    #ifdef WOLFSSL_AES_KEYWRAP_PADDING
+    vectors[testSz].certFile = MLKEM_CERT("1024");
+    vectors[testSz].keyFile  = MLKEM_KEYF("1024");
+    vectors[testSz].kdfOID   = HKDF_SHA512_OID;
+    vectors[testSz].encryptOID = AES256CBCb;
+    vectors[testSz].wrapOID  = AES256_WRAP_PAD;
     testSz++;
     #endif
     /* the subject key identifier recipient-identifier branch */
@@ -77601,6 +77623,8 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
   #endif
 #endif
 
+    if (testSz > (int)(sizeof(vectors) / sizeof(vectors[0])))
+        return WC_TEST_RET_ENC_NC;   /* vectors[] outgrown; raise its size */
     if (testSz == 0)
         return 0;
 
@@ -77653,7 +77677,9 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
         pkcs7->encryptOID = vectors[i].encryptOID;
 
         ret = wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
-                vectors[i].kdfOID, AES256_WRAP, vectors[i].ukm,
+                vectors[i].kdfOID,
+                vectors[i].wrapOID != 0 ? vectors[i].wrapOID : AES256_WRAP,
+                vectors[i].ukm,
                 vectors[i].ukmSz, vectors[i].options);
         if (ret < 0) {
             ret = WC_TEST_RET_ENC_EC(ret);

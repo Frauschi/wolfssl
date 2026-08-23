@@ -4,6 +4,7 @@
 
 * Added ML-KEM (FIPS 203) key OIDs, SubjectPublicKeyInfo and PKCS#8 encoding, and X.509 certificate support, including issuing an ML-KEM certificate with `wc_MakeCert_ex`. A key initialised with the new `WC_ML_KEM_TYPE_UNSET` takes its parameter set from the DER being decoded. by @Frauschi
 * Added RFC 9629 KEMRecipientInfo with ML-KEM to PKCS#7/CMS, so an EnvelopedData or AuthEnvelopedData can encapsulate the content-encryption key to a recipient's ML-KEM certificate. Together with the existing RFC 9882 ML-DSA SignedData support this covers both halves of a CNSA 2.0 S/MIME message. by @Frauschi
+* Added the RFC 5649 AES key wrap with padding (AES-KWP) algorithm identifiers `AES128_WRAP_PAD`, `AES192_WRAP_PAD` and `AES256_WRAP_PAD`, and accepted them as the key wrap in `wc_PKCS7_AddRecipient_KEMRI` and in KEMRecipientInfo decoding. The CNSA 2.0 S/MIME profile mandates `id-aes256-wrap-pad`, so this is what makes a CNSA-compliant message possible. Requires `--enable-aeskeywrap=padding`. by @Frauschi
 
 ## Behavioral Changes
 * **Behavioral change (`ForceZero()` issues no CPU fences)**: the wipe is
