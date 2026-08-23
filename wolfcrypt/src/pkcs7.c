@@ -11796,14 +11796,10 @@ static int wc_PKCS7_KemriPubKeyFromCert(DecodedCert* decoded, MlKemKey* key,
         return ret;
     }
 
-    /* CNSA 2.0 profiles a key establishment certificate with keyUsage marked
-     * critical and keyEncipherment asserted. Refuse to encapsulate when the
-     * extension is present and withholds keyEncipherment. A certificate with
-     * no keyUsage extension at all is unconstrained by X.509 and is left to
-     * the caller's policy. */
+    /* RFC 9935 Section 5: keyEncipherment must be the only key usage */
     if (decoded->extKeyUsageSet &&
-            ((decoded->extKeyUsage & KEYUSE_KEY_ENCIPHER) == 0)) {
-        WOLFSSL_MSG("ML-KEM certificate does not assert keyEncipherment");
+            (decoded->extKeyUsage != KEYUSE_KEY_ENCIPHER)) {
+        WOLFSSL_MSG("ML-KEM certificate keyUsage is not keyEncipherment only");
         return KEYUSAGE_E;
     }
 
