@@ -3742,6 +3742,25 @@
 #endif /* HAVE_ED448 */
 
 
+/* The ML-KEM DER key codec is built on the ASN.1 template encoder and on
+ * asn.h's declarations, so it cannot be built with the original ASN.1 parser
+ * or with ASN.1 compiled out. Derive the switch here, before anything reads
+ * it: settings.h is reached first by every translation unit, whereas
+ * wc_mlkem.h is often included from inside the very guard that tests it.
+ *
+ * This has to name the same inputs the ASN.1 backend selection below uses,
+ * rather than test WOLFSSL_ASN_TEMPLATE, because that macro does not get its
+ * default until "ASN Library Selection" several hundred lines further down.
+ * Only autotools puts it on the command line; a CMake or user_settings.h
+ * build reaches this point with it still undefined, and testing it here would
+ * switch the whole feature off in exactly those builds. Keep the condition in
+ * step with that block. */
+#if defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_MLKEM_NO_ASN1) && \
+    (defined(NO_ASN) || \
+     (!defined(WOLFSSL_ASN_TEMPLATE) && defined(WOLFSSL_ASN_ORIGINAL)))
+    #define WOLFSSL_MLKEM_NO_ASN1
+#endif
+
 /* RFC 5958 (Asymmetric Key Packages) */
 #if !defined(WC_ENABLE_ASYM_KEY_EXPORT) && \
     ((defined(HAVE_ED25519)    && defined(HAVE_ED25519_KEY_EXPORT)) || \
@@ -3750,6 +3769,7 @@
      (defined(HAVE_CURVE448)   && defined(HAVE_CURVE448_KEY_EXPORT)) || \
       defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || \
       defined(WOLFSSL_HAVE_FRODOKEM) || \
+     (defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_MLKEM_NO_ASN1)) || \
       defined(WOLFSSL_HAVE_SLHDSA) || \
      (defined(WOLFSSL_HAVE_LMS)  && !defined(WOLFSSL_LMS_VERIFY_ONLY)) || \
      (defined(WOLFSSL_HAVE_XMSS) && !defined(WOLFSSL_XMSS_VERIFY_ONLY)))
@@ -3763,6 +3783,7 @@
      (defined(HAVE_CURVE448)   && defined(HAVE_CURVE448_KEY_IMPORT)) || \
       defined(HAVE_FALCON) || defined(HAVE_DILITHIUM) || \
       defined(WOLFSSL_HAVE_FRODOKEM) || \
+     (defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_MLKEM_NO_ASN1)) || \
       defined(WOLFSSL_HAVE_SLHDSA) || \
      (defined(WOLFSSL_HAVE_LMS)  && !defined(WOLFSSL_LMS_VERIFY_ONLY)) || \
      (defined(WOLFSSL_HAVE_XMSS) && !defined(WOLFSSL_XMSS_VERIFY_ONLY)))

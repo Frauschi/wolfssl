@@ -87,6 +87,9 @@
 #ifdef WOLF_CRYPTO_CB
     #include <wolfssl/wolfcrypt/cryptocb.h>
 #endif
+#ifndef WOLFSSL_MLKEM_NO_ASN1
+    #include <wolfssl/wolfcrypt/asn.h>
+#endif
 
 #ifdef NO_INLINE
     #include <wolfssl/wolfcrypt/misc.h>
@@ -2804,5 +2807,233 @@ int wc_MlKemKey_EncodePublicKey(MlKemKey* key, unsigned char* out, word32 len)
 
     return ret;
 }
+
+#ifndef WOLFSSL_MLKEM_NO_ASN1
+#if defined(WC_ENABLE_ASYM_KEY_EXPORT) || defined(WC_ENABLE_ASYM_KEY_IMPORT)
+
+/* Map an ML-KEM key type to its FIPS 203 key-OID sum.
+ *
+ * @param  [in]   type    ML-KEM key type (WC_ML_KEM_512/768/1024).
+ * @param  [out]  oidSum  OID sum (ML_KEM_512k/768k/1024k).
+ * @return  0 on success.
+ * @return  BAD_FUNC_ARG when the type is not an ML-KEM parameter set.
+ */
+static int mlkem_type_to_oid_sum(int type, int* oidSum)
+{
+    int ret = 0;
+
+    switch (type) {
+        case WC_ML_KEM_512:
+            *oidSum = ML_KEM_512k;
+            break;
+        case WC_ML_KEM_768:
+            *oidSum = ML_KEM_768k;
+            break;
+        case WC_ML_KEM_1024:
+            *oidSum = ML_KEM_1024k;
+            break;
+        default:
+            /* Kyber round-3 types have no standardised OID. */
+            ret = BAD_FUNC_ARG;
+            break;
+    }
+
+    return ret;
+}
+
+#endif /* WC_ENABLE_ASYM_KEY_EXPORT || WC_ENABLE_ASYM_KEY_IMPORT */
+
+#ifdef WC_ENABLE_ASYM_KEY_EXPORT
+/* Encode the ML-KEM public key as a DER SubjectPublicKeyInfo.
+ *
+ * Pass NULL for output to get the size of the encoding.
+ *
+ * @param  [in]   key      ML-KEM key object with public key set.
+ * @param  [out]  output   Buffer for the DER, or NULL to get the length.
+ * @param  [in]   len      Size of output buffer in bytes.
+ * @param  [in]   withAlg  Include the SubjectPublicKeyInfo wrapper (1) or emit
+ *                         only the raw public key bytes (0).
+ * @return  Length of the encoding in bytes on success.
+ * @return  BAD_FUNC_ARG when key is NULL or the type has no OID.
+ * @return  MEMORY_E when dynamic memory allocation fails.
+ */
+int wc_MlKemKey_PublicKeyToDer(MlKemKey* key, byte* output, word32 len,
+    int withAlg)
+{
+    int ret = 0;
+    int oidSum = 0;
+    word32 pubLen = 0;
+    byte* rawPub = NULL;
+
+    if (key == NULL)
+        return BAD_FUNC_ARG;
+
+    if (ret == 0) {
+        ret = mlkem_type_to_oid_sum(key->type, &oidSum);
+    }
+    if (ret == 0) {
+        ret = wc_MlKemKey_PublicKeySize(key, &pubLen);
+    }
+    if (ret == 0) {
+        rawPub = (byte*)XMALLOC((size_t)pubLen, key->heap,
+            DYNAMIC_TYPE_TMP_BUFFER);
+        if (rawPub == NULL) {
+            ret = MEMORY_E;
+        }
+    }
+    if (ret == 0) {
+        ret = wc_MlKemKey_EncodePublicKey(key, rawPub, pubLen);
+    }
+    if (ret == 0) {
+        ret = SetAsymKeyDerPublic(rawPub, pubLen, output, len, oidSum, withAlg);
+    }
+
+    XFREE(rawPub, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
+
+    return ret;
+}
+
+/* Encode the ML-KEM private key as a DER PKCS#8 OneAsymmetricKey.
+ *
+ * The expanded decapsulation key is emitted. The seed and seed-with-expanded
+ * alternatives of the ML-KEM private key are not produced.
+ *
+ * Pass NULL for output to get the size of the encoding.
+ *
+ * @param  [in]   key     ML-KEM key object with private key set.
+ * @param  [out]  output  Buffer for the DER, or NULL to get the length.
+ * @param  [in]   len     Size of output buffer in bytes.
+ * @return  Length of the encoding in bytes on success.
+ * @return  BAD_FUNC_ARG when key is NULL or the type has no OID.
+ * @return  MEMORY_E when dynamic memory allocation fails.
+ */
+int wc_MlKemKey_PrivateKeyToDer(MlKemKey* key, byte* output, word32 len)
+{
+    int ret = 0;
+    int oidSum = 0;
+    word32 privLen = 0;
+    byte* rawPriv = NULL;
+
+    if (key == NULL)
+        return BAD_FUNC_ARG;
+
+    if (ret == 0) {
+        ret = mlkem_type_to_oid_sum(key->type, &oidSum);
+    }
+    if (ret == 0) {
+        ret = wc_MlKemKey_PrivateKeySize(key, &privLen);
+    }
+    if (ret == 0) {
+        rawPriv = (byte*)XMALLOC((size_t)privLen, key->heap,
+            DYNAMIC_TYPE_TMP_BUFFER);
+        if (rawPriv == NULL) {
+            ret = MEMORY_E;
+        }
+    }
+    if (ret == 0) {
+        ret = wc_MlKemKey_EncodePrivateKey(key, rawPriv, privLen);
+    }
+    if (ret == 0) {
+        /* The ML-KEM private key embeds the public key, so no separate public
+         * key is appended. */
+        ret = SetAsymKeyDer(rawPriv, privLen, NULL, 0, output, len, oidSum);
+    }
+
+    if (rawPriv != NULL) {
+        ForceZero(rawPriv, privLen);
+        XFREE(rawPriv, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
+    }
+
+    return ret;
+}
+#endif /* WC_ENABLE_ASYM_KEY_EXPORT */
+
+#ifdef WC_ENABLE_ASYM_KEY_IMPORT
+/* Decode a DER SubjectPublicKeyInfo into an ML-KEM public key.
+ *
+ * The key object must already be initialized for a parameter set, and the
+ * algorithm OID in the DER must name that same parameter set. ML-KEM cannot
+ * auto-detect the way a signature key does, because WC_ML_KEM_512 is zero and
+ * so is indistinguishable from an unset type.
+ *
+ * @param  [in, out]  key       ML-KEM key object.
+ * @param  [in]       input     DER buffer.
+ * @param  [in]       inSz      Size of DER buffer in bytes.
+ * @param  [in, out]  inOutIdx  On in, index into buffer; on out, index after.
+ * @return  0 on success.
+ * @return  BAD_FUNC_ARG when a pointer is NULL.
+ * @return  ASN_PARSE_E when the DER is invalid or names another parameter set.
+ */
+int wc_MlKemKey_PublicKeyDecode(MlKemKey* key, const byte* input, word32 inSz,
+    word32* inOutIdx)
+{
+    int ret = 0;
+    int keyType = ANONk;
+    const byte* pubKey = NULL;
+    word32 pubKeyLen = 0;
+
+    if ((key == NULL) || (input == NULL) || (inOutIdx == NULL)) {
+        ret = BAD_FUNC_ARG;
+    }
+    if (ret == 0) {
+        ret = mlkem_type_to_oid_sum(key->type, &keyType);
+    }
+    if (ret == 0) {
+        ret = DecodeAsymKeyPublic_Assign(input, inOutIdx, inSz, &pubKey,
+            &pubKeyLen, &keyType);
+    }
+    if (ret == 0) {
+        ret = wc_MlKemKey_DecodePublicKey(key, pubKey, pubKeyLen);
+    }
+
+    return ret;
+}
+
+/* Decode a DER PKCS#8 OneAsymmetricKey into an ML-KEM private key.
+ *
+ * Only the expanded decapsulation key is accepted. The parameter set must
+ * match the initialized key object, as described for
+ * wc_MlKemKey_PublicKeyDecode.
+ *
+ * @param  [in, out]  key       ML-KEM key object.
+ * @param  [in]       input     DER buffer.
+ * @param  [in]       inSz      Size of DER buffer in bytes.
+ * @param  [in, out]  inOutIdx  On in, index into buffer; on out, index after.
+ * @return  0 on success.
+ * @return  BAD_FUNC_ARG when a pointer is NULL.
+ * @return  ASN_PARSE_E when the DER is invalid or names another parameter set.
+ */
+int wc_MlKemKey_PrivateKeyDecode(MlKemKey* key, const byte* input, word32 inSz,
+    word32* inOutIdx)
+{
+    int ret = 0;
+    int keyType = ANONk;
+    const byte* privKey = NULL;
+    word32 privKeyLen = 0;
+    const byte* pubKey = NULL;
+    word32 pubKeyLen = 0;
+
+    if ((key == NULL) || (input == NULL) || (inOutIdx == NULL)) {
+        ret = BAD_FUNC_ARG;
+    }
+    if (ret == 0) {
+        ret = mlkem_type_to_oid_sum(key->type, &keyType);
+    }
+    if (ret == 0) {
+        /* A KEM blob carries no seed, and the ML-KEM private key embeds the
+         * public key, so pubKeyLen comes back zero. The out-params must still
+         * be non-NULL. */
+        ret = DecodeAsymKey_Assign(input, inOutIdx, inSz, NULL, NULL, &privKey,
+            &privKeyLen, &pubKey, &pubKeyLen, &keyType);
+    }
+    if (ret == 0) {
+        ret = wc_MlKemKey_DecodePrivateKey(key, privKey, privKeyLen);
+    }
+
+    return ret;
+}
+#endif /* WC_ENABLE_ASYM_KEY_IMPORT */
+
+#endif /* !WOLFSSL_MLKEM_NO_ASN1 */
 
 #endif /* WOLFSSL_HAVE_MLKEM */

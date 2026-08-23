@@ -56878,6 +56878,174 @@ out:
 }
 #endif /* !WOLFSSL_NO_KYBER1024 && !WOLFSSL_NO_ML_KEM_1024 */
 
+#if !defined(WOLFSSL_MLKEM_NO_ASN1) && \
+    defined(WC_ENABLE_ASYM_KEY_EXPORT) && \
+    defined(WC_ENABLE_ASYM_KEY_IMPORT) && \
+    !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) && !defined(WC_NO_RNG) && \
+    !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) && \
+    !defined(WOLFSSL_MLKEM_NO_DECAPSULATE)
+/* Round-trip each enabled ML-KEM parameter set through its DER encodings:
+ * SubjectPublicKeyInfo for the encapsulation key and PKCS#8 for the expanded
+ * decapsulation key. A decoded public key must still encapsulate to a shared
+ * secret the decoded private key recovers. */
+static wc_test_ret_t mlkem_asn1_test(void)
+{
+    wc_test_ret_t ret = 0;
+    WC_RNG rng;
+    int rngInit = 0;
+    int i;
+    static const int levels[] = {
+#if defined(WOLFSSL_WC_ML_KEM_512) && !defined(WOLFSSL_NO_ML_KEM)
+        WC_ML_KEM_512,
+#endif
+#if defined(WOLFSSL_WC_ML_KEM_768) && !defined(WOLFSSL_NO_ML_KEM)
+        WC_ML_KEM_768,
+#endif
+#if defined(WOLFSSL_WC_ML_KEM_1024) && !defined(WOLFSSL_NO_ML_KEM)
+        WC_ML_KEM_1024,
+#endif
+        -1
+    };
+
+    ret = wc_InitRng_ex(&rng, HEAP_HINT, devId);
+    if (ret != 0)
+        return WC_TEST_RET_ENC_EC(ret);
+    rngInit = 1;
+
+    for (i = 0; levels[i] != -1; i++) {
+        MlKemKey key[1];
+        MlKemKey decoded[1];
+        byte* der = NULL;
+        byte ct[WC_ML_KEM_MAX_CIPHER_TEXT_SIZE];
+        byte ss[WC_ML_KEM_SS_SZ];
+        byte ssDec[WC_ML_KEM_SS_SZ];
+        word32 idx = 0;
+        word32 ctLen = 0;
+        int derLen = 0;
+        int keyInit = 0;
+        int decInit = 0;
+
+        ret = wc_MlKemKey_Init(key, levels[i], HEAP_HINT, devId);
+        if (ret == 0) {
+            keyInit = 1;
+            ret = wc_MlKemKey_MakeKey(key, &rng);
+        }
+
+        /* SubjectPublicKeyInfo round trip. */
+        if (ret == 0) {
+            derLen = wc_MlKemKey_PublicKeyToDer(key, NULL, 0, 1);
+            if (derLen <= 0)
+                ret = WC_TEST_RET_ENC_EC(derLen);
+        }
+        if (ret == 0) {
+            der = (byte*)XMALLOC((word32)derLen, HEAP_HINT,
+                DYNAMIC_TYPE_TMP_BUFFER);
+            if (der == NULL)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0) {
+            derLen = wc_MlKemKey_PublicKeyToDer(key, der, (word32)derLen, 1);
+            if (derLen <= 0)
+                ret = WC_TEST_RET_ENC_EC(derLen);
+        }
+        if (ret == 0) {
+            ret = wc_MlKemKey_Init(decoded, levels[i], HEAP_HINT, devId);
+            if (ret == 0)
+                decInit = 1;
+        }
+        if (ret == 0) {
+            idx = 0;
+            ret = wc_MlKemKey_PublicKeyDecode(decoded, der, (word32)derLen,
+                &idx);
+        }
+        /* A DER naming a different parameter set must be refused. */
+        if (ret == 0) {
+            MlKemKey wrong[1];
+            int wrongLevel = (levels[i] == WC_ML_KEM_512) ? WC_ML_KEM_1024 :
+                                                            WC_ML_KEM_512;
+            if (wc_MlKemKey_Init(wrong, wrongLevel, HEAP_HINT, devId) == 0) {
+                idx = 0;
+                if (wc_MlKemKey_PublicKeyDecode(wrong, der, (word32)derLen,
+                        &idx) == 0) {
+                    ret = WC_TEST_RET_ENC_NC;
+                }
+                wc_MlKemKey_Free(wrong);
+            }
+        }
+        XFREE(der, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        der = NULL;
+
+        /* The decoded public key must interoperate with the original. */
+        if (ret == 0)
+            ret = wc_MlKemKey_CipherTextSize(decoded, &ctLen);
+        if (ret == 0)
+            ret = wc_MlKemKey_Encapsulate(decoded, ct, ss, &rng);
+        if (ret == 0)
+            ret = wc_MlKemKey_Decapsulate(key, ssDec, ct, ctLen);
+        if (ret == 0) {
+            if (XMEMCMP(ss, ssDec, WC_ML_KEM_SS_SZ) != 0)
+                ret = WC_TEST_RET_ENC_NC;
+        }
+        if (decInit) {
+            wc_MlKemKey_Free(decoded);
+            decInit = 0;
+        }
+
+        /* PKCS#8 private key round trip. */
+        if (ret == 0) {
+            derLen = wc_MlKemKey_PrivateKeyToDer(key, NULL, 0);
+            if (derLen <= 0)
+                ret = WC_TEST_RET_ENC_EC(derLen);
+        }
+        if (ret == 0) {
+            der = (byte*)XMALLOC((word32)derLen, HEAP_HINT,
+                DYNAMIC_TYPE_TMP_BUFFER);
+            if (der == NULL)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0) {
+            derLen = wc_MlKemKey_PrivateKeyToDer(key, der, (word32)derLen);
+            if (derLen <= 0)
+                ret = WC_TEST_RET_ENC_EC(derLen);
+        }
+        if (ret == 0) {
+            ret = wc_MlKemKey_Init(decoded, levels[i], HEAP_HINT, devId);
+            if (ret == 0)
+                decInit = 1;
+        }
+        if (ret == 0) {
+            idx = 0;
+            ret = wc_MlKemKey_PrivateKeyDecode(decoded, der, (word32)derLen,
+                &idx);
+        }
+        /* The decoded private key must recover the same shared secret. */
+        if (ret == 0) {
+            XMEMSET(ssDec, 0, sizeof(ssDec));
+            ret = wc_MlKemKey_Decapsulate(decoded, ssDec, ct, ctLen);
+        }
+        if (ret == 0) {
+            if (XMEMCMP(ss, ssDec, WC_ML_KEM_SS_SZ) != 0)
+                ret = WC_TEST_RET_ENC_NC;
+        }
+
+        if (der != NULL)
+            XFREE(der, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        if (decInit)
+            wc_MlKemKey_Free(decoded);
+        if (keyInit)
+            wc_MlKemKey_Free(key);
+
+        if (ret != 0)
+            break;
+    }
+
+    if (rngInit)
+        wc_FreeRng(&rng);
+
+    return ret;
+}
+#endif /* ML-KEM ASN.1 round trip */
+
 WOLFSSL_TEST_SUBROUTINE wc_test_ret_t mlkem_test(void)
 {
     wc_test_ret_t ret;
@@ -56924,15 +57092,15 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t mlkem_test(void)
     int key_inited = 0;
     static const int testData[][4] = {
 #ifndef WOLFSSL_NO_ML_KEM
-    #ifdef WOLFSSL_WC_ML_KEM_512
+    #if defined(WOLFSSL_WC_ML_KEM_512) && !defined(WOLFSSL_NO_ML_KEM)
         { WC_ML_KEM_512,  WC_ML_KEM_512_PRIVATE_KEY_SIZE,
           WC_ML_KEM_512_PUBLIC_KEY_SIZE,  WC_ML_KEM_512_CIPHER_TEXT_SIZE },
     #endif
-    #ifdef WOLFSSL_WC_ML_KEM_768
+    #if defined(WOLFSSL_WC_ML_KEM_768) && !defined(WOLFSSL_NO_ML_KEM)
         { WC_ML_KEM_768,  WC_ML_KEM_768_PRIVATE_KEY_SIZE,
           WC_ML_KEM_768_PUBLIC_KEY_SIZE,  WC_ML_KEM_768_CIPHER_TEXT_SIZE },
     #endif
-    #ifdef WOLFSSL_WC_ML_KEM_1024
+    #if defined(WOLFSSL_WC_ML_KEM_1024) && !defined(WOLFSSL_NO_ML_KEM)
         { WC_ML_KEM_1024, WC_ML_KEM_1024_PRIVATE_KEY_SIZE,
           WC_ML_KEM_1024_PUBLIC_KEY_SIZE, WC_ML_KEM_1024_CIPHER_TEXT_SIZE },
     #endif
@@ -57143,6 +57311,17 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t mlkem_test(void)
 #endif
 #if !defined(WOLFSSL_NO_KYBER1024) && !defined(WOLFSSL_NO_ML_KEM_1024)
     ret = mlkem1024_kat();
+    if (ret != 0)
+        goto out;
+#endif
+
+#if !defined(WOLFSSL_MLKEM_NO_ASN1) && \
+    defined(WC_ENABLE_ASYM_KEY_EXPORT) && \
+    defined(WC_ENABLE_ASYM_KEY_IMPORT) && \
+    !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) && !defined(WC_NO_RNG) && \
+    !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) && \
+    !defined(WOLFSSL_MLKEM_NO_DECAPSULATE)
+    ret = mlkem_asn1_test();
     if (ret != 0)
         goto out;
 #endif
