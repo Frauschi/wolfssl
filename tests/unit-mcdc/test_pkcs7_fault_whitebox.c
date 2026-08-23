@@ -400,7 +400,7 @@ static void wb_ori_pwri(void)
             Pkcs7EncodedRecip* n;
             while (r != NULL) {
                 n = r->next;
-                XFREE(r, pkcs7.heap, DYNAMIC_TYPE_PKCS7);
+                wc_PKCS7_FreeEncodedRecip(&pkcs7, r);
                 r = n;
             }
             pkcs7.recipList = NULL;
@@ -545,7 +545,7 @@ static void wb_kekri_other(void)
         Pkcs7EncodedRecip* n;
         while (r != NULL) {
             n = r->next;
-            XFREE(r, pkcs7.heap, DYNAMIC_TYPE_PKCS7);
+            wc_PKCS7_FreeEncodedRecip(&pkcs7, r);
             r = n;
         }
         pkcs7.recipList = NULL;
@@ -771,7 +771,7 @@ static void wb_kari_full(void)
             Pkcs7EncodedRecip* n;
             while (r != NULL) {
                 n = r->next;
-                XFREE(r, pkcs7.heap, DYNAMIC_TYPE_PKCS7);
+                wc_PKCS7_FreeEncodedRecip(&pkcs7, r);
                 r = n;
             }
             pkcs7.recipList = NULL;
