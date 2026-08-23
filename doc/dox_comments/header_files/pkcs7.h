@@ -1916,7 +1916,58 @@ int wc_PKCS7_SetOriDecryptCb(wc_PKCS7* pkcs7, CallbackOriDecrypt cb);
 
 /*!
     \ingroup PKCS7
+    \brief Adds a KEMRecipientInfo recipient, RFC 9629, using the ML-KEM key
+    in the recipient's certificate.
+
+    The content-encryption key is encapsulated to the recipient's ML-KEM
+    public key. The resulting shared secret derives a key-encryption key
+    through kdfOID, and that key wraps the content-encryption key with
+    wrapOID. RFC 9629 carries the KEMRecipientInfo inside an
+    OtherRecipientInfo whose oriType is id-ori-kem, so no OtherRecipientInfo
+    callback is needed for either direction.
+
+    The recipient certificate must assert the keyEncipherment key usage.
+
+    \return size of the encoded RecipientInfo on success
+    \return negative on error
+
+    \param pkcs7 PKCS7 structure
+    \param cert Recipient certificate holding an ML-KEM public key
+    \param certSz Size of cert, bytes
+    \param kdfOID KDF used to derive the key-encryption key, one of
+    HKDF_SHA256_OID, HKDF_SHA384_OID, HKDF_SHA512_OID, KMAC128_OID or
+    KMAC256_OID
+    \param wrapOID Key wrap algorithm for the content-encryption key
+    \param ukm Optional user keying material, may be NULL
+    \param ukmSz Size of ukm, bytes, or 0
+    \param options Options flags, CMS_SKID or CMS_ISSUER_AND_SERIAL_NUMBER
+
+    _Example_
+    \code
+    int ret = wc_PKCS7_AddRecipient_KEMRI(&pkcs7, cert, certSz,
+                                          HKDF_SHA512_OID, AES256_WRAP,
+                                          NULL, 0, 0);
+    \endcode
+
+    \sa wc_PKCS7_EncodeEnvelopedData
+    \sa wc_PKCS7_DecodeEnvelopedData
+*/
+int wc_PKCS7_AddRecipient_KEMRI(wc_PKCS7* pkcs7, const byte* cert,
+                                word32 certSz, int kdfOID, int wrapOID,
+                                const byte* ukm, word32 ukmSz, int options);
+
+/*!
+    \ingroup PKCS7
     \brief Adds ORI recipient.
+
+    The callback receives oriType and oriValue buffers along with their sizes,
+    and both sizes are in/out. On entry each holds the capacity of its buffer:
+    MAX_ORI_TYPE_SZ for oriType and MAX_ORI_VALUE_SZ for oriValue. The callback
+    MUST NOT write more than the size it was given, and MUST set that size to
+    the number of bytes it actually wrote before returning. Reporting more than
+    was written makes the encoder copy uninitialized memory into the message;
+    writing more than the incoming size overruns the buffer, which no check
+    after the fact can undo.
 
     \return 0 on success
     \return negative on error
