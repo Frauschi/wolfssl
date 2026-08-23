@@ -87,7 +87,7 @@
  *   19. ParseKeyUsageStr()/ParseExtKeyUsageStr() NULL OR .. :28135,:28198
  *   20. wc_SetSubjectKeyId()/wc_SetAuthKeyId()/wc_SetIssuer()/
  *       wc_SetSubject() cert/file NULL OR .... :31812,:31978,:32381,:32404
- *   21. SetKeyIdFromPublicKey() 11-operand cert/key/kid_type OR .... :31594
+ *   21. SetKeyIdFromPublicKey() 12-operand cert/key/kid_type OR .... :31594
  *   22. GetFormattedTime_ex() buf/len/format OR ................... :15901
  *   23. wc_MIME_parse_headers() in/inLen/terminator/headers OR .... :38530
  *   24. wc_GetFASCNFromCert() otherName/oidSum AND ................ :27036
@@ -1461,7 +1461,7 @@ static void wb_cert_file_setters_null_args(void)
 #endif
 
 /* ------------------------------------------------------------------------- *
- * Section 21: SetKeyIdFromPublicKey() (:31594), the 11-operand chain.
+ * Section 21: SetKeyIdFromPublicKey() (:31594), the 12-operand chain.
  *   if (cert == NULL ||
  *       (rsakey==NULL && eckey==NULL && ed25519Key==NULL && ed448Key==NULL &&
  *        falconKey==NULL && mldsaKey==NULL && slhDsaKey==NULL &&
@@ -1489,19 +1489,19 @@ static void wb_set_keyid_from_pubkey_operands(void)
     static byte opaque[8];
     int ret;
 
-    WB_NOTE("SetKeyIdFromPublicKey(): 11-operand cert/key/kid_type OR "
+    WB_NOTE("SetKeyIdFromPublicKey(): 12-operand cert/key/kid_type OR "
             "[:31594]");
 
     WB_CHECK(wc_InitCert(&cert) == 0, "wc_InitCert");
 
     /* 1st operand true. */
     ret = SetKeyIdFromPublicKey(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-            NULL, SKID_TYPE);
+            NULL, NULL, SKID_TYPE);
     WB_CHECK(ret == WC_NO_ERR_TRACE(BAD_FUNC_ARG), "cert==NULL");
 
     /* Inner AND all true (no key supplied) -> 2nd operand true. */
     ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, SKID_TYPE);
+            NULL, NULL, NULL, SKID_TYPE);
     WB_CHECK(ret == WC_NO_ERR_TRACE(BAD_FUNC_ARG), "every key pointer NULL");
 
     /* --- one row per key-pointer operand: that operand false, guard false. */
@@ -1510,7 +1510,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
         RsaKey k;
         if (wc_InitRsaKey(&k, NULL) == 0) {
             ret = SetKeyIdFromPublicKey(&cert, &k, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, SKID_TYPE);
+                    NULL, NULL, NULL, NULL, SKID_TYPE);
             WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
                     "rsakey!=NULL (guard false)");
             wc_FreeRsaKey(&k);
@@ -1518,7 +1518,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
     }
 #else
     ret = SetKeyIdFromPublicKey(&cert, (RsaKey*)(void*)opaque, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL, SKID_TYPE);
+            NULL, NULL, NULL, NULL, NULL, NULL, SKID_TYPE);
     WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
             "rsakey!=NULL (guard false, RSA not compiled)");
 #endif
@@ -1528,7 +1528,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
         ecc_key k;
         if (wc_ecc_init(&k) == 0) {
             ret = SetKeyIdFromPublicKey(&cert, NULL, &k, NULL, NULL, NULL,
-                    NULL, NULL, NULL, SKID_TYPE);
+                    NULL, NULL, NULL, NULL, SKID_TYPE);
             WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
                     "eckey!=NULL (guard false)");
             wc_ecc_free(&k);
@@ -1536,7 +1536,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
     }
 #else
     ret = SetKeyIdFromPublicKey(&cert, NULL, (ecc_key*)(void*)opaque, NULL,
-            NULL, NULL, NULL, NULL, NULL, SKID_TYPE);
+            NULL, NULL, NULL, NULL, NULL, NULL, SKID_TYPE);
     WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
             "eckey!=NULL (guard false, ECC not compiled)");
 #endif
@@ -1546,7 +1546,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
         ed25519_key k;
         if (wc_ed25519_init(&k) == 0) {
             ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, &k, NULL, NULL,
-                    NULL, NULL, NULL, SKID_TYPE);
+                    NULL, NULL, NULL, NULL, SKID_TYPE);
             WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
                     "ed25519Key!=NULL (guard false)");
             wc_ed25519_free(&k);
@@ -1554,7 +1554,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
     }
 #else
     ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, (ed25519_key*)(void*)opaque,
-            NULL, NULL, NULL, NULL, NULL, SKID_TYPE);
+            NULL, NULL, NULL, NULL, NULL, NULL, SKID_TYPE);
     WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
             "ed25519Key!=NULL (guard false, Ed25519 not compiled)");
 #endif
@@ -1564,7 +1564,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
         ed448_key k;
         if (wc_ed448_init(&k) == 0) {
             ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL, &k, NULL,
-                    NULL, NULL, NULL, SKID_TYPE);
+                    NULL, NULL, NULL, NULL, SKID_TYPE);
             WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
                     "ed448Key!=NULL (guard false)");
             wc_ed448_free(&k);
@@ -1572,7 +1572,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
     }
 #else
     ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL,
-            (ed448_key*)(void*)opaque, NULL, NULL, NULL, NULL, SKID_TYPE);
+            (ed448_key*)(void*)opaque, NULL, NULL, NULL, NULL, NULL, SKID_TYPE);
     WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
             "ed448Key!=NULL (guard false, Ed448 not compiled)");
 #endif
@@ -1582,7 +1582,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
         falcon_key k;
         if (wc_falcon_init(&k) == 0) {
             ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL, NULL, &k,
-                    NULL, NULL, NULL, SKID_TYPE);
+                    NULL, NULL, NULL, NULL, SKID_TYPE);
             WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
                     "falconKey!=NULL (guard false)");
             wc_falcon_free(&k);
@@ -1590,7 +1590,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
     }
 #else
     ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL, NULL,
-            (falcon_key*)(void*)opaque, NULL, NULL, NULL, SKID_TYPE);
+            (falcon_key*)(void*)opaque, NULL, NULL, NULL, NULL, SKID_TYPE);
     WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
             "falconKey!=NULL (guard false, Falcon not compiled)");
 #endif
@@ -1600,7 +1600,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
         wc_MlDsaKey k;
         if (wc_MlDsaKey_Init(&k, NULL, INVALID_DEVID) == 0) {
             ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL, NULL, NULL,
-                    &k, NULL, NULL, SKID_TYPE);
+                    &k, NULL, NULL, NULL, SKID_TYPE);
             WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
                     "mldsaKey!=NULL (guard false)");
             wc_MlDsaKey_Free(&k);
@@ -1608,7 +1608,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
     }
 #else
     ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL, NULL, NULL,
-            (wc_MlDsaKey*)(void*)opaque, NULL, NULL, SKID_TYPE);
+            (wc_MlDsaKey*)(void*)opaque, NULL, NULL, NULL, SKID_TYPE);
     WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
             "mldsaKey!=NULL (guard false, ML-DSA not compiled)");
 #endif
@@ -1620,7 +1620,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
         if (k != NULL) {
             if (wc_SlhDsaKey_Init(k, NULL, INVALID_DEVID) == 0) {
                 ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL, NULL,
-                        NULL, NULL, k, NULL, SKID_TYPE);
+                        NULL, NULL, k, NULL, NULL, SKID_TYPE);
                 WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
                         "slhDsaKey!=NULL (guard false)");
                 wc_SlhDsaKey_Free(k);
@@ -1630,7 +1630,7 @@ static void wb_set_keyid_from_pubkey_operands(void)
     }
 #else
     ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL, NULL, NULL, NULL,
-            (SlhDsaKey*)(void*)opaque, NULL, SKID_TYPE);
+            (SlhDsaKey*)(void*)opaque, NULL, NULL, SKID_TYPE);
     WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
             "slhDsaKey!=NULL (guard false, SLH-DSA not compiled)");
 #endif
@@ -1638,9 +1638,17 @@ static void wb_set_keyid_from_pubkey_operands(void)
 #if !defined(WOLFSSL_HAVE_FRODOKEM) || defined(WOLFSSL_FRODOKEM_NO_ASN1)
     /* frodoKey is a void* and its export block is compiled out here. */
     ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL, NULL, NULL, NULL,
-            NULL, (void*)opaque, SKID_TYPE);
+            NULL, (void*)opaque, NULL, SKID_TYPE);
     WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
             "frodoKey!=NULL (guard false, FrodoKEM not compiled)");
+#endif
+
+#if !defined(WOLFSSL_HAVE_MLKEM) || defined(WOLFSSL_MLKEM_NO_ASN1)
+    /* mlKemKey is a void* and its export block is compiled out here. */
+    ret = SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, (void*)opaque, SKID_TYPE);
+    WB_CHECK(ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG),
+            "mlKemKey!=NULL (guard false, ML-KEM not compiled)");
 #endif
 
     /* --- kid_type operands ------------------------------------------------ *
@@ -1654,12 +1662,12 @@ static void wb_set_keyid_from_pubkey_operands(void)
         RsaKey* kp = haveKey ? &k : NULL;
 #define WB_SKID_CALL(kt) \
         SetKeyIdFromPublicKey(&cert, kp, NULL, NULL, NULL, NULL, NULL, NULL, \
-                NULL, (kt))
+                NULL, NULL, (kt))
 #else
         int haveKey = 1;
 #define WB_SKID_CALL(kt) \
         SetKeyIdFromPublicKey(&cert, NULL, NULL, NULL, NULL, NULL, NULL, \
-                NULL, (void*)opaque, (kt))
+                NULL, (void*)opaque, NULL, (kt))
 #endif
         if (haveKey) {
             /* kid_type == AKID_TYPE -> 2nd operand of the kid_type AND is
