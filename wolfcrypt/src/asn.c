@@ -5823,6 +5823,18 @@ static const byte attrGivenName[] = {85, 4, 42};
 
 /* kdfType */
 static const byte pbkdf2Oid[] = {42, 134, 72, 134, 247, 13, 1, 5, 12};
+#if defined(HAVE_PKCS7) && defined(HAVE_HKDF)
+/* RFC 8619 HKDF, the CMS KEMRecipientInfo KDFs. */
+/* id-alg-hkdf-with-sha256: 1.2.840.113549.1.9.16.3.28 */
+static const byte hkdfSha256Oid[] =
+    {42, 134, 72, 134, 247, 13, 1, 9, 16, 3, 28};
+/* id-alg-hkdf-with-sha384: 1.2.840.113549.1.9.16.3.29 */
+static const byte hkdfSha384Oid[] =
+    {42, 134, 72, 134, 247, 13, 1, 9, 16, 3, 29};
+/* id-alg-hkdf-with-sha512: 1.2.840.113549.1.9.16.3.30 */
+static const byte hkdfSha512Oid[] =
+    {42, 134, 72, 134, 247, 13, 1, 9, 16, 3, 30};
+#endif /* HAVE_PKCS7 && HAVE_HKDF */
 
 /* PKCS5 */
 #if !defined(NO_DES3) && !defined(NO_MD5)
@@ -7270,6 +7282,20 @@ const byte* OidFromId(word32 id, word32 type, word32* oidSz)
                     oid = pbkdf2Oid;
                     *oidSz = sizeof(pbkdf2Oid);
                     break;
+            #if defined(HAVE_PKCS7) && defined(HAVE_HKDF)
+                case HKDF_SHA256_OID:
+                    oid = hkdfSha256Oid;
+                    *oidSz = sizeof(hkdfSha256Oid);
+                    break;
+                case HKDF_SHA384_OID:
+                    oid = hkdfSha384Oid;
+                    *oidSz = sizeof(hkdfSha384Oid);
+                    break;
+                case HKDF_SHA512_OID:
+                    oid = hkdfSha512Oid;
+                    *oidSz = sizeof(hkdfSha512Oid);
+                    break;
+            #endif /* HAVE_PKCS7 && HAVE_HKDF */
                 default:
                     break;
             }
@@ -22470,10 +22496,10 @@ static int DecodeSubjKeyIdInternal(const byte* input, word32 sz,
         return ret;
 
     cert->extSubjKeyIdSz = extSubjKeyIdSz;
-
-#if defined(OPENSSL_EXTRA) || defined(OPENSSL_EXTRA_X509_SMALL)
+#if defined(OPENSSL_EXTRA) || defined(OPENSSL_EXTRA_X509_SMALL) || \
+    defined(HAVE_PKCS7)
     cert->extSubjKeyIdSrc = extSubjKeyId;
-#endif /* OPENSSL_EXTRA */
+#endif
 
     /* Get the hash or hash of the hash if wrong size. */
     ret = GetHashId(extSubjKeyId, (int)extSubjKeyIdSz, cert->extSubjKeyId,

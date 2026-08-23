@@ -453,12 +453,30 @@ print_enum("Key_Agree", "_scheme", \@key_agrees, 40, 0);
 my @pbkdf2 = ( 1, 2, 840, 113549, 1, 5, 12 );
 my @mgf1 = (1, 2, 840, 113549, 1, 1, 8 );
 
+# RFC 8619 HKDF, used as CMS KEMRecipientInfo KDFs.
+my @hkdf_sha256 = ( 1, 2, 840, 113549, 1, 9, 16, 3, 28 );
+my @hkdf_sha384 = ( 1, 2, 840, 113549, 1, 9, 16, 3, 29 );
+my @hkdf_sha512 = ( 1, 2, 840, 113549, 1, 9, 16, 3, 30 );
+
 my @kdfs = (
     { name => "PBKDF2", oid => \@pbkdf2 },
     { name => "MGF1",   oid => \@mgf1   },
+    { name => "HKDF_SHA256", oid => \@hkdf_sha256 },
+    { name => "HKDF_SHA384", oid => \@hkdf_sha384 },
+    { name => "HKDF_SHA512", oid => \@hkdf_sha512 },
 );
 
 print_sum_enum("KDF", "_OID", \@kdfs);
+
+
+# RFC 9629 OtherRecipientInfo type for a KEM.
+my @ori_kem = ( 1, 2, 840, 113549, 1, 9, 16, 13, 3 );
+
+my @oris = (
+    { name => "ORI_KEM", oid => \@ori_kem },
+);
+
+print_sum_enum("Ori", "_OID", \@oris);
 
 
 my @hmac_sha224 = ( 1, 2, 840, 113549, 2, 8 );

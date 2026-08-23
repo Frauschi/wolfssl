@@ -2022,6 +2022,9 @@ struct DecodedCert {
     word32  extRawAuthKeyIdSz;
 #endif
     const byte* extAuthKeyIdSrc;
+#endif
+#if defined(OPENSSL_EXTRA) || defined(OPENSSL_EXTRA_X509_SMALL) || \
+    defined(HAVE_PKCS7)
     const byte* extSubjKeyIdSrc;
 #endif
 #ifdef OPENSSL_ALL
