@@ -4,7 +4,6 @@
 
 EXTRA_DIST += \
 		 certs/mlkem/README.txt \
-		 certs/mlkem/gen_mlkem.c \
 		 certs/mlkem/mlkem512-cert.der \
 		 certs/mlkem/mlkem512-key.der \
 		 certs/mlkem/mlkem768-cert.der \
