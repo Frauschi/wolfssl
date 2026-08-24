@@ -71147,9 +71147,142 @@ static wc_test_ret_t pkcs7enveloped_mlkem_multi_test(void)
                 ret = WC_TEST_RET_ENC_NC;
                 goto out_multi;
             }
+
         }
     }
     ret = 0;
+
+#ifndef NO_PKCS7_STREAM
+    /* Two recipients, matching one second, fed in small chunks. A decode that
+     * has to wait for input re-enters through the state dispatch rather than
+     * the recipient walk, and a "not this recipient" answer produced there
+     * used to end the search - so this opened only for the first recipient
+     * however many it named. Two recipients rather than the loop's full set:
+     * stepping over more than one unread recipient in a chunked decode is a
+     * separate, still open problem in the streaming layer. */
+    if (ret == 0) {
+        byte* env = NULL;
+        byte* plain = NULL;
+        int envSz = 0;
+        int fed = 0;
+        int streamSz = -1;
+
+        env = (byte*)XMALLOC(FOURK_BUF * 8, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        plain = (byte*)XMALLOC(FOURK_BUF, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        if (env == NULL || plain == NULL)
+            ret = WC_TEST_RET_ENC_ERRNO;
+
+        if (ret == 0) {
+            f = XFOPEN(certFiles[0], "rb");
+            if (f == XBADFILE)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0) {
+            certSz = (word32)XFREAD(cert, 1, FOURK_BUF * 4, f);
+            XFCLOSE(f);
+            f = XBADFILE;
+            if (certSz == 0)
+                ret = WC_TEST_RET_ENC_NC;
+        }
+        if (ret == 0) {
+            pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+            if (pkcs7 == NULL)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0)
+            ret = wc_PKCS7_Init(pkcs7, HEAP_HINT, devId);
+        if (ret == 0) {
+            pkcs7->content    = (byte*)content;
+            pkcs7->contentSz  = (word32)sizeof(content);
+            pkcs7->contentOID = DATA;
+            pkcs7->encryptOID = MLKEM_TEST_CONTENT_ALG;
+            if (wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+                    MLKEM_TEST_KDF, AES256_WRAP, NULL, 0, 0) < 0) {
+                ret = WC_TEST_RET_ENC_NC;
+            }
+        }
+        /* second recipient, the one the chunked decode has to reach */
+        if (ret == 0) {
+            f = XFOPEN(certFiles[1], "rb");
+            if (f == XBADFILE)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0) {
+            certSz = (word32)XFREAD(cert, 1, FOURK_BUF * 4, f);
+            XFCLOSE(f);
+            f = XBADFILE;
+            if (certSz == 0)
+                ret = WC_TEST_RET_ENC_NC;
+        }
+        if (ret == 0) {
+            if (wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+                    MLKEM_TEST_KDF, AES256_WRAP, NULL, 0, 0) < 0) {
+                ret = WC_TEST_RET_ENC_NC;
+            }
+        }
+        if (ret == 0) {
+            envSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, env, FOURK_BUF * 8);
+            if (envSz <= 0)
+                ret = WC_TEST_RET_ENC_I(envSz);
+        }
+        if (pkcs7 != NULL) {
+            pkcs7->content = NULL;
+            pkcs7->contentSz = 0;
+            wc_PKCS7_Free(pkcs7);
+            pkcs7 = NULL;
+        }
+
+        if (ret == 0) {
+            f = XFOPEN(keyFiles[1], "rb");
+            if (f == XBADFILE)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0) {
+            keySz = (word32)XFREAD(key, 1, FOURK_BUF * 4, f);
+            XFCLOSE(f);
+            f = XBADFILE;
+            if (keySz == 0)
+                ret = WC_TEST_RET_ENC_NC;
+        }
+        if (ret == 0) {
+            pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+            if (pkcs7 == NULL)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0)
+            ret = wc_PKCS7_Init(pkcs7, HEAP_HINT, devId);
+        if (ret == 0) {
+            pkcs7->privateKey   = key;
+            pkcs7->privateKeySz = keySz;
+            while (fed < envSz) {
+                /* Small enough that the decode has to wait for input part
+                 * way through a RecipientInfo, which is what puts it on the
+                 * resume path. Larger chunks let it finish each recipient in
+                 * one call and the bug this guards against never shows. */
+                int n = ((envSz - fed) < 64) ? (envSz - fed) : 64;
+
+                streamSz = wc_PKCS7_DecodeEnvelopedData(pkcs7, env + fed,
+                    (word32)n, plain, FOURK_BUF);
+                fed += n;
+                if (streamSz != WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E))
+                    break;
+            }
+            pkcs7->privateKey = NULL;
+            pkcs7->privateKeySz = 0;
+        }
+        if (pkcs7 != NULL) {
+            wc_PKCS7_Free(pkcs7);
+            pkcs7 = NULL;
+        }
+        if ((ret == 0) && (streamSz != (int)sizeof(content)))
+            ret = WC_TEST_RET_ENC_I(streamSz);
+        if ((ret == 0) && (XMEMCMP(plain, content, sizeof(content)) != 0))
+            ret = WC_TEST_RET_ENC_NC;
+
+        XFREE(plain, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        XFREE(env, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    }
+#endif /* !NO_PKCS7_STREAM */
 
 out_multi:
     if (f != XBADFILE)
