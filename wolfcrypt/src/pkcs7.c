@@ -192,6 +192,7 @@ struct PKCS7State {
     word32 currContRmnSz; /* remaining size of current content */
     word32 accumContSz;   /* size of accumulated content size */
     int recipientSz; /* size of recipient set */
+    word32 recipientStart; /* index the recipient set starts at */
     byte tmpIv[MAX_CONTENT_IV_SIZE]; /* store IV if needed */
 #ifdef WC_PKCS7_STREAM_DEBUG
     word32 peakUsed; /* most bytes used for struct at any one time */
@@ -11370,6 +11371,13 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     if (GetSequence(in, &idx, &length, inSz) < 0)
         return ASN_PARSE_E;
 
+    /* Everything below belongs to this KEMRecipientInfo, so parse against its
+     * own length rather than the whole input: a truncated structure must not
+     * be able to read fields out of whatever follows it in the set. */
+    if ((word32)length > inSz - idx)
+        return ASN_PARSE_E;
+    inSz = idx + (word32)length;
+
     if (GetMyVersion(in, &idx, &version, inSz) < 0)
         return ASN_PARSE_E;
     if (version != 0) {
@@ -11378,7 +11386,9 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     }
 
     /* rid, either an IssuerAndSerialNumber SEQUENCE or a [0] key identifier.
-     * Only one recipient is supported, so step over it. */
+     * The reader holds only a private key, so there is nothing to match it
+     * against here; a wrong guess shows up as a key unwrap failure and the
+     * caller moves on to the next recipient. */
     if (idx >= inSz)
         return ASN_PARSE_E;
     if (in[idx] == (ASN_CONSTRUCTED | ASN_SEQUENCE)) {
@@ -14896,14 +14906,25 @@ static int wc_PKCS7_DecryptKari(wc_PKCS7* pkcs7, byte* in, word32 inSz,
 
 
 /* decode ASN.1 RecipientInfos SET, return 0 on success, < 0 on error */
+/* Walk the RecipientInfo set looking for one this reader can decrypt.
+ *
+ * setEnd - index just past the last RecipientInfo, or 0 when the caller does
+ *          not know it. Without it a KeyTransRecipientInfo cannot be told from
+ *          the EncryptedContentInfo that follows the set, since both are a
+ *          bare SEQUENCE, so the search has to stop at the first one it cannot
+ *          identify.
+ *
+ * Returns 0 on success, negative upon error */
 static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                             word32  inSz, word32* idx, byte* decryptedKey,
-                            word32* decryptedKeySz, int* recipFound)
+                            word32* decryptedKeySz, int* recipFound,
+                            word32 setEnd)
 {
     word32 savedIdx;
     int version, ret = 0, length;
     byte* pkiMsg = in;
     word32 pkiMsgSz = inSz;
+    word32 keyCap;
     byte  tag;
 #ifndef NO_PKCS7_STREAM
     word32 tmpIdx;
@@ -14968,14 +14989,51 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
 
     savedIdx = *idx;
 #ifndef NO_PKCS7_STREAM
-    pkiMsgSz = (pkcs7->stream->length > 0)? pkcs7->stream->length: inSz;
-    if (pkcs7->stream->length > 0)
-        pkiMsg = pkcs7->stream->buffer;
+    /* Set the pointer and its bound together. Taking the bound from the
+     * stream while leaving the pointer at the caller's input - or the
+     * reverse - hands GetSequence_ex a length that does not belong to the
+     * buffer it is reading. */
+    if (pkcs7->stream->length > 0) {
+        pkiMsg   = pkcs7->stream->buffer;
+        pkiMsgSz = pkcs7->stream->length;
+    }
+    else {
+        pkiMsg   = in;
+        pkiMsgSz = inSz;
+    }
 #endif
 
     /* when looking for next recipient, use first sequence and version to
      * indicate there is another, if not, move on */
     while (*recipFound == 0) {
+
+        /* stop at the end of the set rather than reading the
+         * EncryptedContentInfo that follows it as another recipient */
+        if ((setEnd != 0) && (*idx >= setEnd)) {
+            break;
+        }
+
+    #ifndef NO_PKCS7_STREAM
+        /* A handler may have appended to, shifted, or reallocated the stream
+         * buffer, so re-read both the pointer and the bound each round rather
+         * than trusting the snapshot taken before the loop. They move
+         * together: a handler (or the resync above) can drain the stream to
+         * empty, and pairing the caller's input size with a pointer still
+         * aimed at the smaller stream buffer would read off the end of it. */
+        if (pkcs7->stream->length > 0) {
+            pkiMsg   = pkcs7->stream->buffer;
+            pkiMsgSz = pkcs7->stream->length;
+        }
+        else {
+            pkiMsg   = in;
+            pkiMsgSz = inSz;
+        }
+    #endif
+
+        /* Each attempt is handed the buffer capacity and writes back the
+         * length it recovered, so a failed attempt must not leave a shortened
+         * capacity behind for the next recipient. */
+        keyCap = *decryptedKeySz;
 
         /* remove RecipientInfo, if we don't have a SEQUENCE, back up idx to
          * last good saved one */
@@ -14995,6 +15053,7 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
             if (ret != 0) {
                 if (ret != WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E) &&
                         *recipFound == 0) {
+                    *decryptedKeySz = keyCap;
                     continue; /* try next recipient */
                 }
                 else {
@@ -15120,43 +15179,25 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                                           decryptedKey, decryptedKeySz,
                                           recipFound);
                 if (ret != 0) {
-                    word32 peekIdx = *idx;
-                    byte   nextTag = 0;
-
-                    /* Not this recipient, so move on to the next one if there
-                     * demonstrably is one. wc_PKCS7_DecryptOri has already
-                     * stepped over the whole OtherRecipientInfo, so *idx is
-                     * at whatever follows.
+                    /* Not this recipient. wc_PKCS7_DecryptOri has already
+                     * stepped over the whole OtherRecipientInfo, so *idx is at
+                     * whatever follows, and the loop bound above decides
+                     * whether that is another recipient or the end of the set.
                      *
-                     * Only the implicitly tagged alternatives are followed.
-                     * A KeyTransRecipientInfo is a bare SEQUENCE and so is the
-                     * EncryptedContentInfo that ends the set, and this loop is
-                     * not told where the set stops, so the two cannot be told
-                     * apart here. Treating a SEQUENCE as another recipient
-                     * would parse the encrypted content as a RecipientInfo and
-                     * report a parse error in place of the recipient error the
-                     * caller expects, so a SEQUENCE stops the search instead.
-                     * Every recipient of a KEM-addressed message is an ori, so
-                     * this covers the case that matters. */
-                    if ((ret != WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E)) &&
-                            (*recipFound == 0) &&
-                            (GetASNTag(pkiMsg, &peekIdx, &nextTag,
-                                       pkiMsgSz) == 0) &&
-                            ((nextTag == (ASN_CONSTRUCTED |
-                                          ASN_CONTEXT_SPECIFIC | 1)) ||
-                             (nextTag == (ASN_CONSTRUCTED |
-                                          ASN_CONTEXT_SPECIFIC | 2)) ||
-                             (nextTag == (ASN_CONSTRUCTED |
-                                          ASN_CONTEXT_SPECIFIC | 3)) ||
-                             (nextTag == (ASN_CONSTRUCTED |
-                                          ASN_CONTEXT_SPECIFIC | 4)))) {
+                     * A parse failure or a missing callback is not a
+                     * "wrong recipient" answer, so those are returned rather
+                     * than retried; only a failure to recover the key moves on.
+                     */
+                    if ((ret == WC_NO_ERR_TRACE(PKCS7_RECIP_E)) &&
+                            (*recipFound == 0)) {
                         /* savedIdx has to follow, or the "no RecipientInfo
                          * here" path below would rewind onto the one just
                          * rejected and spin. */
                         savedIdx = *idx;
+                        *decryptedKeySz = keyCap;
                         continue; /* try next recipient */
                     }
-                    return ret; /* no other recipient to try */
+                    return ret; /* found recipient and failed decrypt */
                 }
             }
             else {
@@ -15570,6 +15611,14 @@ int wc_PKCS7_DecodeEnvelopedData(wc_PKCS7* pkcs7, byte* in,
                     pkcs7->stream->expected, &pkiMsg, &idx)) != 0) {
                 return ret;
             }
+            /* Record where the set starts only now. wc_PKCS7_AddDataToStream
+             * decides which buffer the walk reads from, and hands back an
+             * index into that one - the caller's input when nothing is
+             * buffered, the stream buffer from offset 0 when something is.
+             * Capturing before the call stores an offset from the other
+             * space, which makes the search bound meaningless and sends the
+             * step-over to the wrong place. */
+            pkcs7->stream->recipientStart = idx;
         #endif
             FALL_THROUGH;
 
@@ -15587,7 +15636,14 @@ int wc_PKCS7_DecodeEnvelopedData(wc_PKCS7* pkcs7, byte* in,
         #endif
             ret = wc_PKCS7_DecryptRecipientInfos(pkcs7, in, inSz, &idx,
                                         decryptedKey, &decryptedKeySz,
-                                        &recipFound);
+                                        &recipFound,
+                                    #ifndef NO_PKCS7_STREAM
+                                        pkcs7->stream->recipientStart +
+                                            (word32)pkcs7->stream->recipientSz
+                                    #else
+                                        tmpIdx + recipientSetSz
+                                    #endif
+                                        );
             if (ret == 0 && recipFound == 0) {
                 WOLFSSL_MSG(
                       "No recipient found in envelopedData that matches input");
@@ -16881,6 +16937,9 @@ int wc_PKCS7_DecodeAuthEnvelopedData(wc_PKCS7* pkcs7, byte* in,
     word32 idx = 0;
 #ifndef NO_PKCS7_STREAM
     word32 tmpIdx = 0;
+#else
+    word32 recipientSetStart = 0;
+    word32 recipientSetSz = 0;
 #endif
     word32 contentType = 0, encOID = 0;
     word32 decryptedKeySz = 0;
@@ -16930,18 +16989,37 @@ int wc_PKCS7_DecodeAuthEnvelopedData(wc_PKCS7* pkcs7, byte* in,
             if (ret < 0)
                 break;
 
+            /* Decryption stops at the RecipientInfo that matches, so the ones
+             * after it are still unread. Remember where the set starts and how
+             * long it is, both to bound the search and to step over the
+             * remainder once a match is found. */
         #ifndef NO_PKCS7_STREAM
             tmpIdx = idx;
+            pkcs7->stream->recipientSz    = ret;
+            /* buffer the whole set, so stepping over the recipients that were
+             * not ours does not run past what has been read */
+            pkcs7->stream->expected       = (word32)ret;
+        #else
+            recipientSetStart = idx;
+            recipientSetSz    = (word32)ret;
         #endif
+            ret = 0;
             wc_PKCS7_ChangeState(pkcs7, WC_PKCS7_AUTHENV_2);
             FALL_THROUGH;
 
         case WC_PKCS7_AUTHENV_2:
         #ifndef NO_PKCS7_STREAM
-            if ((ret = wc_PKCS7_AddDataToStream(pkcs7, in, inSz, MAX_LENGTH_SZ +
-                            MAX_VERSION_SZ + ASN_TAG_SZ, &pkiMsg, &idx)) != 0) {
+            /* pkcs7->stream->expected was set to the size of the whole
+             * RecipientInfo set above, so that stepping over the recipients
+             * that are not ours stays inside what has been read. This is what
+             * the EnvelopedData decoder does at WC_PKCS7_ENV_2. */
+            if ((ret = wc_PKCS7_AddDataToStream(pkcs7, in, inSz,
+                            pkcs7->stream->expected, &pkiMsg, &idx)) != 0) {
                 break;
             }
+            /* Capture the start of the set in the coordinate space the call
+             * above just established, for the same reason as WC_PKCS7_ENV_2. */
+            pkcs7->stream->recipientStart = idx;
         #endif
             decryptedKey = (byte*)XMALLOC(MAX_ENCRYPTED_KEY_SZ, pkcs7->heap,
                                                             DYNAMIC_TYPE_PKCS7);
@@ -16977,7 +17055,15 @@ int wc_PKCS7_DecodeAuthEnvelopedData(wc_PKCS7* pkcs7, byte* in,
 
             ret = wc_PKCS7_DecryptRecipientInfos(pkcs7, in, inSz, &idx,
                                                 decryptedKey, &decryptedKeySz,
-                                                &recipFound);
+                                                &recipFound,
+                                            #ifndef NO_PKCS7_STREAM
+                                                pkcs7->stream->recipientStart +
+                                          (word32)pkcs7->stream->recipientSz
+                                            #else
+                                                recipientSetStart +
+                                                    recipientSetSz
+                                            #endif
+                                                );
             if (ret != 0) {
                 break;
             }
@@ -16989,9 +17075,33 @@ int wc_PKCS7_DecodeAuthEnvelopedData(wc_PKCS7* pkcs7, byte* in,
                 break;
             }
 
+            /* The search stopped at the matching RecipientInfo, so anything
+             * after it in the set is still unread. Step over the remainder,
+             * the way the EnvelopedData decoder does, or the
+             * EncryptedContentInfo below would be parsed from the wrong
+             * offset. */
         #ifndef NO_PKCS7_STREAM
+            /* Only step forward while the stream has not already been read
+             * past the end of the set. Counting is from where the search
+             * stopped, not from the head of the set, since the recipients
+             * walked to get here are already accounted for. The call is what
+             * moves pkcs7->stream->idx, which wc_PKCS7_AddDataToStream
+             * restores idx from on the next state. */
+            if (pkcs7->stream->totalRd < (pkcs7->stream->recipientStart +
+                    (word32)pkcs7->stream->recipientSz)) {
+                tmpIdx = idx;
+                idx = pkcs7->stream->recipientStart +
+                        (word32)pkcs7->stream->recipientSz;
+
+                if ((ret = wc_PKCS7_StreamEndCase(pkcs7, &tmpIdx, &idx)) != 0) {
+                    break;
+                }
+            }
+
             tmpIdx = idx;
             pkcs7->stream->expected = MAX_SEQ_SZ;
+        #else
+            idx = recipientSetStart + recipientSetSz;
         #endif
             wc_PKCS7_ChangeState(pkcs7, WC_PKCS7_AUTHENV_3);
             FALL_THROUGH;

@@ -4429,11 +4429,19 @@ int test_wc_PKCS7_EncodeDecodeEnvelopedData(void)
         pkcs7->singleCert = NULL;
     }
   #ifndef NO_RSA
-    /* With corrupted singleCert, decode should fail with a parse error.
+    /* With singleCert cleared there is no identity to match a
+     * KeyTransRecipientInfo against, so no recipient in the set is this
+     * reader's and the decode reports that.
+     *
+     * This used to be ASN_PARSE_E, which was a symptom rather than the answer:
+     * the recipient search was not bounded by the RecipientInfo set, so after
+     * exhausting the recipients it read the EncryptedContentInfo that follows
+     * as though it were another RecipientInfo and failed to parse it. Now that
+     * the search stops at the end of the set, the honest error surfaces.
      * State is properly reset on error so re-decode starts from scratch. */
     ExpectIntEQ(wc_PKCS7_DecodeEnvelopedData(pkcs7, output,
         (word32)sizeof(output), decoded, (word32)sizeof(decoded)),
-        WC_NO_ERR_TRACE(ASN_PARSE_E));
+        WC_NO_ERR_TRACE(PKCS7_RECIP_E));
   #endif /* !NO_RSA */
     if (pkcs7 != NULL) {
         pkcs7->singleCert = tmpBytePtr;

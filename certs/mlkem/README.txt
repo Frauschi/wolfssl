@@ -15,16 +15,19 @@ keyEncipherment alone. The subjectPublicKeyInfo algorithm is
 algorithm is 2.16.840.1.101.3.4.3.19 (ML-DSA-87).
 
 These were generated in tree, because ML-KEM certificate issuance is not
-available in OpenSSL before 3.5. Regenerate them by building wolfSSL with
+available in OpenSSL before 3.5. gen_mlkem.c in this directory regenerates
+them. Build wolfSSL with
 
   ./configure --enable-mldsa --enable-mlkem --enable-keygen \
               --enable-certgen --enable-certreq --enable-certext
 
-and then, from the repository root, making an ML-KEM key with
-wc_MlKemKey_MakeKey, setting the subject fields and
-wc_SetKeyUsage(cert, "keyEncipherment"), pointing the issuer at
-certs/mldsa/mldsa87-cert.der with wc_SetIssuerBuffer, and calling
-wc_MakeCert_ex with MLKEM_TYPE followed by wc_SignCert_ex with
-ML_DSA_87_TYPE and the ML-DSA-87 issuer key.
+install it, then
+
+  cc gen_mlkem.c -lwolfssl -o gen_mlkem && (cd certs/mlkem && ./gen_mlkem)
+
+It reads ../mldsa/mldsa87-cert.der and ../mldsa/mldsa87-key.der as the issuer
+and writes one certificate and key per enabled parameter set. The keys are
+freshly generated, so the output differs from the committed files on every run;
+only the structure is reproducible, not the bytes.
 
 These are shared test credentials. Never use them in production.

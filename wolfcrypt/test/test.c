@@ -56980,9 +56980,12 @@ static wc_test_ret_t mlkem_seed_consistency_test(void)
         oid[sizeof(oid) - 1] = (byte)(levels[i] == WC_ML_KEM_512 ? 1 :
                                      (levels[i] == WC_ML_KEM_768 ? 2 : 3));
 
-        /* Two rounds: a consistent "both" key must decode, then the same key
-         * with one seed byte flipped must not. */
-        for (j = 0; j < 2; j++) {
+        /* Four rounds:
+         *   0 - a consistent "both" key, must decode
+         *   1 - the same with one seed byte flipped, must not
+         *   2 - the seed on its own, must decode to the same key
+         *   3 - a seed of the wrong length, must not */
+        for (j = 0; j < 4; j++) {
             word32 bothSz, pkeySz, algSz, bodySz, n, idx;
 
             /* both ::= SEQUENCE { OCTET STRING seed, OCTET STRING expanded } */
@@ -56998,6 +57001,26 @@ static wc_test_ret_t mlkem_seed_consistency_test(void)
                 goto out_seed;
             }
 
+            if (j >= 2) {
+                /* seed on its own, under the implicit [0] */
+                word32 seedLen = (j == 3) ? (word32)sizeof(seed) - 1
+                                          : (word32)sizeof(seed);
+
+                pkeySz = 2 + seedLen;
+                bodySz = 3 + algSz + 2 + pkeySz;
+
+                n = mlkem_der_hdr(ASN_SEQUENCE | ASN_CONSTRUCTED, bodySz, der);
+                der[n++] = ASN_INTEGER; der[n++] = 1; der[n++] = 0;
+                n += mlkem_der_hdr(ASN_SEQUENCE | ASN_CONSTRUCTED,
+                        (word32)sizeof(oid), der + n);
+                XMEMCPY(der + n, oid, sizeof(oid));
+                n += (word32)sizeof(oid);
+                n += mlkem_der_hdr(ASN_OCTET_STRING, pkeySz, der + n);
+                n += mlkem_der_hdr(ASN_CONTEXT_SPECIFIC | 0, seedLen, der + n);
+                XMEMCPY(der + n, seed, seedLen);
+                n += seedLen;
+            }
+            else {
             n = mlkem_der_hdr(ASN_SEQUENCE | ASN_CONSTRUCTED, bodySz, der);
             der[n++] = ASN_INTEGER; der[n++] = 1; der[n++] = 0;
             n += mlkem_der_hdr(ASN_SEQUENCE | ASN_CONSTRUCTED,
@@ -57014,6 +57037,7 @@ static wc_test_ret_t mlkem_seed_consistency_test(void)
             n += mlkem_der_hdr(ASN_OCTET_STRING, expandedSz, der + n);
             XMEMCPY(der + n, expanded, expandedSz);
             n += expandedSz;
+            }
 
             ret = wc_MlKemKey_Init(key, levels[i], HEAP_HINT, devId);
             if (ret != 0) {
@@ -57022,16 +57046,37 @@ static wc_test_ret_t mlkem_seed_consistency_test(void)
             }
             idx = 0;
             ret = wc_MlKemKey_PrivateKeyDecode(key, der, n, &idx);
-            wc_MlKemKey_Free(key);
 
-            if ((j == 0) && (ret != 0)) {
-                ret = WC_TEST_RET_ENC_EC(ret);   /* consistent, must decode */
+            if (((j == 0) || (j == 2)) && (ret != 0)) {
+                wc_MlKemKey_Free(key);
+                ret = WC_TEST_RET_ENC_EC(ret);   /* valid, must decode */
                 goto out_seed;
             }
-            if ((j == 1) && (ret == 0)) {
-                ret = WC_TEST_RET_ENC_NC;        /* broken, must not decode */
+            if (((j == 1) || (j == 3)) && (ret == 0)) {
+                wc_MlKemKey_Free(key);
+                ret = WC_TEST_RET_ENC_NC;        /* invalid, must not decode */
                 goto out_seed;
             }
+            if (j == 2) {
+                /* the seed alone must reproduce the expanded key exactly */
+                byte* again = (byte*)XMALLOC(expandedSz, HEAP_HINT,
+                        DYNAMIC_TYPE_TMP_BUFFER);
+                if (again == NULL) {
+                    wc_MlKemKey_Free(key);
+                    ret = WC_TEST_RET_ENC_ERRNO;
+                    goto out_seed;
+                }
+                ret = wc_MlKemKey_EncodePrivateKey(key, again, expandedSz);
+                if (ret == 0 && XMEMCMP(again, expanded, expandedSz) != 0)
+                    ret = WC_TEST_RET_ENC_NC;
+                ForceZero(again, expandedSz);
+                XFREE(again, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+                if (ret != 0) {
+                    wc_MlKemKey_Free(key);
+                    goto out_seed;
+                }
+            }
+            wc_MlKemKey_Free(key);
             ret = 0;
 
             XFREE(der, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
@@ -57212,12 +57257,13 @@ static wc_test_ret_t mlkem_asn1_test(void)
 }
 #endif /* ML-KEM ASN.1 round trip */
 
-/* Reaches wc_MlKemKey_PrivateKeyDecode, which needs the key generation half of
- * ML-KEM to expand a seed, so guard it the way mlkem_asn1_test is guarded. */
+/* The committed mlkem<N>-key.der are the RFC 9935 expandedKey form - see
+ * certs/mlkem/README.txt for why - so nothing here expands a seed and the test
+ * runs in WOLFSSL_MLKEM_NO_MAKE_KEY builds too, which is exactly what that key
+ * format was chosen for. */
 #if !defined(WOLFSSL_MLKEM_NO_ASN1) && !defined(NO_FILESYSTEM) && \
     !defined(NO_ASN) && defined(WC_ENABLE_ASYM_KEY_IMPORT) && \
-    defined(WC_ENABLE_ASYM_KEY_EXPORT) && \
-    !defined(WOLFSSL_MLKEM_NO_MAKE_KEY)
+    defined(WC_ENABLE_ASYM_KEY_EXPORT)
 /* Parse the ML-KEM end-entity certificates, confirm the subject public key
  * carries the expected ML-KEM parameter set, and confirm the matching private
  * key reproduces that same public key. */
@@ -57643,8 +57689,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t mlkem_test(void)
 
 #if !defined(WOLFSSL_MLKEM_NO_ASN1) && !defined(NO_FILESYSTEM) && \
     !defined(NO_ASN) && defined(WC_ENABLE_ASYM_KEY_IMPORT) && \
-    defined(WC_ENABLE_ASYM_KEY_EXPORT) && \
-    !defined(WOLFSSL_MLKEM_NO_MAKE_KEY)
+    defined(WC_ENABLE_ASYM_KEY_EXPORT)
     ret = mlkem_cert_test();
     if (ret != 0)
         goto out;
@@ -70642,7 +70687,25 @@ static wc_test_ret_t pkcs7enveloped_run_vectors(byte* rsaCert, word32 rsaCertSz,
     !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) && \
     !defined(WOLFSSL_MLKEM_NO_DECAPSULATE) && \
     defined(HAVE_HKDF) && !defined(NO_HMAC) && \
+    (defined(HAVE_AES_CBC) || defined(HAVE_AESGCM)) && \
     defined(WOLFSSL_AES_256) && !defined(NO_FILESYSTEM)
+
+/* HKDF-SHA-512 is the CNSA 2.0 key derivation function; fall back to whatever
+ * digest this build does carry so these tests stay live in smaller configs. */
+#ifdef WOLFSSL_SHA512
+    #define MLKEM_TEST_KDF HKDF_SHA512_OID
+    /* last byte of 1.2.840.113549.1.9.16.3.30, for tests that have to find the
+     * encoded algorithm identifier in a message and alter it */
+    #define MLKEM_TEST_KDF_OID_LAST 0x1e
+#elif defined(WOLFSSL_SHA384)
+    #define MLKEM_TEST_KDF HKDF_SHA384_OID
+    #define MLKEM_TEST_KDF_OID_LAST 0x1d
+#elif !defined(NO_SHA256)
+    #define MLKEM_TEST_KDF HKDF_SHA256_OID
+    #define MLKEM_TEST_KDF_OID_LAST 0x1c
+#elif defined(WOLFSSL_KMAC256)
+    #define MLKEM_TEST_KDF KMAC256_OID
+#endif
 
 typedef struct {
     const char* certFile;
@@ -70655,6 +70718,16 @@ typedef struct {
     int         options;      /* CMS_SKID or CMS_ISSUER_AND_SERIAL_NUMBER */
     int         wrapOID;      /* 0 selects AES256_WRAP */
 } pkcs7KemriVector;
+
+/* Content cipher for the KEMRecipientInfo tests. AES-256-CBC is the usual
+ * choice, but a --disable-aescbc build still has AES-GCM and the recipient
+ * half is what these tests are about, so fall back rather than compiling the
+ * whole KEMRecipientInfo suite out. */
+#ifdef HAVE_AES_CBC
+    #define MLKEM_TEST_CONTENT_ALG AES256CBCb
+#else
+    #define MLKEM_TEST_CONTENT_ALG AES256GCMb
+#endif
 
 /* Round trip a CMS EnvelopedData and AuthEnvelopedData whose recipient is an
  * RFC 9629 KEMRecipientInfo built from an ML-KEM certificate. */
@@ -70684,6 +70757,12 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
     testSz = 0;
     XMEMSET(vectors, 0, sizeof(vectors));
 
+    /* Guards every append below. Checking after the fact would only report a
+     * stack overwrite that had already happened. */
+    #define MLKEM_VEC_ROOM() \
+        if (testSz >= (int)(sizeof(vectors) / sizeof(vectors[0]))) \
+            return WC_TEST_RET_ENC_NC
+
     /* only the vectors that carry user keying material read this, and which
      * vectors exist depends on the parameter sets and digests compiled in */
     (void)testUkm;
@@ -70692,12 +70771,14 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
      * parameter sets and the other KDFs exercise the same paths. */
 #if defined(WOLFSSL_WC_ML_KEM_1024) && !defined(WOLFSSL_NO_ML_KEM)
   #ifdef WOLFSSL_SHA512
+    MLKEM_VEC_ROOM();
     vectors[testSz].certFile = MLKEM_CERT("1024");
     vectors[testSz].keyFile  = MLKEM_KEYF("1024");
     vectors[testSz].kdfOID   = HKDF_SHA512_OID;
-    vectors[testSz].encryptOID = AES256CBCb;
+    vectors[testSz].encryptOID = MLKEM_TEST_CONTENT_ALG;
     testSz++;
     #ifdef HAVE_AESGCM
+    MLKEM_VEC_ROOM();
     vectors[testSz].certFile = MLKEM_CERT("1024");
     vectors[testSz].keyFile  = MLKEM_KEYF("1024");
     vectors[testSz].kdfOID   = HKDF_SHA512_OID;
@@ -70709,6 +70790,7 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
      * id-aes256-wrap-pad for the key wrap and AES-256-GCM authenticated
      * encryption, with no user keying material. */
     #if defined(WOLFSSL_AES_KEYWRAP_PADDING) && defined(HAVE_AESGCM)
+    MLKEM_VEC_ROOM();
     vectors[testSz].certFile = MLKEM_CERT("1024");
     vectors[testSz].keyFile  = MLKEM_KEYF("1024");
     vectors[testSz].kdfOID   = HKDF_SHA512_OID;
@@ -70719,58 +70801,64 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
     #endif
     /* the padded wrap over EnvelopedData too, so both encoders see it */
     #ifdef WOLFSSL_AES_KEYWRAP_PADDING
+    MLKEM_VEC_ROOM();
     vectors[testSz].certFile = MLKEM_CERT("1024");
     vectors[testSz].keyFile  = MLKEM_KEYF("1024");
     vectors[testSz].kdfOID   = HKDF_SHA512_OID;
-    vectors[testSz].encryptOID = AES256CBCb;
+    vectors[testSz].encryptOID = MLKEM_TEST_CONTENT_ALG;
     vectors[testSz].wrapOID  = AES256_WRAP_PAD;
     testSz++;
     #endif
     /* the subject key identifier recipient-identifier branch */
+    MLKEM_VEC_ROOM();
     vectors[testSz].certFile = MLKEM_CERT("1024");
     vectors[testSz].keyFile  = MLKEM_KEYF("1024");
     vectors[testSz].kdfOID   = HKDF_SHA512_OID;
-    vectors[testSz].encryptOID = AES256CBCb;
+    vectors[testSz].encryptOID = MLKEM_TEST_CONTENT_ALG;
     vectors[testSz].options  = CMS_SKID;
     testSz++;
     /* same again with user keying material present */
+    MLKEM_VEC_ROOM();
     vectors[testSz].certFile = MLKEM_CERT("1024");
     vectors[testSz].keyFile  = MLKEM_KEYF("1024");
     vectors[testSz].kdfOID   = HKDF_SHA512_OID;
-    vectors[testSz].encryptOID = AES256CBCb;
+    vectors[testSz].encryptOID = MLKEM_TEST_CONTENT_ALG;
     vectors[testSz].ukm      = testUkm;
     vectors[testSz].ukmSz    = (word32)sizeof(testUkm);
     testSz++;
   #endif
   #ifdef WOLFSSL_KMAC256
+    MLKEM_VEC_ROOM();
     vectors[testSz].certFile = MLKEM_CERT("1024");
     vectors[testSz].keyFile  = MLKEM_KEYF("1024");
     vectors[testSz].kdfOID   = KMAC256_OID;
-    vectors[testSz].encryptOID = AES256CBCb;
+    vectors[testSz].encryptOID = MLKEM_TEST_CONTENT_ALG;
     testSz++;
   #endif
 #endif
 #if defined(WOLFSSL_WC_ML_KEM_768) && !defined(WOLFSSL_NO_ML_KEM)
   #ifndef NO_SHA256
+    MLKEM_VEC_ROOM();
     vectors[testSz].certFile = MLKEM_CERT("768");
     vectors[testSz].keyFile  = MLKEM_KEYF("768");
     vectors[testSz].kdfOID   = HKDF_SHA256_OID;
-    vectors[testSz].encryptOID = AES256CBCb;
+    vectors[testSz].encryptOID = MLKEM_TEST_CONTENT_ALG;
     testSz++;
   #endif
 #endif
 #if defined(WOLFSSL_WC_ML_KEM_512) && !defined(WOLFSSL_NO_ML_KEM)
   #ifdef WOLFSSL_SHA384
+    MLKEM_VEC_ROOM();
     vectors[testSz].certFile = MLKEM_CERT("512");
     vectors[testSz].keyFile  = MLKEM_KEYF("512");
     vectors[testSz].kdfOID   = HKDF_SHA384_OID;
-    vectors[testSz].encryptOID = AES256CBCb;
+    vectors[testSz].encryptOID = MLKEM_TEST_CONTENT_ALG;
     testSz++;
   #endif
 #endif
 
-    if (testSz > (int)(sizeof(vectors) / sizeof(vectors[0])))
-        return WC_TEST_RET_ENC_NC;   /* vectors[] outgrown; raise its size */
+    #undef MLKEM_VEC_ROOM
+
     if (testSz == 0)
         return 0;
 
@@ -70895,13 +70983,8 @@ out_free:
  * message to several recipients only helps if each of them can open it, which
  * means the decoder has to walk past the KEMRecipientInfo structures that are
  * not theirs. Decoding as the last recipient is the case that exercises that;
- * decoding as the first one would pass either way.
- *
- * EnvelopedData only. wc_PKCS7_DecodeAuthEnvelopedData does not step over the
- * RecipientInfo structures left unread after the match, so any
- * AuthEnvelopedData with more than one recipient fails to parse whatever
- * follows the set. That is independent of ML-KEM and reproduces with two RSA
- * recipients, so it belongs to that decoder rather than here. */
+ * decoding as the first one would pass either way. Both content types are
+ * covered, AuthEnvelopedData because that is the one CNSA 2.0 uses. */
 static wc_test_ret_t pkcs7enveloped_mlkem_multi_test(void)
 {
     wc_test_ret_t ret = 0;
@@ -70939,6 +71022,9 @@ static wc_test_ret_t pkcs7enveloped_mlkem_multi_test(void)
     /* one recipient proves nothing here */
     if (nRecip < 2)
         return 0;
+#ifndef MLKEM_TEST_KDF
+    return 0;   /* no key derivation function this build can use */
+#else
 
     cert = (byte*)XMALLOC(FOURK_BUF * 4, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
     key  = (byte*)XMALLOC(FOURK_BUF * 4, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
@@ -70948,7 +71034,12 @@ static wc_test_ret_t pkcs7enveloped_mlkem_multi_test(void)
         goto out_multi;
     }
 
-    for (j = 0; j < 1; j++) {
+    /* j == 0: EnvelopedData, j == 1: AuthEnvelopedData */
+    for (j = 0; j < 2; j++) {
+    #ifndef HAVE_AESGCM
+        if (j == 1)
+            continue;
+    #endif
         pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
         if (pkcs7 == NULL) {
             ret = WC_TEST_RET_ENC_ERRNO;
@@ -70962,7 +71053,12 @@ static wc_test_ret_t pkcs7enveloped_mlkem_multi_test(void)
         pkcs7->content    = (byte*)content;
         pkcs7->contentSz  = (word32)sizeof(content);
         pkcs7->contentOID = DATA;
-        pkcs7->encryptOID = AES256CBCb;
+    #ifdef HAVE_AESGCM
+        pkcs7->encryptOID = (j == 1) ? AES256GCMb
+                                     : MLKEM_TEST_CONTENT_ALG;
+    #else
+        pkcs7->encryptOID = MLKEM_TEST_CONTENT_ALG;
+    #endif
 
         for (i = 0; i < nRecip; i++) {
             f = XFOPEN(certFiles[i], "rb");
@@ -70978,14 +71074,21 @@ static wc_test_ret_t pkcs7enveloped_mlkem_multi_test(void)
                 goto out_multi;
             }
             ret = wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
-                    HKDF_SHA512_OID, AES256_WRAP, NULL, 0, 0);
+                    MLKEM_TEST_KDF, AES256_WRAP, NULL, 0, 0);
             if (ret < 0) {
                 ret = WC_TEST_RET_ENC_EC(ret);
                 goto out_multi;
             }
         }
 
-        encodedSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, out, FOURK_BUF * 8);
+    #ifdef HAVE_AESGCM
+        if (j == 1)
+            encodedSz = wc_PKCS7_EncodeAuthEnvelopedData(pkcs7, out,
+                    FOURK_BUF * 8);
+        else
+    #endif
+            encodedSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, out,
+                    FOURK_BUF * 8);
         wc_PKCS7_Free(pkcs7);
         pkcs7 = NULL;
         if (encodedSz <= 0) {
@@ -71021,8 +71124,14 @@ static wc_test_ret_t pkcs7enveloped_mlkem_multi_test(void)
             pkcs7->privateKeySz = keySz;
 
             XMEMSET(decoded, 0, sizeof(decoded));
-            decSz = wc_PKCS7_DecodeEnvelopedData(pkcs7, out,
-                    (word32)encodedSz, decoded, sizeof(decoded));
+        #ifdef HAVE_AESGCM
+            if (j == 1)
+                decSz = wc_PKCS7_DecodeAuthEnvelopedData(pkcs7, out,
+                        (word32)encodedSz, decoded, sizeof(decoded));
+            else
+        #endif
+                decSz = wc_PKCS7_DecodeEnvelopedData(pkcs7, out,
+                        (word32)encodedSz, decoded, sizeof(decoded));
 
             pkcs7->privateKey = NULL;
             pkcs7->privateKeySz = 0;
@@ -71055,6 +71164,7 @@ out_multi:
     XFREE(out, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
 
     return ret;
+#endif /* MLKEM_TEST_KDF */
 }
 
 /* The published vector is ML-KEM-512 with HKDF-SHA-256 and AES-128 key wrap,
@@ -71222,29 +71332,36 @@ static wc_test_ret_t pkcs7_mlkem_rfc9936_interop_test(void)
 
 #endif
 
-/* Pick the one parameter set and the one KDF this build actually compiled.
- * ML-KEM-1024 with HKDF-SHA-512 is the CNSA 2.0 combination and is preferred;
- * the fallbacks keep the negative test running in builds that carry only a
- * smaller parameter set or a single digest. */
+/* Pick the one parameter set this build actually compiled. ML-KEM-1024 is the
+ * CNSA 2.0 choice and is preferred; the fallbacks keep the tests that need a
+ * single parameter set running in smaller builds. */
 #if defined(WOLFSSL_WC_ML_KEM_1024) && !defined(WOLFSSL_NO_ML_KEM)
     #define MLKEM_NEG_PARAM "1024"
+    #define MLKEM_NEG_LEVEL WC_ML_KEM_1024
 #elif defined(WOLFSSL_WC_ML_KEM_768) && !defined(WOLFSSL_NO_ML_KEM)
     #define MLKEM_NEG_PARAM "768"
+    #define MLKEM_NEG_LEVEL WC_ML_KEM_768
 #elif defined(WOLFSSL_WC_ML_KEM_512) && !defined(WOLFSSL_NO_ML_KEM)
     #define MLKEM_NEG_PARAM "512"
+    #define MLKEM_NEG_LEVEL WC_ML_KEM_512
 #endif
 
-#ifdef WOLFSSL_SHA512
-    #define MLKEM_NEG_KDF HKDF_SHA512_OID
-#elif defined(WOLFSSL_SHA384)
-    #define MLKEM_NEG_KDF HKDF_SHA384_OID
-#elif !defined(NO_SHA256)
-    #define MLKEM_NEG_KDF HKDF_SHA256_OID
-#elif defined(WOLFSSL_KMAC256)
-    #define MLKEM_NEG_KDF KMAC256_OID
+/* A second parameter set, different from MLKEM_NEG_PARAM, for the tests that
+ * need two distinct KEM recipients in one message. Undefined when the build
+ * carries only one. */
+#if defined(WOLFSSL_WC_ML_KEM_1024) && !defined(WOLFSSL_NO_ML_KEM)
+    #if defined(WOLFSSL_WC_ML_KEM_768)
+        #define MLKEM_ALT_PARAM "768"
+    #elif defined(WOLFSSL_WC_ML_KEM_512)
+        #define MLKEM_ALT_PARAM "512"
+    #endif
+#elif defined(WOLFSSL_WC_ML_KEM_768) && !defined(WOLFSSL_NO_ML_KEM)
+    #if defined(WOLFSSL_WC_ML_KEM_512)
+        #define MLKEM_ALT_PARAM "512"
+    #endif
 #endif
 
-#if defined(MLKEM_NEG_PARAM) && defined(MLKEM_NEG_KDF)
+#if defined(MLKEM_NEG_PARAM) && defined(MLKEM_TEST_KDF)
 
 /* A KEMRecipientInfo arrives from the network, so corrupting bytes of a valid
  * one must be refused rather than mis-parsed. Each case flips a byte range in
@@ -71310,9 +71427,9 @@ static wc_test_ret_t pkcs7enveloped_mlkem_negative_test(void)
     pkcs7->content    = (byte*)content;
     pkcs7->contentSz  = (word32)sizeof(content);
     pkcs7->contentOID = DATA;
-    pkcs7->encryptOID = AES256CBCb;
+    pkcs7->encryptOID = MLKEM_TEST_CONTENT_ALG;
 
-    ret = wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz, MLKEM_NEG_KDF,
+    ret = wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz, MLKEM_TEST_KDF,
             AES256_WRAP, NULL, 0, 0);
     if (ret < 0) {
         ret = WC_TEST_RET_ENC_EC(ret);
@@ -71382,6 +71499,450 @@ out_neg:
     return ret;
 }
 
+/* Argument and certificate validation on wc_PKCS7_AddRecipient_KEMRI. The
+ * RFC 9935 Section 5 keyUsage rule is the interesting one: every committed
+ * ML-KEM certificate asserts keyEncipherment alone, so the rejection branch
+ * needs a certificate that does not. The recipient certificate is parsed with
+ * NO_VERIFY, so flipping the keyUsage bits in place is enough and keeps this
+ * test free of any certificate generation dependency. */
+static wc_test_ret_t pkcs7_mlkem_kemri_reject_test(void)
+{
+    wc_test_ret_t ret = 0;
+    wc_PKCS7* pkcs7 = NULL;
+    byte* cert = NULL;
+    byte* key = NULL;
+    size_t certSz = 0;
+    size_t keySz = 0;
+    XFILE f = XBADFILE;
+    word32 i;
+    word32 j;
+    word32 kuIdx = 0;
+    int patched = 0;
+    WOLFSSL_SMALL_STACK_STATIC const byte content[] = { 0x74, 0x65, 0x73, 0x74 };
+
+    cert = (byte*)XMALLOC(FOURK_BUF * 4, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    key = (byte*)XMALLOC(FOURK_BUF * 4, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    if (cert == NULL || key == NULL) {
+        XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        return WC_TEST_RET_ENC_ERRNO;
+    }
+
+    f = XFOPEN(CERT_ROOT "mlkem" CERT_PATH_SEP "mlkem" MLKEM_NEG_PARAM
+               "-cert.der", "rb");
+    if (f == XBADFILE)
+        ret = WC_TEST_RET_ENC_ERRNO;
+    if (ret == 0) {
+        certSz = XFREAD(cert, 1, FOURK_BUF * 4, f);
+        XFCLOSE(f);
+        if (certSz == 0)
+            ret = WC_TEST_RET_ENC_NC;
+    }
+    if (ret == 0) {
+        f = XFOPEN(CERT_ROOT "mlkem" CERT_PATH_SEP "mlkem" MLKEM_NEG_PARAM
+                   "-key.der", "rb");
+        if (f == XBADFILE)
+            ret = WC_TEST_RET_ENC_ERRNO;
+    }
+    if (ret == 0) {
+        keySz = XFREAD(key, 1, FOURK_BUF * 4, f);
+        XFCLOSE(f);
+        if (keySz == 0)
+            ret = WC_TEST_RET_ENC_NC;
+    }
+
+    if (ret == 0) {
+        pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+        if (pkcs7 == NULL)
+            ret = WC_TEST_RET_ENC_ERRNO;
+    }
+    if (ret == 0)
+        ret = wc_PKCS7_Init(pkcs7, HEAP_HINT, devId);
+    if (ret == 0) {
+        pkcs7->content    = (byte*)content;
+        pkcs7->contentSz  = (word32)sizeof(content);
+        pkcs7->contentOID = DATA;
+        pkcs7->encryptOID = MLKEM_TEST_CONTENT_ALG;
+    }
+
+    /* Unmodified, the certificate is the profile's own shape and must be
+     * accepted - so a later rejection is the keyUsage bits and not the
+     * certificate generally. */
+    if (ret == 0) {
+        if (wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, (word32)certSz,
+                MLKEM_TEST_KDF, AES256_WRAP, NULL, 0, 0) < 0) {
+            ret = WC_TEST_RET_ENC_NC;
+        }
+    }
+
+    /* NULL arguments. */
+    if (ret == 0) {
+        if (wc_PKCS7_AddRecipient_KEMRI(NULL, cert, (word32)certSz,
+                MLKEM_TEST_KDF, AES256_WRAP, NULL, 0, 0) !=
+                WC_NO_ERR_TRACE(BAD_FUNC_ARG)) {
+            ret = WC_TEST_RET_ENC_NC;
+        }
+    }
+    if (ret == 0) {
+        if (wc_PKCS7_AddRecipient_KEMRI(pkcs7, NULL, (word32)certSz,
+                MLKEM_TEST_KDF, AES256_WRAP, NULL, 0, 0) !=
+                WC_NO_ERR_TRACE(BAD_FUNC_ARG)) {
+            ret = WC_TEST_RET_ENC_NC;
+        }
+    }
+
+    /* A content cipher OID where a key wrap belongs. */
+    if (ret == 0) {
+        if (wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, (word32)certSz,
+                MLKEM_TEST_KDF, DATA, NULL, 0, 0) >= 0) {
+            ret = WC_TEST_RET_ENC_NC;
+        }
+    }
+
+    /* Add digitalSignature to the keyUsage extension: id-ce-keyUsage is
+     * 55 1D 0F, and the BIT STRING that follows holds 0x20 for
+     * keyEncipherment alone. 0xA0 adds digitalSignature, which RFC 9935
+     * Section 5 forbids on a key establishment certificate. */
+    if (ret == 0) {
+        for (i = 0; (i + 3) < (word32)certSz; i++) {
+            /* id-ce-keyUsage, 2.5.29.15 */
+            if ((cert[i] != 0x55) || (cert[i + 1] != 0x1D) ||
+                    (cert[i + 2] != 0x0F)) {
+                continue;
+            }
+            /* Its BIT STRING follows within a few bytes: 03 02 05 20 is five
+             * unused bits over keyEncipherment alone. Keep every read inside
+             * the certificate, and keep looking rather than giving up on the
+             * first coincidental 55 1D 0F - an ML-KEM public key is ~1.5 KB of
+             * effectively random bytes, so one turns up by chance often enough
+             * to matter once renewcerts.sh regenerates these. */
+            for (j = i + 3; (j + 3) < (word32)certSz && (j < i + 12); j++) {
+                if ((cert[j] == 0x03) && (cert[j + 1] == 0x02) &&
+                        (cert[j + 2] == 0x05) && (cert[j + 3] == 0x20)) {
+                    cert[j + 3] = 0xA0;
+                    kuIdx = j + 3;
+                    patched = 1;
+                    break;
+                }
+            }
+            if (patched)
+                break;
+        }
+        if (!patched)
+            ret = WC_TEST_RET_ENC_NC;
+    }
+    if (ret == 0) {
+        if (wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, (word32)certSz,
+                MLKEM_TEST_KDF, AES256_WRAP, NULL, 0, 0) !=
+                WC_NO_ERR_TRACE(KEYUSAGE_E)) {
+            ret = WC_TEST_RET_ENC_NC;
+        }
+    }
+
+    if (pkcs7 != NULL) {
+        pkcs7->content = NULL;
+        pkcs7->contentSz = 0;
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = NULL;
+    }
+
+    /* Put the certificate back the way it shipped before reusing it. */
+    if (patched)
+        cert[kuIdx] = 0x20;
+
+    /* A RecipientInfo the reader cannot use for a reason other than "not
+     * addressed to me" must not end the search either: a message may name
+     * several recipients, and only one of them has to be ours. Build a
+     * two-recipient bundle, corrupt the FIRST one's key derivation algorithm
+     * identifier - which leaves every length in the message intact, so only
+     * that recipient is affected - and require the second to open it.
+     *
+     * The corruption produces an unknown-algorithm error rather than
+     * PKCS7_RECIP_E, so this fails if the decoder ever goes back to treating
+     * only PKCS7_RECIP_E as "try the next one". */
+#if defined(MLKEM_ALT_PARAM) && defined(MLKEM_TEST_KDF_OID_LAST)
+    if (ret == 0) {
+        byte* altCert = NULL;
+        byte* env = NULL;
+        byte* envAlt = NULL;
+        byte* plain = NULL;
+        XFILE af = XBADFILE;
+        size_t altCertSz = 0;
+        int envSz = 0;
+        int hit = -1;
+        int scan;
+        /* tail of the HKDF algorithm identifier this build uses,
+         * 1.2.840.113549.1.9.16.3.x */
+        WOLFSSL_SMALL_STACK_STATIC const byte kdfTail[] = {
+            0x86,0xf7,0x0d,0x01,0x09,0x10,0x03,MLKEM_TEST_KDF_OID_LAST
+        };
+        /* 2.16.840.1.101.3.4.4, the ML-KEM arc; the byte after it names the
+         * parameter set */
+        WOLFSSL_SMALL_STACK_STATIC const byte kemArc[] = {
+            0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x04
+        };
+
+        altCert = (byte*)XMALLOC(FOURK_BUF * 4, HEAP_HINT,
+            DYNAMIC_TYPE_TMP_BUFFER);
+        env = (byte*)XMALLOC(FOURK_BUF * 8, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        plain = (byte*)XMALLOC(FOURK_BUF, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        if (altCert == NULL || env == NULL || plain == NULL)
+            ret = WC_TEST_RET_ENC_ERRNO;
+
+        if (ret == 0) {
+            af = XFOPEN(CERT_ROOT "mlkem" CERT_PATH_SEP "mlkem"
+                        MLKEM_ALT_PARAM "-cert.der", "rb");
+            if (af == XBADFILE)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0) {
+            altCertSz = XFREAD(altCert, 1, FOURK_BUF * 4, af);
+            XFCLOSE(af);
+            if (altCertSz == 0)
+                ret = WC_TEST_RET_ENC_NC;
+        }
+
+        if (ret == 0) {
+            pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+            if (pkcs7 == NULL)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0)
+            ret = wc_PKCS7_Init(pkcs7, HEAP_HINT, devId);
+        if (ret == 0) {
+            pkcs7->content    = (byte*)content;
+            pkcs7->contentSz  = (word32)sizeof(content);
+            pkcs7->contentOID = DATA;
+            pkcs7->encryptOID = MLKEM_TEST_CONTENT_ALG;
+            /* the one to be broken goes first */
+            if (wc_PKCS7_AddRecipient_KEMRI(pkcs7, altCert, (word32)altCertSz,
+                    MLKEM_TEST_KDF, AES256_WRAP, NULL, 0, 0) < 0) {
+                ret = WC_TEST_RET_ENC_NC;
+            }
+        }
+        if (ret == 0) {
+            if (wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, (word32)certSz,
+                    MLKEM_TEST_KDF, AES256_WRAP, NULL, 0, 0) < 0) {
+                ret = WC_TEST_RET_ENC_NC;
+            }
+        }
+        if (ret == 0) {
+            envSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, env, FOURK_BUF * 8);
+            if (envSz <= 0)
+                ret = WC_TEST_RET_ENC_I(envSz);
+        }
+        if (pkcs7 != NULL) {
+            pkcs7->content = NULL;
+            pkcs7->contentSz = 0;
+            wc_PKCS7_Free(pkcs7);
+            pkcs7 = NULL;
+        }
+
+        if (ret == 0) {
+            for (scan = 0; (scan + (int)sizeof(kdfTail)) < envSz; scan++) {
+                if (XMEMCMP(env + scan, kdfTail, sizeof(kdfTail)) == 0) {
+                    hit = scan;
+                    break;
+                }
+            }
+            if (hit < 0)
+                ret = WC_TEST_RET_ENC_NC;
+            else
+                env[hit + (int)sizeof(kdfTail) - 1] = 0x7f;
+        }
+        if (ret == 0) {
+            /* the same message with the first recipient's KEM algorithm made
+             * unrecognisable instead - RFC 9629 lets every recipient pick its
+             * own KEM, so one this build does not implement must not end the
+             * search either */
+            envAlt = (byte*)XMALLOC((word32)envSz, HEAP_HINT,
+                DYNAMIC_TYPE_TMP_BUFFER);
+            if (envAlt == NULL)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0) {
+            XMEMCPY(envAlt, env, (word32)envSz);
+            envAlt[hit + (int)sizeof(kdfTail) - 1] =
+                kdfTail[sizeof(kdfTail) - 1];   /* undo the KDF change */
+            hit = -1;
+            for (scan = 0; (scan + (int)sizeof(kemArc)) < envSz; scan++) {
+                if (XMEMCMP(envAlt + scan, kemArc, sizeof(kemArc)) == 0) {
+                    hit = scan;
+                    break;
+                }
+            }
+            if (hit < 0)
+                ret = WC_TEST_RET_ENC_NC;
+            else
+                envAlt[hit + (int)sizeof(kemArc)] = 0x7f;
+        }
+
+        if (ret == 0) {
+            pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+            if (pkcs7 == NULL)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0)
+            ret = wc_PKCS7_Init(pkcs7, HEAP_HINT, devId);
+        if (ret == 0) {
+            pkcs7->privateKey   = key;
+            pkcs7->privateKeySz = (word32)keySz;
+            if (wc_PKCS7_DecodeEnvelopedData(pkcs7, env, (word32)envSz, plain,
+                    FOURK_BUF) != (int)sizeof(content)) {
+                ret = WC_TEST_RET_ENC_NC;
+            }
+            else if (XMEMCMP(plain, content, sizeof(content)) != 0) {
+                ret = WC_TEST_RET_ENC_NC;
+            }
+            pkcs7->privateKey   = NULL;
+            pkcs7->privateKeySz = 0;
+        }
+        if (pkcs7 != NULL) {
+            wc_PKCS7_Free(pkcs7);
+            pkcs7 = NULL;
+        }
+
+        if (ret == 0) {
+            pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+            if (pkcs7 == NULL)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0)
+            ret = wc_PKCS7_Init(pkcs7, HEAP_HINT, devId);
+        if (ret == 0) {
+            pkcs7->privateKey   = key;
+            pkcs7->privateKeySz = (word32)keySz;
+            if (wc_PKCS7_DecodeEnvelopedData(pkcs7, envAlt, (word32)envSz,
+                    plain, FOURK_BUF) != (int)sizeof(content)) {
+                ret = WC_TEST_RET_ENC_NC;
+            }
+            pkcs7->privateKey   = NULL;
+            pkcs7->privateKeySz = 0;
+        }
+        if (pkcs7 != NULL) {
+            wc_PKCS7_Free(pkcs7);
+            pkcs7 = NULL;
+        }
+
+        XFREE(envAlt, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        XFREE(plain, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        XFREE(env, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        XFREE(altCert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    }
+#endif /* MLKEM_ALT_PARAM && MLKEM_TEST_KDF_OID_LAST */
+
+    /* A KEMRecipientInfo meant for somebody else at the SAME parameter set is
+     * the case that matters for walking a multi-recipient message: ML-KEM
+     * decapsulates with implicit rejection, so decapsulation and the KDF both
+     * succeed on a foreign key and only the key unwrap disagrees. That has to
+     * read as "not my recipient" - PKCS7_RECIP_E - or the decode aborts on the
+     * first recipient instead of trying the next. A parameter-set mismatch is
+     * the easy case and is already covered elsewhere; this is the hard one. */
+#if !defined(WC_NO_RNG) && !defined(WOLFSSL_MLKEM_NO_MAKE_KEY)
+    if (ret == 0) {
+        WC_RNG rng;
+        MlKemKey foreign[1];
+        byte* env = NULL;
+        byte* foreignKey = NULL;
+        byte* plain = NULL;
+        int envSz = 0;
+        int foreignKeySz = 0;
+        int rngInit = 0;
+        int keyInit = 0;
+
+        env = (byte*)XMALLOC(FOURK_BUF * 8, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        foreignKey = (byte*)XMALLOC(FOURK_BUF * 4, HEAP_HINT,
+            DYNAMIC_TYPE_TMP_BUFFER);
+        plain = (byte*)XMALLOC(FOURK_BUF, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        if (env == NULL || foreignKey == NULL || plain == NULL)
+            ret = WC_TEST_RET_ENC_ERRNO;
+
+        if (ret == 0) {
+            ret = wc_InitRng_ex(&rng, HEAP_HINT, devId);
+            if (ret == 0)
+                rngInit = 1;
+        }
+        if (ret == 0) {
+            ret = wc_MlKemKey_Init(foreign, MLKEM_NEG_LEVEL, HEAP_HINT, devId);
+            if (ret == 0)
+                keyInit = 1;
+        }
+        if (ret == 0)
+            ret = wc_MlKemKey_MakeKey(foreign, &rng);
+        if (ret == 0) {
+            foreignKeySz = wc_MlKemKey_PrivateKeyToDer(foreign, foreignKey,
+                FOURK_BUF * 4);
+            if (foreignKeySz <= 0)
+                ret = WC_TEST_RET_ENC_I(foreignKeySz);
+        }
+
+        /* Encode to the committed certificate, then try the foreign key. */
+        if (ret == 0) {
+            pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+            if (pkcs7 == NULL)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0)
+            ret = wc_PKCS7_Init(pkcs7, HEAP_HINT, devId);
+        if (ret == 0) {
+            pkcs7->content    = (byte*)content;
+            pkcs7->contentSz  = (word32)sizeof(content);
+            pkcs7->contentOID = DATA;
+            pkcs7->encryptOID = MLKEM_TEST_CONTENT_ALG;
+            if (wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, (word32)certSz,
+                    MLKEM_TEST_KDF, AES256_WRAP, NULL, 0, 0) < 0) {
+                ret = WC_TEST_RET_ENC_NC;
+            }
+        }
+        if (ret == 0) {
+            envSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, env, FOURK_BUF * 8);
+            if (envSz <= 0)
+                ret = WC_TEST_RET_ENC_I(envSz);
+        }
+        if (pkcs7 != NULL) {
+            pkcs7->content = NULL;
+            pkcs7->contentSz = 0;
+            wc_PKCS7_Free(pkcs7);
+            pkcs7 = NULL;
+        }
+
+        if (ret == 0) {
+            pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+            if (pkcs7 == NULL)
+                ret = WC_TEST_RET_ENC_ERRNO;
+        }
+        if (ret == 0)
+            ret = wc_PKCS7_Init(pkcs7, HEAP_HINT, devId);
+        if (ret == 0) {
+            pkcs7->privateKey   = foreignKey;
+            pkcs7->privateKeySz = (word32)foreignKeySz;
+            if (wc_PKCS7_DecodeEnvelopedData(pkcs7, env, (word32)envSz, plain,
+                    FOURK_BUF) != WC_NO_ERR_TRACE(PKCS7_RECIP_E)) {
+                ret = WC_TEST_RET_ENC_NC;
+            }
+            pkcs7->privateKey   = NULL;
+            pkcs7->privateKeySz = 0;
+        }
+
+        if (keyInit)
+            wc_MlKemKey_Free(foreign);
+        if (rngInit)
+            wc_FreeRng(&rng);
+        XFREE(plain, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        XFREE(foreignKey, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+        XFREE(env, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    }
+#endif /* !WC_NO_RNG && !WOLFSSL_MLKEM_NO_MAKE_KEY */
+
+    if (pkcs7 != NULL) {
+        wc_PKCS7_Free(pkcs7);
+    }
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+
+    return ret;
+}
+
 #else
 
 /* No parameter set or key derivation function this build can pair, so there is
@@ -71391,7 +71952,12 @@ static wc_test_ret_t pkcs7enveloped_mlkem_negative_test(void)
     return 0;
 }
 
-#endif /* MLKEM_NEG_PARAM && MLKEM_NEG_KDF */
+static wc_test_ret_t pkcs7_mlkem_kemri_reject_test(void)
+{
+    return 0;
+}
+
+#endif /* MLKEM_NEG_PARAM && MLKEM_TEST_KDF */
 #endif /* KEMRecipientInfo round trip */
 
 WOLFSSL_TEST_SUBROUTINE wc_test_ret_t pkcs7enveloped_test(void)
@@ -71479,6 +72045,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t pkcs7enveloped_test(void)
     !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) && \
     !defined(WOLFSSL_MLKEM_NO_DECAPSULATE) && \
     defined(HAVE_HKDF) && !defined(NO_HMAC) && \
+    (defined(HAVE_AES_CBC) || defined(HAVE_AESGCM)) && \
     defined(WOLFSSL_AES_256) && !defined(NO_FILESYSTEM)
     if (ret >= 0)
         ret = pkcs7enveloped_mlkem_multi_test();
@@ -71488,6 +72055,8 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t pkcs7enveloped_test(void)
         ret = pkcs7enveloped_mlkem_test();
     if (ret >= 0)
         ret = pkcs7enveloped_mlkem_negative_test();
+    if (ret >= 0)
+        ret = pkcs7_mlkem_kemri_reject_test();
 #endif
 
 #ifndef NO_RSA

@@ -5781,10 +5781,14 @@ static const byte hkdfSha384Oid[] =
 /* id-alg-hkdf-with-sha512: 1.2.840.113549.1.9.16.3.30 */
 static const byte hkdfSha512Oid[] =
     {42, 134, 72, 134, 247, 13, 1, 9, 16, 3, 30};
+#ifdef WOLFSSL_KMAC128
 /* id-kmac128: 2.16.840.1.101.3.4.2.19 */
 static const byte kmac128Oid[] = {96, 134, 72, 1, 101, 3, 4, 2, 19};
+#endif
+#ifdef WOLFSSL_KMAC256
 /* id-kmac256: 2.16.840.1.101.3.4.2.20 */
 static const byte kmac256Oid[] = {96, 134, 72, 1, 101, 3, 4, 2, 20};
+#endif
 #endif /* HAVE_PKCS7 && WOLFSSL_HAVE_MLKEM */
 
 /* PKCS5 */
@@ -7230,14 +7234,18 @@ const byte* OidFromId(word32 id, word32 type, word32* oidSz)
                     oid = hkdfSha512Oid;
                     *oidSz = sizeof(hkdfSha512Oid);
                     break;
+            #ifdef WOLFSSL_KMAC128
                 case KMAC128_OID:
                     oid = kmac128Oid;
                     *oidSz = sizeof(kmac128Oid);
                     break;
+            #endif
+            #ifdef WOLFSSL_KMAC256
                 case KMAC256_OID:
                     oid = kmac256Oid;
                     *oidSz = sizeof(kmac256Oid);
                     break;
+            #endif
             #endif /* HAVE_PKCS7 && WOLFSSL_HAVE_MLKEM */
                 default:
                     break;
@@ -10133,6 +10141,7 @@ int wc_CheckPrivateKey(const byte* privKey, word32 privKeySz,
         word32 pubSz = 0;
         byte*  pub = NULL;
         int    level = 0;
+        int    inited = 0;
 
         if (key_pair == NULL) {
             return MEMORY_E;
@@ -10144,6 +10153,9 @@ int wc_CheckPrivateKey(const byte* privKey, word32 privKeySz,
         ret = wc_MlKemKey_TypeFromOidSum(ks, &level);
         if (ret == 0) {
             ret = wc_MlKemKey_Init(key_pair, level, heap, INVALID_DEVID);
+            if (ret == 0) {
+                inited = 1;
+            }
         }
         if (ret == 0) {
             ret = wc_MlKemKey_PrivateKeyDecode(key_pair, privKey, privKeySz,
@@ -10167,7 +10179,14 @@ int wc_CheckPrivateKey(const byte* privKey, word32 privKeySz,
                    (XMEMCMP(pub, pubKey, pubSz) == 0)) ? 1 : 0;
         }
         XFREE(pub, heap, DYNAMIC_TYPE_TMP_BUFFER);
-        wc_MlKemKey_Free(key_pair);
+        /* Only free what was set up. wc_MlKemKey_Init validates the parameter
+         * set before it assigns anything, so a rejected level (an ML-KEM-512
+         * certificate in a build without that parameter set, say) leaves an
+         * all-zero struct, and freeing that would hand a zeroed key to a
+         * crypto callback registered at device id 0. */
+        if (inited) {
+            wc_MlKemKey_Free(key_pair);
+        }
         XFREE(key_pair, heap, DYNAMIC_TYPE_TMP_BUFFER);
     }
     else

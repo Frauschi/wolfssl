@@ -1463,13 +1463,13 @@ static void wb_misc_guards2(void)
         word32 idx = 0, decryptedKeySz = sizeof(out);
         int recipFound = 0;
         ret = wc_PKCS7_DecryptRecipientInfos(NULL, out, outSz, &idx, out,
-                &decryptedKeySz, &recipFound);
+                &decryptedKeySz, &recipFound, 0);
         WB_CHECK(ret == WC_NO_ERR_TRACE(BAD_FUNC_ARG), ":13744 pkcs7==NULL");
         ret = wc_PKCS7_DecryptRecipientInfos(&pkcs7, NULL, outSz, &idx, out,
-                &decryptedKeySz, &recipFound);
+                &decryptedKeySz, &recipFound, 0);
         WB_CHECK(ret == WC_NO_ERR_TRACE(BAD_FUNC_ARG), ":13744 in==NULL");
         ret = wc_PKCS7_DecryptRecipientInfos(&pkcs7, out, outSz, NULL, out,
-                &decryptedKeySz, &recipFound);
+                &decryptedKeySz, &recipFound, 0);
         WB_CHECK(ret == WC_NO_ERR_TRACE(BAD_FUNC_ARG), ":13744 idx==NULL");
     }
 

@@ -3063,6 +3063,9 @@ int wc_MlKemKey_PrivateKeyDecode(MlKemKey* key, const byte* input, word32 inSz,
     word32 privKeyLen = 0;
     const byte* pubKey = NULL;
     word32 pubKeyLen = 0;
+#ifndef WOLFSSL_MLKEM_NO_MAKE_KEY
+    int keyExpanded = 0;
+#endif
 
     if ((key == NULL) || (input == NULL) || (inOutIdx == NULL)) {
         ret = BAD_FUNC_ARG;
@@ -3102,6 +3105,9 @@ int wc_MlKemKey_PrivateKeyDecode(MlKemKey* key, const byte* input, word32 inSz,
             /* Expand with ML-KEM.KeyGen_internal(d,z), FIPS 203 algorithm 16,
              * taking the first 32 octets as d and the rest as z. */
             ret = wc_MlKemKey_MakeKeyWithRandom(key, seed, (int)seedLen);
+            if (ret == 0) {
+                keyExpanded = 1;
+            }
         }
     }
     if ((ret == 0) && (seed != NULL) && (privKey != NULL)) {
@@ -3134,6 +3140,33 @@ int wc_MlKemKey_PrivateKeyDecode(MlKemKey* key, const byte* input, word32 inSz,
             ForceZero(expanded, expandedLen);
             XFREE(expanded, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
         }
+    }
+    if ((ret != 0) && keyExpanded) {
+        /* The seed was expanded before it could be checked, so a failure after
+         * that point leaves a complete, usable private key in the caller's
+         * object. A caller is entitled to read "decode failed" as "key
+         * untouched", so scrub what was written, the way
+         * wc_MlKemKey_DecodePrivateKey does on its own failure paths.
+         *
+         * Gate this on the expansion having run rather than on seed != NULL:
+         * a seed rejected for its length never reaches the expansion, and
+         * scrubbing there would destroy whatever the caller had already
+         * loaded into the object - and, with WOLFSSL_MLKEM_DYNAMIC_KEYS,
+         * write through a priv pointer that is still NULL. */
+    #ifdef WOLFSSL_MLKEM_DYNAMIC_KEYS
+        if (key->priv != NULL) {
+            ForceZero(key->priv, key->privAllocSz);
+        }
+    #else
+        int scrubK = mlkemkey_get_k(key);
+
+        if (scrubK != 0) {
+            ForceZero(key->priv,
+                (size_t)scrubK * MLKEM_N * sizeof(sword16));
+        }
+    #endif
+        ForceZero(key->z, WC_ML_KEM_SYM_SZ);
+        key->flags = 0;
     }
     else if ((ret == 0) && (seed == NULL)) {
         ret = wc_MlKemKey_DecodePrivateKey(key, privKey, privKeyLen);

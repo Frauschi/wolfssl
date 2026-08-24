@@ -471,15 +471,6 @@ my @kdfs = (
 print_sum_enum("KDF", "_OID", \@kdfs);
 
 
-# RFC 9629 OtherRecipientInfo type for a KEM.
-my @ori_kem = ( 1, 2, 840, 113549, 1, 9, 16, 13, 3 );
-
-my @oris = (
-    { name => "ORI_KEM", oid => \@ori_kem },
-);
-
-print_sum_enum("Ori", "_OID", \@oris);
-
 
 my @hmac_sha224 = ( 1, 2, 840, 113549, 2, 8 );
 my @hmac_sha256 = ( 1, 2, 840, 113549, 2, 9 );
