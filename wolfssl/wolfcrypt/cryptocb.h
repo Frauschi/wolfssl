@@ -162,6 +162,45 @@ enum wc_SetKeyType {
 };
 #endif /* WOLF_CRYPTO_CB_SETKEY */
 
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+/* Operations on a hardware key store. These cross (or stay inside) the
+ * boundary of a secure element, so none of them can be expressed by an
+ * algorithm-specific callback: SETKEY/EXPORT_KEY carry plaintext key material,
+ * and a wrapped blob never becomes plaintext on this side of the boundary. */
+enum wc_KeyStoreType {
+    WC_KEYSTORE_NONE           = 0,
+    WC_KEYSTORE_IMPORT_WRAPPED = 1, /* wrapped blob  -> key store slot   */
+    WC_KEYSTORE_EXPORT_WRAPPED = 2, /* key store slot -> wrapped blob    */
+    WC_KEYSTORE_DERIVE         = 3, /* slot -> slot, never touching RAM  */
+    WC_KEYSTORE_DELETE         = 4, /* destroy a stored key              */
+    WC_KEYSTORE_GET_INFO       = 5  /* what is in this slot?             */
+};
+
+/* What a stored key is for. Deliberately parallel to the port-side key class
+ * so a device can cross-check the caller's intent against its own metadata. */
+enum wc_KeyStoreKeyType {
+    WC_KEYSTORE_KEY_NONE     = 0,
+    WC_KEYSTORE_KEY_AES      = 1,
+    WC_KEYSTORE_KEY_HMAC     = 2,
+    WC_KEYSTORE_KEY_CMAC     = 3,
+    WC_KEYSTORE_KEY_ECC_SIGN = 4,
+    WC_KEYSTORE_KEY_ECC_DH   = 5
+};
+
+/* Wrapped blob formats. A device that only speaks one format ignores this. */
+enum wc_KeyWrapFormat {
+    WC_KEYWRAP_FORMAT_NONE   = 0,
+    WC_KEYWRAP_FORMAT_VENDOR = 1, /* device-defined container          */
+    WC_KEYWRAP_FORMAT_AESKW  = 2  /* bare RFC 3394, no vendor wrapper  */
+};
+
+/* Attributes requested at creation. Some are irrevocable on real hardware
+ * (exportability in particular), so they cannot be set after the fact. */
+#define WC_KEYSTORE_ATTR_EXPORTABLE   0x0001 /* may later be wrapped out    */
+#define WC_KEYSTORE_ATTR_UNWRAP_ONLY  0x0002 /* KWK may unwrap, never wrap  */
+#define WC_KEYSTORE_ATTR_PERSISTENT   0x0004 /* survives reset, if supported */
+#endif /* WOLF_CRYPTO_CB_KEYSTORE */
+
 /* Crypto Information Structure for callbacks */
 typedef struct wc_CryptoInfo {
     int algo_type; /* enum wc_AlgoType */
@@ -803,6 +842,53 @@ typedef struct wc_CryptoInfo {
         void* out;              /* Software key to fill (same type as obj) */
     } export_key;
 #endif /* WOLF_CRYPTO_CB_EXPORT_KEY */
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+    struct {                       /* uses wc_AlgoType=WC_ALGO_TYPE_KEYSTORE */
+        int         type;          /* enum wc_KeyStoreType - discriminator */
+        const void* ctx;           /* read-only caller context */
+        union {
+            struct {                       /* WC_KEYSTORE_IMPORT_WRAPPED */
+                const byte* keyRef;        /* opaque: where it should land */
+                word32      keyRefSz;
+                const byte* wrapKeyRef;    /* opaque: the wrapping key */
+                word32      wrapKeyRefSz;
+                const byte* blob;          /* the wrapped container */
+                word32      blobSz;
+                word32      format;        /* enum wc_KeyWrapFormat */
+            } importWrapped;
+            struct {                       /* WC_KEYSTORE_EXPORT_WRAPPED */
+                const byte* keyRef;        /* opaque: the key to export */
+                word32      keyRefSz;
+                const byte* wrapKeyRef;
+                word32      wrapKeyRefSz;
+                byte*       blob;          /* out: the wrapped container */
+                word32*     blobSz;        /* in: capacity, out: written */
+                word32      format;
+            } exportWrapped;
+            struct {                       /* WC_KEYSTORE_DERIVE */
+                const byte* keyRef;        /* opaque: where it should land */
+                word32      keyRefSz;
+                const byte* srcKeyRef;     /* opaque: the derivation key */
+                word32      srcKeyRefSz;
+                const byte* deriv;         /* derivation data */
+                word32      derivSz;       /* size is algorithm-specific */
+                word32      kdfType;       /* enum wc_KdfType */
+                word32      attrs;         /* WC_KEYSTORE_ATTR_* */
+            } derive;
+            struct {                       /* WC_KEYSTORE_DELETE */
+                const byte* keyRef;
+                word32      keyRefSz;
+            } deleteKey;
+            struct {                       /* WC_KEYSTORE_GET_INFO */
+                const byte* keyRef;
+                word32      keyRefSz;
+                word32*     keyType;       /* out: enum wc_KeyStoreKeyType */
+                word32*     keySz;         /* out: key size in BITS */
+                word32*     attrs;         /* out: WC_KEYSTORE_ATTR_* */
+            } getInfo;
+        } op;
+    } keystore;
+#endif /* WOLF_CRYPTO_CB_KEYSTORE */
 #if defined(HAVE_HKDF) || defined(HAVE_CMAC_KDF)
     struct {
         int type; /* enum wc_KdfType */
@@ -1252,6 +1338,26 @@ WOLFSSL_LOCAL int wc_CryptoCb_SetKey(int devId, int type, void* obj,
 WOLFSSL_LOCAL int wc_CryptoCb_ExportKey(int devId, int type,
                                          const void* obj, void* out);
 #endif /* WOLF_CRYPTO_CB_EXPORT_KEY */
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+WOLFSSL_LOCAL int wc_CryptoCb_KeyStoreImportWrapped(int devId,
+    const byte* keyRef, word32 keyRefSz,
+    const byte* wrapKeyRef, word32 wrapKeyRefSz,
+    const byte* blob, word32 blobSz, word32 format, const void* ctx);
+WOLFSSL_LOCAL int wc_CryptoCb_KeyStoreExportWrapped(int devId,
+    const byte* keyRef, word32 keyRefSz,
+    const byte* wrapKeyRef, word32 wrapKeyRefSz,
+    byte* blob, word32* blobSz, word32 format, const void* ctx);
+WOLFSSL_LOCAL int wc_CryptoCb_KeyStoreDerive(int devId,
+    const byte* keyRef, word32 keyRefSz,
+    const byte* srcKeyRef, word32 srcKeyRefSz,
+    word32 kdfType, const byte* deriv, word32 derivSz,
+    word32 attrs, const void* ctx);
+WOLFSSL_LOCAL int wc_CryptoCb_KeyStoreDelete(int devId,
+    const byte* keyRef, word32 keyRefSz, const void* ctx);
+WOLFSSL_LOCAL int wc_CryptoCb_KeyStoreGetInfo(int devId,
+    const byte* keyRef, word32 keyRefSz,
+    word32* keyType, word32* keySz, word32* attrs, const void* ctx);
+#endif /* WOLF_CRYPTO_CB_KEYSTORE */
 
 #endif /* WOLF_CRYPTO_CB */
 

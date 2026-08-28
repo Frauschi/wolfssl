@@ -1527,7 +1527,12 @@ enum wc_AlgoType {
     /* async: re-enter a crypto callback device to poll a pending operation so
      * it can complete the work and fill the output buffer (QAT-style). */
     WC_ALGO_TYPE_ASYNC_POLL = 15,
-    WC_ALGO_TYPE_MAX = WC_ALGO_TYPE_ASYNC_POLL
+    /* hardware key store lifecycle: move keys across the boundary of a secure
+     * element (wrapped import/export), derive one in place, delete one, or ask
+     * what a stored key is. Distinct from SETKEY/EXPORT_KEY, which carry
+     * plaintext key material to and from a wolfCrypt key object. */
+    WC_ALGO_TYPE_KEYSTORE = 16,
+    WC_ALGO_TYPE_MAX = WC_ALGO_TYPE_KEYSTORE
 };
 
 /* KDF types */

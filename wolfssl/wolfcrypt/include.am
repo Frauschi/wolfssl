@@ -11,6 +11,7 @@ nobase_include_HEADERS+= \
                          wolfssl/wolfcrypt/poly1305.h \
                          wolfssl/wolfcrypt/camellia.h \
                          wolfssl/wolfcrypt/cmac.h \
+                         wolfssl/wolfcrypt/wc_keystore.h \
                          wolfssl/wolfcrypt/wc_she.h \
                          wolfssl/wolfcrypt/coding.h \
                          wolfssl/wolfcrypt/compress.h \
@@ -249,6 +250,7 @@ endif
 if BUILD_SE050
 nobase_include_HEADERS+= wolfssl/wolfcrypt/port/nxp/se050_port.h
 endif
+
 
 if BUILD_TROPIC01
 nobase_include_HEADERS+= wolfssl/wolfcrypt/port/tropicsquare/tropic01.h

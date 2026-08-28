@@ -353,6 +353,9 @@ static const byte const_byte_array[] = "A+Gd\0\0\0";
 #include <wolfssl/wolfcrypt/aes.h>
 #include <wolfssl/wolfcrypt/wc_encrypt.h>
 #include <wolfssl/wolfcrypt/cmac.h>
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+    #include <wolfssl/wolfcrypt/wc_keystore.h>
+#endif
 #ifdef WOLFSSL_SHE
     #include <wolfssl/wolfcrypt/wc_she.h>
 #endif
@@ -885,6 +888,9 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t  aesofb_test(void);
 WOLFSSL_TEST_SUBROUTINE wc_test_ret_t  cmac_test(void);
 #ifdef WOLFSSL_SHE
 WOLFSSL_TEST_SUBROUTINE wc_test_ret_t  she_test(void);
+#endif
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+WOLFSSL_TEST_SUBROUTINE wc_test_ret_t  keystore_cb_test(void);
 #endif
 #ifdef HAVE_ASCON
 WOLFSSL_TEST_SUBROUTINE wc_test_ret_t  ascon_hash256_test(void);
@@ -3361,6 +3367,13 @@ options: [-s max_relative_stack_bytes] [-m max_relative_heap_memory_bytes]\n\
         TEST_FAIL("SHE      test failed!\n", ret);
     else
         TEST_PASS("SHE      test passed!\n");
+#endif
+
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+    if ( (ret = keystore_cb_test()) != 0)
+        TEST_FAIL("KeyStore test failed!\n", ret);
+    else
+        TEST_PASS("KeyStore test passed!\n");
 #endif
 
 #if defined(WOLFSSL_SIPHASH)
@@ -68425,6 +68438,176 @@ exit_SHE_Test:
 }
 
 #endif /* WOLFSSL_SHE && !NO_AES */
+
+
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+
+/* Mock device recording what the key store dispatch handed it. Key references
+ * are opaque to wolfCrypt, so the contract worth testing is that each call
+ * reaches the device as the right operation with the pointers unmodified, and
+ * that argument validation happens before any device is consulted. */
+typedef struct keystoreCbCtx {
+    int calls;
+    int lastOp;
+    const byte* lastKeyRef;
+    const byte* lastSrcKeyRef;
+    word32 lastBlobSz;
+    word32 lastFormat;
+    word32 lastAttrs;
+} keystoreCbCtx;
+
+static int keystoreTestCb(int cbDevId, wc_CryptoInfo* info, void* ctx)
+{
+    keystoreCbCtx* c = (keystoreCbCtx*)ctx;
+
+    (void)cbDevId;
+
+    if (info->algo_type != WC_ALGO_TYPE_KEYSTORE)
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+
+    c->calls++;
+    c->lastOp = info->keystore.type;
+
+    switch (info->keystore.type) {
+        case WC_KEYSTORE_IMPORT_WRAPPED:
+            c->lastKeyRef  = info->keystore.op.importWrapped.keyRef;
+            c->lastBlobSz  = info->keystore.op.importWrapped.blobSz;
+            c->lastFormat  = info->keystore.op.importWrapped.format;
+            break;
+        case WC_KEYSTORE_EXPORT_WRAPPED:
+            c->lastKeyRef  = info->keystore.op.exportWrapped.keyRef;
+            break;
+        case WC_KEYSTORE_DERIVE:
+            c->lastKeyRef    = info->keystore.op.derive.keyRef;
+            c->lastSrcKeyRef = info->keystore.op.derive.srcKeyRef;
+            c->lastAttrs     = info->keystore.op.derive.attrs;
+            break;
+        case WC_KEYSTORE_DELETE:
+            c->lastKeyRef = info->keystore.op.deleteKey.keyRef;
+            break;
+        case WC_KEYSTORE_GET_INFO:
+            c->lastKeyRef = info->keystore.op.getInfo.keyRef;
+            /* answer only part of the query, to prove the dispatcher cleared
+             * the rest of the caller's storage rather than leaving it stale */
+            if (info->keystore.op.getInfo.keySz != NULL)
+                *info->keystore.op.getInfo.keySz = 256;
+            break;
+        default:
+            return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    return 0;
+}
+
+WOLFSSL_TEST_SUBROUTINE wc_test_ret_t keystore_cb_test(void)
+{
+    WOLFSSL_SMALL_STACK_STATIC const byte kref[4] = { 'K','R','E','F' };
+    WOLFSSL_SMALL_STACK_STATIC const byte wref[4] = { 'W','R','E','F' };
+    WOLFSSL_SMALL_STACK_STATIC const byte sref[4] = { 'S','R','E','F' };
+    WOLFSSL_SMALL_STACK_STATIC const byte blob[8] = { 1,2,3,4,5,6,7,8 };
+    WOLFSSL_SMALL_STACK_STATIC const byte dd[4]   = { 9,9,9,9 };
+    keystoreCbCtx ctx;
+    byte   outBlob[32];
+    word32 outSz = (word32)sizeof(outBlob);
+    word32 keyType, keySz, attrs;
+    int    ksDevId = 0x4B53; /* 'KS' */
+    int    ret;
+
+    XMEMSET(&ctx, 0, sizeof(ctx));
+
+    ret = wc_CryptoCb_RegisterDevice(ksDevId, keystoreTestCb, &ctx);
+    if (ret != 0)
+        return WC_TEST_RET_ENC_EC(ret);
+
+    ret = wc_KeyStore_ImportWrapped(ksDevId, kref, (word32)sizeof(kref),
+            wref, (word32)sizeof(wref), blob, (word32)sizeof(blob),
+            WC_KEYWRAP_FORMAT_VENDOR, NULL);
+    if (ret != 0 || ctx.lastOp != WC_KEYSTORE_IMPORT_WRAPPED ||
+        ctx.lastKeyRef != kref || ctx.lastBlobSz != (word32)sizeof(blob) ||
+        ctx.lastFormat != WC_KEYWRAP_FORMAT_VENDOR) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+
+    ret = wc_KeyStore_ExportWrapped(ksDevId, kref, (word32)sizeof(kref),
+            wref, (word32)sizeof(wref), outBlob, &outSz,
+            WC_KEYWRAP_FORMAT_AESKW, NULL);
+    if (ret != 0 || ctx.lastOp != WC_KEYSTORE_EXPORT_WRAPPED) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+
+    /* blob == NULL is the required-size query and must still dispatch */
+    outSz = 0;
+    ret = wc_KeyStore_ExportWrapped(ksDevId, kref, (word32)sizeof(kref),
+            wref, (word32)sizeof(wref), NULL, &outSz,
+            WC_KEYWRAP_FORMAT_AESKW, NULL);
+    if (ret != 0 || ctx.lastOp != WC_KEYSTORE_EXPORT_WRAPPED) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+
+    ret = wc_KeyStore_Derive(ksDevId, kref, (word32)sizeof(kref),
+            sref, (word32)sizeof(sref), WC_KDF_TYPE_HKDF,
+            dd, (word32)sizeof(dd), WC_KEYSTORE_ATTR_EXPORTABLE, NULL);
+    if (ret != 0 || ctx.lastOp != WC_KEYSTORE_DERIVE ||
+        ctx.lastSrcKeyRef != sref ||
+        ctx.lastAttrs != WC_KEYSTORE_ATTR_EXPORTABLE) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+
+    ret = wc_KeyStore_Delete(ksDevId, kref, (word32)sizeof(kref), NULL);
+    if (ret != 0 || ctx.lastOp != WC_KEYSTORE_DELETE) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+
+    /* the device answers keySz only; keyType and attrs must come back cleared,
+     * never left holding whatever was on the caller's stack */
+    keyType = 0xDEADBEEF;
+    keySz   = 0xDEADBEEF;
+    attrs   = 0xDEADBEEF;
+    ret = wc_KeyStore_GetInfo(ksDevId, kref, (word32)sizeof(kref),
+                              &keyType, &keySz, &attrs, NULL);
+    if (ret != 0 || ctx.lastOp != WC_KEYSTORE_GET_INFO) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+    if (keySz != 256 || keyType != 0 || attrs != 0) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+
+    if (ctx.calls != 6) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+
+    /* argument validation must happen before the device is consulted */
+    ctx.calls = 0;
+    if (wc_KeyStore_ImportWrapped(ksDevId, NULL, 0, wref, (word32)sizeof(wref),
+            blob, (word32)sizeof(blob), 0, NULL)
+                != WC_NO_ERR_TRACE(BAD_FUNC_ARG)) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+    if (wc_KeyStore_Delete(ksDevId, kref, 0, NULL)
+                != WC_NO_ERR_TRACE(BAD_FUNC_ARG)) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+    if (ctx.calls != 0) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+
+    /* an unregistered ksDevId must report CRYPTOCB_UNAVAILABLE, not success */
+    if (wc_KeyStore_Delete(ksDevId + 1, kref, (word32)sizeof(kref), NULL)
+                != WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE)) {
+        ret = WC_TEST_RET_ENC_NC; goto out;
+    }
+
+    ret = 0;
+
+out:
+    wc_CryptoCb_UnRegisterDevice(ksDevId);
+
+    return ret;
+}
+
+#endif /* WOLF_CRYPTO_CB_KEYSTORE */
+
+
 
 #if defined(WOLFSSL_SIPHASH)
 
