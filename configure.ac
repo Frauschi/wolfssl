@@ -11617,6 +11617,39 @@ then
 fi
 
 # Crypto Callbacks Utils (Copy/Free/etc)
+# NXP EdgeLock (ELS) wrapped-key container builder. Pure software: lets a
+# provisioning tool produce blobs the ELS key store accepts without any vendor
+# library or target hardware.
+AC_ARG_ENABLE([elspkckeyblob],
+    [AS_HELP_STRING([--enable-elspkckeyblob],
+                    [Enable NXP ELS wrapped-key container support (default: disabled)])],
+    [ ENABLED_ELS_PKC_KEYBLOB=$enableval ],
+    [ ENABLED_ELS_PKC_KEYBLOB=no ]
+)
+
+if test "$ENABLED_ELS_PKC_KEYBLOB" = "yes"; then
+    # AES is a hard prerequisite - the container is AES key wrap.
+    if test "$ENABLED_AES" = "no"; then
+        AC_MSG_ERROR([--enable-elspkckeyblob requires AES])
+    fi
+
+    # Turn AES key wrap on rather than rejecting the combination: several
+    # options (pkcs7, wpas) promote ENABLED_AESKEYWRAP further down the file,
+    # so an error here would fire spuriously for configurations that do end up
+    # with HAVE_AES_KEYWRAP defined. The -DHAVE_AES_KEYWRAP itself is emitted
+    # by the shared "if test $ENABLED_AESKEYWRAP = yes" block below.
+    #
+    # Guard it the way the adjacent --enable-wpas promotion does: the FIPS
+    # v2/dev branch emits -UHAVE_AES_KEYWRAP much earlier, and promoting here
+    # unconditionally would put -D after -U on the same command line and
+    # silently re-enable an algorithm FIPS had disabled.
+    AS_IF([test "$ENABLED_FIPS" = "no" || test "x$FIPS_VERSION" = "xv6"],
+          [ENABLED_AESKEYWRAP="yes"],
+          [AC_MSG_ERROR([--enable-elspkckeyblob requires AES key wrap, which this FIPS version disables])])
+
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_ELS_PKC_KEYBLOB"
+fi
+
 AC_ARG_ENABLE([cryptocbutils],
     [AS_HELP_STRING([--enable-cryptocbutils@<:@=copy,free,setkey,export,keystore,...@:>@],
                     [Enable crypto callback utilities (default: all)])],
@@ -13467,6 +13500,7 @@ AM_CONDITIONAL([BUILD_IOTSAFE],[test "x$ENABLED_IOTSAFE" = "xyes"])
 AM_CONDITIONAL([BUILD_IOTSAFE_HWRNG],[test "x$ENABLED_IOTSAFE_HWRNG" = "xyes"])
 AM_CONDITIONAL([BUILD_VAULTIC],[test "x$ENABLED_VAULTIC" = "xyes"])
 AM_CONDITIONAL([BUILD_SE050],[test "x$ENABLED_SE050" = "xyes"])
+AM_CONDITIONAL([BUILD_ELS_PKC_KEYBLOB],[test "x$ENABLED_ELS_PKC_KEYBLOB" = "xyes"])
 AM_CONDITIONAL([BUILD_STSAFE],[test "x$ENABLED_STSAFE" != "xno"])
 AM_CONDITIONAL([BUILD_RTL8735B],[test "x$ENABLED_RTL8735B" != "xno"])
 AM_CONDITIONAL([BUILD_TROPIC01],[test "x$ENABLED_TROPIC01" = "xyes"])
