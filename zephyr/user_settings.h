@@ -293,6 +293,19 @@ extern "C" {
 
 /* Build-profile knobs for the module-default config only (a user-supplied
  * settings file sets these itself). */
+/* NXP EdgeLock (ELS) offload. The port is a crypto callback, so it needs the
+ * callback machinery; the key store ops come with it because slot-resident
+ * keys are the point of the hardware. */
+#ifdef CONFIG_WOLFSSL_ELS_PKC
+    #define WOLFSSL_ELS_PKC
+    #ifndef WOLF_CRYPTO_CB
+        #define WOLF_CRYPTO_CB
+    #endif
+    #ifndef WOLF_CRYPTO_CB_KEYSTORE
+        #define WOLF_CRYPTO_CB_KEYSTORE
+    #endif
+#endif
+
 #ifdef CONFIG_WOLFSSL_CRYPTO_ONLY
     #define WOLFCRYPT_ONLY
 #endif

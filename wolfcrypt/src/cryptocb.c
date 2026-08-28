@@ -89,6 +89,10 @@ silence."
 #ifdef WOLFSSL_CAAM
     #include <wolfssl/wolfcrypt/port/caam/wolfcaam.h>
 #endif
+
+#ifdef WOLFSSL_ELS_PKC
+    #include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
+#endif
 /* Fixed table, read without a lock on every offloaded operation. Lookups
  * match on devId, so an entry is filled before devId is stored and cleared
  * after devId is retired, with a WC_BARRIER() between the two so the
@@ -3462,6 +3466,10 @@ int wc_CryptoCb_DefaultDevID(void)
     ret = WOLFSSL_ARIA_DEVID;
 #elif defined(WC_USE_DEVID)
     ret = WC_USE_DEVID;
+#elif defined(WOLFSSL_ELS_PKC)
+    /* The EdgeLock port declines anything it cannot serve, so routing every
+     * context through it by default costs nothing but reaches the hardware. */
+    ret = WOLFSSL_ELS_PKC_DEVID;
 #else
     /* try first available */
     ret = wc_CryptoCb_GetDevIdAtIndex(0);
