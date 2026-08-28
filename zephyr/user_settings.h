@@ -293,6 +293,30 @@ extern "C" {
 
 /* Build-profile knobs for the module-default config only (a user-supplied
  * settings file sets these itself). */
+/* NXP EdgeLock (ELS) offload. The port is a crypto callback, so it needs the
+ * callback machinery; the key store ops come with it because slot-resident
+ * keys are the point of the hardware. */
+#ifdef CONFIG_WOLFSSL_ELS_PKC
+    #define WOLFSSL_ELS_PKC
+    #ifndef WOLF_CRYPTO_CB
+        #define WOLF_CRYPTO_CB
+    #endif
+    #ifndef WOLF_CRYPTO_CB_KEYSTORE
+        #define WOLF_CRYPTO_CB_KEYSTORE
+    #endif
+    /* The port parks per-hash state in a fixed pool and reclaims the entry
+     * from the free hook. Without it, a hash that is initialised and then
+     * abandoned rather than finalised would hold its entry forever. */
+    #ifndef WOLF_CRYPTO_CB_FREE
+        #define WOLF_CRYPTO_CB_FREE
+    #endif
+    /* Without this wc_Sha256Copy() struct-copies devCtx and two hashes end up
+     * sharing one hardware context - the TLS 1.3 transcript snapshot path. */
+    #ifndef WOLF_CRYPTO_CB_COPY
+        #define WOLF_CRYPTO_CB_COPY
+    #endif
+#endif
+
 #ifdef CONFIG_WOLFSSL_CRYPTO_ONLY
     #define WOLFCRYPT_ONLY
 #endif

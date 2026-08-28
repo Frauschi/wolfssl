@@ -69,6 +69,7 @@ if(CONFIG_WOLFSSL)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/compress.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/cpuid.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/cryptocb.c)
+    zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/wc_keystore.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/curve25519.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/curve448.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/des3.c)
@@ -134,6 +135,23 @@ if(CONFIG_WOLFSSL)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/psa/psa_pkcbs.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/st/stm32.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/realtek/rtl8735b.c)
+
+    # NXP EdgeLock offload. The port needs the els_pkc module's headers, and
+    # picks up its transitive device includes from the McuxElsPkc target the
+    # same way an application would.
+    if(CONFIG_WOLFSSL_ELS_PKC)
+      zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/nxp/els_pkc_port.c)
+      # Take the include set from the els_pkc target rather than naming
+      # directories, and scope it to this library so no header can be injected
+      # ahead of the right one in another module's compilation.
+      #
+      # Note this only carries src/platforms/<soc> on RW6XX - els_pkc guards
+      # those directories with CONFIG_SOC_SERIES_RW6XX - which is why the
+      # Kconfig symbol is restricted to that series.
+      zephyr_library_include_directories(
+        $<TARGET_PROPERTY:McuxElsPkc,INTERFACE_INCLUDE_DIRECTORIES>
+      )
+    endif()
 
     if(CONFIG_WOLFCRYPT_ARMASM)
       # tested with board: "qemu_kvm_arm64"

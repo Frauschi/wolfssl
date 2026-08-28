@@ -111,6 +111,29 @@ config WOLFCRYPT_FIPS_READY
 
 endchoice
 
+config WOLFSSL_ELS_PKC
+	bool "NXP EdgeLock (ELS) hardware offload"
+	depends on WOLFSSL_BUILTIN
+	depends on MCUX_ELS_PKC && !BUILD_WITH_TFM
+	depends on SOC_SERIES_RW6XX
+	help
+	  Route wolfCrypt operations to the on-chip EdgeLock secure subsystem
+	  through the crypto callback interface. Requires the NXP els_pkc
+	  module, so it is only selectable on SoCs that ship EdgeLock.
+
+	  Operations the hardware does not implement fall back to software, so
+	  enabling this never removes functionality.
+
+	  Not available in a TF-M build: els_pkc only creates its McuxElsPkc
+	  CMake target when TF-M is off, even though it defaults MCUX_ELS_PKC
+	  on for TF-M builds.
+
+	  Restricted to RW6XX. els_pkc exports src/platforms/<soc> - which is
+	  where mcux_els.h and ELS_PowerDownWakeupInit() live - only under
+	  CONFIG_SOC_SERIES_RW6XX, so on the other ELS parts the port would
+	  fail to compile and then to link. Lifting this means getting those
+	  platform sources exported for the other families first.
+
 config WOLFSSL_CRYPTO_ONLY
 	bool "Build wolfCrypt only (no TLS layer)"
 	depends on WOLFSSL_BUILTIN
