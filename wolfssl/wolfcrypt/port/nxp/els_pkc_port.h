@@ -60,6 +60,23 @@
     #define WOLFSSL_ELS_PKC_IRQ_PRIO 2
 #endif
 
+/* Instrumentation: how many times each hardware path actually ran, and which
+ * completion route was taken.
+ *
+ * These exist so a test can assert the offload ran rather than only that its
+ * result agrees with software - a handler that never fires produces a passing
+ * comparison of software against itself. They are incremented without
+ * atomics, some outside the ELS lock, so treat them as best-effort under
+ * concurrency: fine for a counter that only has to be non-zero. */
+WOLFSSL_API extern unsigned long wc_ElsPkc_HashOffloadCount;
+WOLFSSL_API extern unsigned long wc_ElsPkc_AesOffloadCount;
+WOLFSSL_API extern unsigned long wc_ElsPkc_GcmOffloadCount;
+WOLFSSL_API extern unsigned long wc_ElsPkc_CmacOffloadCount;
+WOLFSSL_API extern unsigned long wc_ElsPkc_RngOffloadCount;
+WOLFSSL_API extern unsigned long wc_ElsPkc_IrqWaitCount;
+WOLFSSL_API extern unsigned long wc_ElsPkc_PollWaitCount;
+WOLFSSL_API extern unsigned long wc_ElsPkc_TimeoutCount;
+
 /* Bring the EdgeLock subsystem up and register the crypto callback.
  *
  * Must run after wolfCrypt_Init(), which calls wc_CryptoCb_Init() and zeroes

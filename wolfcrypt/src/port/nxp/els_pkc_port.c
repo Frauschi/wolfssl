@@ -612,6 +612,644 @@ static int ElsSha256Copy(wc_Sha256* src, wc_Sha256* dst)
 #endif /* !NO_SHA256 */
 
 /* ---------------------------------------------------------------------------
+ * AES-ECB / CBC / CTR
+ *
+ * Simpler than hashing: mcuxClEls_Cipher_Async takes the key and the data
+ * together, so nothing has to survive between calls and the lock is held for
+ * one operation. wolfCrypt keeps the raw key in aes->devKey precisely for
+ * offload, and aes->reg carries the IV or counter, which ELS updates in place
+ * through its in/out pIV - so chained calls continue correctly with no extra
+ * bookkeeping here.
+ *
+ * ELS only knows 128- and 256-bit keys, and only whole blocks. AES-192 and any
+ * trailing partial block are declined so software handles them; that is the
+ * whole reason the fallback contract exists.
+ * ------------------------------------------------------------------------ */
+
+#ifndef NO_AES
+
+unsigned long wc_ElsPkc_AesOffloadCount = 0;
+
+static int ElsAesKeyOk(const Aes* aes)
+{
+    return (aes->keylen == 16 || aes->keylen == 32);
+}
+
+/* Issue one cipher command. Caller holds the lock. */
+static int ElsCipherRun(mcuxClEls_CipherOption_t opt, Aes* aes,
+                        const byte* in, word32 sz, byte* out, int useIv)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Cipher_Async(
+        opt, 0u, (const uint8_t*)aes->devKey, (size_t)aes->keylen,
+        in, sz, useIv ? (uint8_t*)aes->reg : NULL, out));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Cipher_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+static int ElsAesCipher(Aes* aes, byte* out, const byte* in, word32 sz,
+                        int mode, int encrypt, int useIv)
+{
+    mcuxClEls_CipherOption_t opt;
+    byte lastCipher[MCUXCLELS_CIPHER_BLOCK_SIZE_AES];
+    int ret;
+
+    if (aes == NULL || out == NULL || in == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    /* whole blocks only, and only key sizes the hardware represents */
+    if (sz == 0 || (sz % MCUXCLELS_CIPHER_BLOCK_SIZE_AES) != 0 ||
+        !ElsAesKeyOk(aes)) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+#ifdef WOLFSSL_AES_COUNTER
+    /* CTR additionally needs an empty software keystream remainder. A partial
+     * call leaves the unused tail of a generated block in aes->tmp and has
+     * already advanced aes->reg past it, and the callback runs before that
+     * remainder is consumed - so starting the hardware from aes->reg here
+     * would silently drop it and desynchronise the stream. Hand the whole
+     * message back to software once it has buffered anything. */
+    if (mode == MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CTR && aes->left != 0) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+#endif
+
+    opt.word.value = 0u;
+    opt.bits.cphmde = (uint32_t)mode;
+    opt.bits.dcrpt  = encrypt ? MCUXCLELS_CIPHER_ENCRYPT
+                              : MCUXCLELS_CIPHER_DECRYPT;
+    opt.bits.extkey = MCUXCLELS_CIPHER_EXTERNAL_KEY;
+    if (useIv && mode == MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CTR) {
+        /* CTR: pIV carries the counter, and cphsoe is what makes ELS write the
+         * updated counter back so a chained call continues correctly.
+         *
+         * NOT set for CBC. The documentation says both flags are ignored
+         * there and pIV is always read and written - but setting them made
+         * ELS produce output that was self-consistent yet disagreed with
+         * software, i.e. it took pIV as an internal state blob rather than a
+         * plain IV. Left off, CBC matches software exactly. */
+        opt.bits.cphsie = MCUXCLELS_CIPHER_STATE_IN_ENABLE;
+        opt.bits.cphsoe = MCUXCLELS_CIPHER_STATE_OUT_ENABLE;
+    }
+
+    /* CBC decrypt chains on the last ciphertext block, which is the input -
+     * save it now because an in-place call is about to overwrite it. */
+    if (mode == MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CBC && !encrypt) {
+        XMEMCPY(lastCipher, in + sz - MCUXCLELS_CIPHER_BLOCK_SIZE_AES,
+                MCUXCLELS_CIPHER_BLOCK_SIZE_AES);
+    }
+
+    ret = ElsLock();
+    if (ret == 0) {
+        ret = ElsCipherRun(opt, aes, in, sz, out, useIv);
+        ElsUnlock();
+    }
+
+    if (ret == 0) {
+        /* Despite the documentation, this part does not write pIV back for
+         * CBC, so a chained call would restart from the original IV. The next
+         * IV is the last ciphertext block: the output when encrypting, the
+         * saved input when decrypting. */
+        if (mode == MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CBC) {
+            if (encrypt) {
+                XMEMCPY(aes->reg, out + sz - MCUXCLELS_CIPHER_BLOCK_SIZE_AES,
+                        MCUXCLELS_CIPHER_BLOCK_SIZE_AES);
+            }
+            else {
+                XMEMCPY(aes->reg, lastCipher,
+                        MCUXCLELS_CIPHER_BLOCK_SIZE_AES);
+            }
+        }
+        ELS_COUNT(wc_ElsPkc_AesOffloadCount);
+    }
+
+    ForceZero(lastCipher, sizeof(lastCipher));
+
+    return ret;
+}
+
+#endif /* ELS_HAVE_AES_CIPHER */
+
+/* ---------------------------------------------------------------------------
+ * AES-GCM
+ *
+ * ELS drives GCM as a four-stage sequence - Init, UpdateAad, UpdateData,
+ * Finalize - threaded through an 80-byte context. wolfCrypt's callback hands
+ * the whole message over at once, so the sequence runs start to finish under a
+ * single lock and no state has to survive between calls.
+ *
+ * Every stage consumes whole 16-byte blocks. The true AAD and data lengths
+ * reach the hardware only through Finalize, plus msgendw for the final partial
+ * data block; getting either wrong yields a clean-looking but wrong tag.
+ * ------------------------------------------------------------------------ */
+
+#ifdef HAVE_AESGCM
+
+unsigned long wc_ElsPkc_GcmOffloadCount = 0;
+
+#define ELS_GCM_BLOCK MCUXCLELS_AEAD_IV_BLOCK_SIZE
+
+/* Constant-time compare, 0 when equal. Kept local rather than reaching for
+ * misc.c's ConstantCompare, whose visibility depends on the inline-misc
+ * build knobs. */
+static int ElsCtCompare(const byte* a, const byte* b, word32 len)
+{
+    byte diff = 0;
+    word32 i;
+
+    for (i = 0; i < len; i++) {
+        diff |= (byte)(a[i] ^ b[i]);
+    }
+
+    return (int)diff;
+}
+
+/* Each stage below is its own function so the flow-protection macro pair stays
+ * within one scope, matching the rest of this port. Caller holds the lock. */
+
+static int ElsGcmInit(mcuxClEls_AeadOption_t opt, const Aes* aes,
+                      const byte* j0, byte* aeadCtx)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Aead_Init_Async(
+        opt, 0u, (const uint8_t*)aes->devKey, (size_t)aes->keylen,
+        j0, (size_t)ELS_GCM_BLOCK, aeadCtx));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Aead_Init_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+static int ElsGcmAadChunk(mcuxClEls_AeadOption_t opt, const Aes* aes,
+                          const byte* aad, word32 len, byte* aeadCtx)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Aead_UpdateAad_Async(
+        opt, 0u, (const uint8_t*)aes->devKey, (size_t)aes->keylen,
+        aad, (size_t)len, aeadCtx));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Aead_UpdateAad_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+static int ElsGcmDataChunk(mcuxClEls_AeadOption_t opt, const Aes* aes,
+                           const byte* in, word32 len, byte* out,
+                           byte* aeadCtx)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Aead_UpdateData_Async(
+        opt, 0u, (const uint8_t*)aes->devKey, (size_t)aes->keylen,
+        in, (size_t)len, out, aeadCtx));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Aead_UpdateData_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+static int ElsGcmFinal(mcuxClEls_AeadOption_t opt, const Aes* aes,
+                       word32 aadSz, word32 dataSz, byte* tag, byte* aeadCtx)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Aead_Finalize_Async(
+        opt, 0u, (const uint8_t*)aes->devKey, (size_t)aes->keylen,
+        (size_t)aadSz, (size_t)dataSz, tag, aeadCtx));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Aead_Finalize_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+/* AAD is fed as whole blocks; the tail goes through a zero-padded scratch
+ * block, and Finalize's aadLength is what tells the hardware how much of that
+ * last block was real. */
+static int ElsGcmAad(mcuxClEls_AeadOption_t opt, const Aes* aes,
+                     const byte* aad, word32 aadSz, byte* aeadCtx)
+{
+    ALIGN32 byte block[ELS_GCM_BLOCK];
+    word32 full = aadSz & ~(word32)(ELS_GCM_BLOCK - 1u);
+    word32 tail = aadSz - full;
+    int ret = 0;
+
+    if (full > 0u) {
+        ret = ElsGcmAadChunk(opt, aes, aad, full, aeadCtx);
+    }
+
+    if (ret == 0 && tail > 0u) {
+        XMEMSET(block, 0, sizeof(block));
+        XMEMCPY(block, aad + full, tail);
+        ret = ElsGcmAadChunk(opt, aes, block, ELS_GCM_BLOCK, aeadCtx);
+        ForceZero(block, sizeof(block));
+    }
+
+    return ret;
+}
+
+static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
+                     const byte* iv, word32 ivSz,
+                     byte* authTag, word32 authTagSz,
+                     const byte* authIn, word32 authInSz, int encrypt)
+{
+    mcuxClEls_AeadOption_t opt;
+    mcuxClEls_AeadOption_t stageOpt;
+    ALIGN32 byte aeadCtx[MCUXCLELS_AEAD_CONTEXT_SIZE];
+    ALIGN32 byte j0[ELS_GCM_BLOCK];
+    ALIGN32 byte inBlock[ELS_GCM_BLOCK];
+    ALIGN32 byte outBlock[ELS_GCM_BLOCK];
+    byte   tag[MCUXCLELS_AEAD_TAG_SIZE];
+    word32 full, tail;
+    int ret;
+
+    if (aes == NULL || iv == NULL || authTag == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if ((sz > 0 && (in == NULL || out == NULL)) ||
+        (authInSz > 0 && authIn == NULL)) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    /* Decline what the hardware does not represent:
+     *  - only a 12-byte IV maps onto the single-block J0 that Aead_Init takes;
+     *    other lengths need the GHASH-based derivation via Aead_PartialInit.
+     *  - ELS produces a 16-byte tag. A shorter one is its leftmost bytes,
+     *    which is what GCM truncation means, so those are still served.
+     *  - AES-192 has no ELS key size. */
+    if (ivSz != GCM_NONCE_MID_SZ || authTagSz == 0 ||
+        authTagSz > MCUXCLELS_AEAD_TAG_SIZE || !ElsAesKeyOk(aes)) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    /* For a 96-bit IV, J0 is IV || 0x00000001 (SP 800-38D, 7.1). */
+    XMEMSET(j0, 0, sizeof(j0));
+    XMEMCPY(j0, iv, ivSz);
+    j0[ELS_GCM_BLOCK - 1] = 0x01;
+
+    opt.word.value   = 0u;
+    opt.bits.dcrpt   = encrypt ? MCUXCLELS_AEAD_ENCRYPT
+                               : MCUXCLELS_AEAD_DECRYPT;
+    opt.bits.extkey  = MCUXCLELS_AEAD_EXTERN_KEY;
+    opt.bits.acpsie  = MCUXCLELS_AEAD_STATE_IN_ENABLE;
+    opt.bits.lastinit = MCUXCLELS_AEAD_LASTINIT_FALSE;
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* Init builds the context rather than continuing one, so it is the single
+     * stage that runs with state input disabled. */
+    stageOpt = opt;
+    stageOpt.bits.acpsie = MCUXCLELS_AEAD_STATE_IN_DISABLE;
+    ret = ElsGcmInit(stageOpt, aes, j0, aeadCtx);
+
+    if (ret == 0 && authInSz > 0) {
+        ret = ElsGcmAad(opt, aes, authIn, authInSz, aeadCtx);
+    }
+
+    if (ret == 0 && sz > 0) {
+        full = sz & ~(word32)(ELS_GCM_BLOCK - 1u);
+        tail = sz - full;
+
+        if (full > 0) {
+            ret = ElsGcmDataChunk(opt, aes, in, full, out, aeadCtx);
+        }
+        if (ret == 0 && tail > 0) {
+            /* msgendw carries the real byte count of the final block while the
+             * block itself still arrives zero-padded - the same split between
+             * padded buffer and true length that CMAC needs. */
+            stageOpt = opt;
+            stageOpt.bits.msgendw = (uint32_t)tail;
+
+            XMEMSET(inBlock, 0, sizeof(inBlock));
+            XMEMCPY(inBlock, in + full, tail);
+            ret = ElsGcmDataChunk(stageOpt, aes, inBlock, ELS_GCM_BLOCK,
+                                  outBlock, aeadCtx);
+            if (ret == 0) {
+                XMEMCPY(out + full, outBlock, tail);
+            }
+        }
+    }
+
+    if (ret == 0) {
+        ret = ElsGcmFinal(opt, aes, authInSz, sz, tag, aeadCtx);
+    }
+
+    ElsUnlock();
+
+    if (ret == 0) {
+        if (encrypt) {
+            XMEMCPY(authTag, tag, authTagSz);
+        }
+        else if (wc_ConstantCompare(tag, authTag, (int)authTagSz) != 0) {
+            /* Match the software path: a failed tag check leaves no plaintext
+             * behind for a caller that ignores the return value. */
+            if (sz > 0) {
+                XMEMSET(out, 0, sz);
+            }
+            ret = WC_NO_ERR_TRACE(AES_GCM_AUTH_E);
+        }
+        if (ret == 0) {
+            ELS_COUNT(wc_ElsPkc_GcmOffloadCount);
+        }
+    }
+
+    ForceZero(tag, sizeof(tag));
+    ForceZero(j0, sizeof(j0));
+    ForceZero(inBlock, sizeof(inBlock));
+    ForceZero(outBlock, sizeof(outBlock));
+    ForceZero(aeadCtx, sizeof(aeadCtx));
+
+    return ret;
+}
+
+#endif /* HAVE_AESGCM */
+
+#endif /* !NO_AES */
+
+/* ---------------------------------------------------------------------------
+ * Random
+ *
+ * The one genuinely stateless primitive here: ELS hands over DRBG output with
+ * nothing to carry between calls. Serving both WC_ALGO_TYPE_RNG and
+ * WC_ALGO_TYPE_SEED means wolfCrypt's own Hash-DRBG is seeded from the
+ * hardware too, rather than only the direct generate path being accelerated.
+ * ------------------------------------------------------------------------ */
+
+#ifndef WC_NO_RNG
+
+unsigned long wc_ElsPkc_RngOffloadCount = 0;
+
+static int ElsRandom(byte* out, word32 sz)
+{
+    int ret;
+
+    if (out == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (sz == 0) {
+        return 0;
+    }
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t,
+        mcuxClEls_Rng_DrbgRequest_Async(out, (size_t)sz));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Rng_DrbgRequest_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        ElsUnlock();
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    ret = ElsWait();
+
+    ElsUnlock();
+
+    if (ret == 0) {
+        wc_ElsPkc_RngOffloadCount++;
+    }
+
+    return ret;
+}
+
+#endif /* !WC_NO_RNG */
+
+/* ---------------------------------------------------------------------------
+ * AES-CMAC
+ * ------------------------------------------------------------------------ */
+
+/* pMac is [in, out] and carries the intermediate state, so it lives in the
+ * caller's Cmac and the lock is held per call. */
+
+#if defined(WOLFSSL_CMAC) && !defined(NO_AES)
+
+unsigned long wc_ElsPkc_CmacOffloadCount = 0;
+
+#define ELS_CMAC_BLOCK MCUXCLELS_CIPHER_BLOCK_SIZE_AES
+#define ELS_CMAC_STATE MCUXCLELS_CMAC_OUT_SIZE
+
+#ifndef WOLFSSL_ELS_PKC_CMAC_CTX_COUNT
+    #define WOLFSSL_ELS_PKC_CMAC_CTX_COUNT 2
+#endif
+
+typedef struct ElsCmacCtx {
+    ALIGN32 byte state[ELS_CMAC_STATE];
+    byte   key[32];
+    word32 keySz;
+    byte   buf[ELS_CMAC_BLOCK];
+    word32 buffered;
+    byte   started;
+    byte   inUse;
+    void*  owner;
+} ElsCmacCtx;
+
+static ElsCmacCtx elsCmacPool[WOLFSSL_ELS_PKC_CMAC_CTX_COUNT];
+
+static ElsCmacCtx* ElsCmacClaim(void* owner)
+{
+    int i;
+
+    for (i = 0; i < WOLFSSL_ELS_PKC_CMAC_CTX_COUNT; i++) {
+        if (!elsCmacPool[i].inUse) {
+            XMEMSET(&elsCmacPool[i], 0, sizeof(elsCmacPool[i]));
+            elsCmacPool[i].inUse = 1;
+            elsCmacPool[i].owner = owner;
+            return &elsCmacPool[i];
+        }
+    }
+
+    return NULL;
+}
+
+/* Feed one chunk. Caller holds the lock. */
+static int ElsCmacChunk(ElsCmacCtx* ctx, const byte* in, word32 len, int final)
+{
+    mcuxClEls_CmacOption_t opt;
+
+    opt.word.value = 0u;
+    opt.bits.extkey = MCUXCLELS_CMAC_EXTERNAL_KEY_ENABLE;
+    opt.bits.initialize = ctx->started ? MCUXCLELS_CMAC_INITIALIZE_DISABLE
+                                       : MCUXCLELS_CMAC_INITIALIZE_ENABLE;
+    opt.bits.finalize = final ? MCUXCLELS_CMAC_FINALIZE_ENABLE
+                              : MCUXCLELS_CMAC_FINALIZE_DISABLE;
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Cmac_Async(
+        opt, 0u, ctx->key, (size_t)ctx->keySz, in, (size_t)len, ctx->state));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Cmac_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    ctx->started = 1;
+
+    return ElsWait();
+}
+
+/* Release the pool entry behind an abandoned CMAC - one started on hardware
+ * and dropped without a Final. Left alone the entry stays claimed forever, and
+ * it also holds a plaintext AES key. */
+static void ElsCmacFreeCtx(Cmac* cmac)
+{
+    if (cmac == NULL || cmac->devCtx == NULL) {
+        return;
+    }
+    if (ElsLock() == 0) {
+        ForceZero(cmac->devCtx, sizeof(ElsCmacCtx));
+        ElsUnlock();
+    }
+    cmac->devCtx = NULL;
+}
+
+static int ElsCmacInit(Cmac* cmac, const byte* key, word32 keySz)
+{
+    ElsCmacCtx* ctx;
+    int ret;
+
+    if (cmac == NULL || key == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (keySz != 16 && keySz != 32) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    ctx = ElsCmacClaim(cmac);
+    if (ctx == NULL) {
+        ElsUnlock();
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    XMEMCPY(ctx->key, key, keySz);
+    ctx->keySz = keySz;
+    cmac->devCtx = ctx;
+
+    ElsUnlock();
+
+    return 0;
+}
+
+static int ElsCmacUpdate(Cmac* cmac, const byte* in, word32 inSz)
+{
+    ElsCmacCtx* ctx;
+    word32 take;
+    int ret;
+
+    if (cmac == NULL || cmac->devCtx == NULL) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    /* A zero-length update is legal and absorbs nothing; in may be NULL. */
+    if (inSz == 0) {
+        return 0;
+    }
+    if (in == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* CMAC uses a different subkey for the final chunk and only the final call
+     * knows which that is, so a full buffer is flushed only once more data is
+     * known to follow. */
+    while (inSz > 0) {
+        take = ELS_CMAC_BLOCK - cmac->bufferSz;
+        if (take > inSz) {
+            take = inSz;
+        }
+        XMEMCPY(cmac->buffer + cmac->bufferSz, in, take);
+        cmac->bufferSz += take;
+        in += take;
+        inSz -= take;
+
+        if (cmac->bufferSz == ELS_CMAC_BLOCK && inSz > 0) {
+            ret = ElsCmacChunk(cmac, cmac->buffer, ELS_CMAC_BLOCK, 0);
+            if (ret != 0) {
+                goto out;
+            }
+            cmac->bufferSz = 0;
+        }
+    }
+
+out:
+    ElsUnlock();
+
+    return ret;
+}
+
+static int ElsCmacFinal(Cmac* cmac, byte* out, word32* outSz)
+{
+    word32 buffered;
+    int ret;
+
+    if (cmac == NULL || cmac->devCtx == NULL || out == NULL || outSz == NULL) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    /* Truncation to any length in [WC_CMAC_TAG_MIN_SZ, WC_CMAC_TAG_MAX_SZ] is
+     * what wc_AesCmacVerify_ex() asks for. Refusing it is not a fallback: the
+     * message is already absorbed and no software state remains. */
+    if (*outSz < WC_CMAC_TAG_MIN_SZ || *outSz > ELS_CMAC_STATE) {
+        return WC_NO_ERR_TRACE(BUFFER_E);
+    }
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* ELS takes inputLength as the length *before* padding but expects the
+     * block already padded per SP 800-38B. Getting this wrong is quiet: exact
+     * block multiples come out correct and every other length is wrong. */
+    buffered = cmac->bufferSz;
+    if (buffered < ELS_CMAC_BLOCK) {
+        cmac->buffer[buffered] = 0x80;
+        if (buffered + 1u < ELS_CMAC_BLOCK) {
+            XMEMSET(cmac->buffer + buffered + 1u, 0,
+                    ELS_CMAC_BLOCK - buffered - 1u);
+        }
+    }
+
+    ret = ElsCmacChunk(cmac, cmac->buffer, buffered, 1);
+    if (ret == 0) {
+        XMEMCPY(out, cmac->digest, *outSz);
+        ELS_COUNT(wc_ElsPkc_CmacOffloadCount);
+    }
+
+    /* The key is not needed again, and wc_CmacFinalNoFree() leaves the object
+     * to the caller. */
+    ForceZero(cmac->k1, WC_AES_BLOCK_SIZE);
+    ForceZero(cmac->k2, WC_AES_BLOCK_SIZE);
+    cmac->bufferSz = 0;
+    cmac->devCtx   = NULL;
+
+    ElsUnlock();
+
+    return ret;
+}
+
+#endif /* WOLFSSL_CMAC && !NO_AES */
+
+/* ---------------------------------------------------------------------------
  * Dispatch
  * ------------------------------------------------------------------------ */
 
@@ -630,6 +1268,113 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
     }
 
     switch (info->algo_type) {
+#if defined(WOLFSSL_CMAC) && !defined(NO_AES)
+        case WC_ALGO_TYPE_CMAC:
+            if (info->cmac.type != WC_CMAC_AES) {
+                break;
+            }
+            /* cmac.c drives this as init / update / final, distinguished by
+             * which pointers are present (see wc_CryptoCb_Cmac call sites). */
+            if (info->cmac.key != NULL && info->cmac.in == NULL &&
+                info->cmac.out == NULL) {
+                ret = ElsCmacInit(info->cmac.cmac, info->cmac.key,
+                                  info->cmac.keySz);
+            }
+            else if (info->cmac.out == NULL &&
+                     info->cmac.cmac->devCtx != NULL) {
+                /* in == NULL with a zero length is a legal update, and for an
+                 * object this port owns software has no key schedule to fall
+                 * back on - init returned through the device. */
+                ret = ElsCmacUpdate(info->cmac.cmac, info->cmac.in,
+                                    info->cmac.inSz);
+            }
+            else if (info->cmac.out != NULL && info->cmac.key == NULL &&
+                     info->cmac.in == NULL) {
+                ret = ElsCmacFinal(info->cmac.cmac, info->cmac.out,
+                                   info->cmac.outSz);
+            }
+            /* the one-shot form (key + in + out together) is left to software:
+             * it would need init/update/final stitched here for no gain */
+            break;
+#endif
+
+#ifndef WC_NO_RNG
+        case WC_ALGO_TYPE_RNG:
+            ret = ElsRandom(info->rng.out, info->rng.sz);
+            break;
+
+        case WC_ALGO_TYPE_SEED:
+            ret = ElsRandom(info->seed.seed, info->seed.sz);
+            break;
+#endif
+
+#ifndef NO_AES
+        case WC_ALGO_TYPE_CIPHER:
+            switch (info->cipher.type) {
+    #ifdef HAVE_AESGCM
+                case WC_CIPHER_AES_GCM:
+                    if (info->cipher.enc) {
+                        ret = ElsAesGcm(info->cipher.aesgcm_enc.aes,
+                                info->cipher.aesgcm_enc.out,
+                                info->cipher.aesgcm_enc.in,
+                                info->cipher.aesgcm_enc.sz,
+                                info->cipher.aesgcm_enc.iv,
+                                info->cipher.aesgcm_enc.ivSz,
+                                info->cipher.aesgcm_enc.authTag,
+                                info->cipher.aesgcm_enc.authTagSz,
+                                info->cipher.aesgcm_enc.authIn,
+                                info->cipher.aesgcm_enc.authInSz, 1);
+                    }
+                    else {
+                        /* the decrypt struct keeps authTag const; the port
+                         * only ever compares against it */
+                        ret = ElsAesGcm(info->cipher.aesgcm_dec.aes,
+                                info->cipher.aesgcm_dec.out,
+                                info->cipher.aesgcm_dec.in,
+                                info->cipher.aesgcm_dec.sz,
+                                info->cipher.aesgcm_dec.iv,
+                                info->cipher.aesgcm_dec.ivSz,
+                                (byte*)info->cipher.aesgcm_dec.authTag,
+                                info->cipher.aesgcm_dec.authTagSz,
+                                info->cipher.aesgcm_dec.authIn,
+                                info->cipher.aesgcm_dec.authInSz, 0);
+                    }
+                    break;
+    #endif
+    #ifdef HAVE_AES_CBC
+                case WC_CIPHER_AES_CBC:
+                    ret = ElsAesCipher(info->cipher.aescbc.aes,
+                            info->cipher.aescbc.out, info->cipher.aescbc.in,
+                            info->cipher.aescbc.sz,
+                            MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CBC,
+                            info->cipher.enc, 1);
+                    break;
+    #endif
+    #ifdef WOLFSSL_AES_COUNTER
+                case WC_CIPHER_AES_CTR:
+                    /* CTR keystream is symmetric, so the hardware always runs
+                     * the "encrypt" direction regardless of the caller's. */
+                    ret = ElsAesCipher(info->cipher.aesctr.aes,
+                            info->cipher.aesctr.out, info->cipher.aesctr.in,
+                            info->cipher.aesctr.sz,
+                            MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CTR, 1, 1);
+                    break;
+    #endif
+    #if defined(HAVE_AES_ECB) || defined(WOLFSSL_AES_DIRECT)
+                case WC_CIPHER_AES_ECB:
+                    ret = ElsAesCipher(info->cipher.aesecb.aes,
+                            info->cipher.aesecb.out, info->cipher.aesecb.in,
+                            info->cipher.aesecb.sz,
+                            MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_ECB,
+                            info->cipher.enc, 0);
+                    break;
+    #endif
+                default:
+                    break;
+            }
+            break;
+#endif /* !NO_AES */
+
 #if !defined(NO_SHA256)
         case WC_ALGO_TYPE_HASH:
             if (info->hash.type != WC_HASH_TYPE_SHA256 ||
@@ -670,12 +1415,19 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
             break;
 #endif
 
-#if defined(WOLF_CRYPTO_CB_FREE) && !defined(NO_SHA256)
+#if defined(WOLF_CRYPTO_CB_FREE)
         case WC_ALGO_TYPE_FREE:
+    #if !defined(NO_SHA256)
             if (info->free.algo == WC_ALGO_TYPE_HASH &&
                 info->free.type == WC_HASH_TYPE_SHA256) {
                 ElsSha256FreeCtx((wc_Sha256*)info->free.obj);
             }
+    #endif
+    #if defined(WOLFSSL_CMAC) && !defined(NO_AES)
+            if (info->free.algo == WC_ALGO_TYPE_CMAC) {
+                ElsCmacFreeCtx((Cmac*)info->free.obj);
+            }
+    #endif
             /* Deliberately still CRYPTOCB_UNAVAILABLE: wolfCrypt treats any
              * other return as "the callback owns the whole teardown" and skips
              * its own, which would leak everything it would have released. We
@@ -758,11 +1510,31 @@ int wc_ElsPkc_Cleanup(void)
 
     if (elsLockInit) {
         if (wc_LockMutex(&elsLock) == 0) {
+            /* Drop every claimed pool entry. Left alone they stay marked in
+             * use across the cleanup, so a later wc_ElsPkc_Init() comes up
+             * with reduced or zero offload capacity for no visible reason -
+             * and unrecoverably, because once elsLockInit is clear the free
+             * paths can no longer take the lock to release them. The CMAC
+             * pool also holds plaintext keys, which must not outlive a
+             * shutdown. Any live wc_Sha256 or Cmac must be freed first. */
+            ForceZero(elsHashPool, sizeof(elsHashPool));
+#if defined(WOLFSSL_CMAC) && !defined(NO_AES)
+            ForceZero(elsCmacPool, sizeof(elsCmacPool));
+#endif
             (void)wc_UnLockMutex(&elsLock);
         }
         elsLockInit = 0;
         wc_FreeMutex(&elsLock);
     }
+
+#ifdef WOLFSSL_ZEPHYR
+    /* Disarm the interrupt: the ISR gives a semaphore this port now considers
+     * dead, and nothing else owns the ELS IRQ. */
+    if (elsIrqReady) {
+        irq_disable(ELS_IRQn);
+        elsIrqReady = 0;
+    }
+#endif
 
     return 0;
 }
