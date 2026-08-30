@@ -210,7 +210,7 @@ WOLFSSL_API extern unsigned long wc_ElsPkc_HashOffloadCount;
 #ifndef NO_AES
 WOLFSSL_API extern unsigned long wc_ElsPkc_AesOffloadCount;
 #endif
-#ifdef HAVE_AESGCM
+#if defined(HAVE_AESGCM) && !defined(NO_AES)
 WOLFSSL_API extern unsigned long wc_ElsPkc_GcmOffloadCount;
 #endif
 #if defined(WOLFSSL_CMAC) && !defined(NO_AES)
@@ -221,6 +221,12 @@ WOLFSSL_API extern unsigned long wc_ElsPkc_RngOffloadCount;
 #endif
 #ifdef HAVE_ECC
 WOLFSSL_API extern unsigned long wc_ElsPkc_EccOffloadCount;
+#endif
+#ifndef NO_RSA
+WOLFSSL_API extern unsigned long wc_ElsPkc_RsaOffloadCount;
+#endif
+#ifdef HAVE_CURVE25519
+WOLFSSL_API extern unsigned long wc_ElsPkc_X25519OffloadCount;
 #endif
 
 /* Bring the EdgeLock subsystem up and register the crypto callback.

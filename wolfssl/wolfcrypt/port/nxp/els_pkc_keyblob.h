@@ -82,7 +82,9 @@ WOLFSSL_API int wc_ElsPkc_BuildWrappedBlob(const byte* kek, word32 kekSz,
  * just produced. Recovers both the property word and the key.
  *
  *   key/keyBufSz  where to put the key, and the capacity of that buffer;
- *                 pass key == NULL (keyBufSz ignored) to query the size only
+ *                 pass key == NULL (keyBufSz ignored) to learn the recovered
+ *                 size without keeping the key - the unwrap still runs, so
+ *                 this costs the same as a full parse
  *   props/keySz   outputs; either may be NULL if not wanted
  *
  * The buffer capacity is a separate input from the recovered size so there is
