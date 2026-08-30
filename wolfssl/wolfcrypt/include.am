@@ -257,6 +257,13 @@ if BUILD_ELS_PKC_KEYBLOB
 nobase_include_HEADERS+= wolfssl/wolfcrypt/port/nxp/els_pkc_keyblob.h
 endif
 
+# Installed unconditionally: this header declares the port's whole public API -
+# the slot reference, the use-slot helpers and the init entry points - and an
+# application needs it to bind a key to the device. There is no configure
+# conditional to hang it on because the port itself is not yet built by
+# autotools, and the header is inert without WOLFSSL_ELS_PKC.
+nobase_include_HEADERS+= wolfssl/wolfcrypt/port/nxp/els_pkc_port.h
+
 if BUILD_TROPIC01
 nobase_include_HEADERS+= wolfssl/wolfcrypt/port/tropicsquare/tropic01.h
 endif
