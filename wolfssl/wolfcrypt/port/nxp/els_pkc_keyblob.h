@@ -66,24 +66,18 @@
 WOLFSSL_API int wc_ElsPkc_BuildWrappedBlob(const byte* kek, word32 kekSz,
     word32 props, const byte* key, word32 keySz, byte* out, word32 outSz);
 
-/* Inverse, for tests and for a provisioning tool that wants to verify what it
- * just produced. Recovers both the property word and the key.
+/* Inverse, for tests and for a provisioning tool verifying what it produced.
  *
- *   key/keyBufSz  where to put the key, and the capacity of that buffer;
- *                 pass key == NULL (keyBufSz ignored) to query the size only
- *   props/keySz   outputs; either may be NULL if not wanted
+ *   key/keyBufSz  where to put the key, and that buffer's capacity; pass
+ *                 key == NULL to learn the recovered size without keeping the
+ *                 key - the unwrap still runs
+ *   props/keySz   outputs; either may be NULL
  *
- * The buffer capacity is a separate input from the recovered size so there is
- * no in/out parameter to leave uninitialised.
+ * Returns the number of key bytes recovered, or a negative error code.
  *
- * Returns the number of key bytes recovered (a positive count), or a negative
- * error code - the same convention as wc_ElsPkc_BuildWrappedBlob.
- *
- * Two failures are worth telling apart. A wrong KEK fails the AES-KW integrity
- * check and returns whatever wc_AesKeyUnWrap reports. BAD_STATE_E means the
- * unwrap succeeded but the plaintext is not an ELS container - the reserved
- * padding after the property word was non-zero - so the KEK was right and the
- * content was not.
+ * A wrong KEK fails the AES-KW integrity check and returns what wc_AesKeyUnWrap
+ * reports. BAD_STATE_E means the unwrap succeeded but the plaintext is not an
+ * ELS container, so the KEK was right and the content was not.
  */
 WOLFSSL_API int wc_ElsPkc_ParseWrappedBlob(const byte* kek, word32 kekSz,
     const byte* blob, word32 blobSz, word32* props,
