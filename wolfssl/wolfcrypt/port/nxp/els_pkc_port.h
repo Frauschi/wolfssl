@@ -51,6 +51,9 @@
 
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/wolfcrypt/cryptocb.h>
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+    #include <wolfssl/wolfcrypt/wc_keystore.h>
+#endif
 #ifdef HAVE_ECC
     #include <wolfssl/wolfcrypt/ecc.h>
 #endif
@@ -161,11 +164,12 @@ WOLFSSL_API int wc_ElsPkc_EccUseSlot(ecc_key* key, const wc_ElsPkc_KeyRef* ref,
 #ifndef NO_AES
 /* Same, for an Aes that names a slot rather than carrying key material.
  *
- * Note the cipher path does not consume a slot reference yet - that arrives
- * with the keystore phase, which is what puts AES keys into slots in the first
- * place. Until then this builds the reference and binds the Aes to it; an
- * encrypt against it fails rather than silently using an empty key, because
- * wc_AesInit_Id() deliberately leaves keyInstalled clear. */
+ * The key store can now put an AES key into a slot, but the cipher path still
+ * does not consume the reference - an encrypt under a slot-resident AES key
+ * needs the ELS internal-key option, which is separate work. Until then this
+ * builds the reference and binds the Aes to it, and an encrypt against it
+ * fails rather than silently using an empty key, because wc_AesInit_Id()
+ * deliberately leaves keyInstalled clear. */
 WOLFSSL_API int wc_ElsPkc_AesUseSlot(Aes* aes, const wc_ElsPkc_KeyRef* ref,
                                      void* heap, int devId);
 #endif
@@ -195,6 +199,9 @@ WOLFSSL_API extern unsigned long wc_ElsPkc_CmacOffloadCount;
 #endif
 #ifndef WC_NO_RNG
 WOLFSSL_API extern unsigned long wc_ElsPkc_RngOffloadCount;
+#endif
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+WOLFSSL_API extern unsigned long wc_ElsPkc_KeyStoreOffloadCount;
 #endif
 #ifdef HAVE_ECC
 WOLFSSL_API extern unsigned long wc_ElsPkc_EccOffloadCount;
