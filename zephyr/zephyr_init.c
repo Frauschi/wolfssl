@@ -50,25 +50,23 @@
 #include <errno.h>
 
 #include <zephyr/init.h>
-#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 
 #include <wolfssl/wolfcrypt/wc_port.h>
-#include <wolfssl/wolfcrypt/error-crypt.h>
-#include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
+
+LOG_MODULE_REGISTER(wolfssl_els_pkc, CONFIG_WOLFSSL_LOG_LEVEL);
 
 static int wolfssl_els_pkc_init(void)
 {
     int ret;
 
-    /* wc_CryptoCb_Init() runs from here and wipes the device table, so the
-     * callback cannot be registered before it. */
+    /* This is what brings the EdgeLock up and registers its callback. Log the
+     * failure rather than rely on the return value: Zephyr passes a non-device
+     * SYS_INIT result only to a trace hook, so it would otherwise leave no
+     * evidence of software-only operation. */
     ret = wolfCrypt_Init();
     if (ret != 0) {
-        return -EIO;
-    }
-
-    ret = wc_ElsPkc_Init();
-    if (ret != 0) {
+        LOG_ERR("wolfCrypt_Init failed: %d", ret);
         return -EIO;
     }
 
@@ -80,4 +78,4 @@ static int wolfssl_els_pkc_init(void)
  * bring-up has already run. */
 SYS_INIT(wolfssl_els_pkc_init, POST_KERNEL, 99);
 
-#endif /* WOLFSSL_ELS_PKC */
+#endif /* WOLFSSL_ELS_PKC && CONFIG_WOLFSSL_ELS_PKC */
