@@ -1479,36 +1479,37 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
 #endif /* HAVE_ECC */
 
 /* ---------------------------------------------------------------------------
- * PKC tier
- *
- * The second engine on this part. Where ELS is a fixed-function block driven by
- * one _Async call, the PKC is a general modular-arithmetic coprocessor reached
- * through a session that owns two workareas.
- *
- * Only one of those is ours to allocate. The CPU workarea is an ordinary
- * buffer, but the PKC workarea is a FIXED HARDWARE REGION at PKC_RAM_ADDR -
- * mcuxClSession_init() takes it as a pointer, which makes it look like memory
- * the caller chose. It is not. That single shared region is also why PKC work
- * runs under the same lock as ELS: two concurrent operations would corrupt each
- * other's intermediate values directly, not merely race.
- *
- * Nothing here is vaulted. The PKC tier operates on ordinary wolfCrypt key
- * material - it accelerates keys that live in memory, which is exactly what the
- * ELS key store cannot hold: RSA at any size, and the curves beyond P-256.
+ * PKC coprocessor
  * ------------------------------------------------------------------------ */
 
-#if !defined(NO_RSA)
+/* The PKC workarea is a FIXED HARDWARE REGION at PKC_RAM_ADDR, not memory the
+ * caller chose, even though mcuxClSession_init() takes it as a pointer. That
+ * shared region is why PKC work runs under the same lock as ELS. Nothing here
+ * is vaulted: the PKC accelerates ordinary in-memory key material. */
+
+/* Shared by every PKC consumer - RSA, ECDSA and X25519 - so guarded on the
+ * union of them, not on RSA alone. */
+#if !defined(NO_RSA) || defined(HAVE_CURVE25519) || \
+    (defined(HAVE_ECC) && \
+     (defined(HAVE_ECC_SIGN) || defined(HAVE_ECC_VERIFY)))
+#define ELS_PKC_HAVE_SESSION
 
 #include <mcuxClSession.h>
 #include <mcuxClPkc_Types.h>   /* MCUXCLPKC_PACKARGS4, used by the ECC
                                 * domain-parameter packing macro */
 #include <mcuxClRandom.h>
 #include <mcuxClRandomModes.h>
-#include <mcuxClRsa.h>
+#ifdef HAVE_ECC
+    /* Here rather than in the X25519 block below: the ECDSA code needs it
+     * whether or not the Montgomery curves are built. */
+    #include <mcuxClEcc.h>
+#endif
+#ifndef NO_RSA
+    #include <mcuxClRsa.h>
+#endif
 
-/* Fixed PKC RAM window on rw61x. Mirrored from the vendor platform header so a
- * build that does not export ip_platform.h still gets the right region; the
- * assertion below keeps the two honest. */
+/* Fixed PKC RAM window on rw61x, mirrored from the vendor platform header so a
+ * build that does not export ip_platform.h still gets the right region. */
 #ifndef WOLFSSL_ELS_PKC_RAM_ADDR
     #define WOLFSSL_ELS_PKC_RAM_ADDR 0x5015A000u
 #endif
@@ -1591,6 +1592,31 @@ static int ElsPkcSessionOpen(mcuxClSession_Descriptor_t* sess)
 
     return ret;
 }
+
+/* Pair every Open. CLNS wipes the work areas here, and the PKC half is the
+ * fixed hardware window shared by RSA, ECDSA and X25519 - without this a
+ * private-key operation leaves its primes, nonce or scalar resident there
+ * until something else happens to overwrite them. Best effort: the operation's
+ * own result is what the caller is told about. */
+static void ElsPkcSessionClose(mcuxClSession_Descriptor_t* sess)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(ur, ut, mcuxClRandom_uninit(sess));
+    (void)ur;
+    (void)ut;
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(cr, ct, mcuxClSession_cleanup(sess));
+    (void)cr;
+    (void)ct;
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(dr, dt, mcuxClSession_destroy(sess));
+    (void)dr;
+    (void)dt;
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+}
+
+#ifndef NO_RSA
 
 /* Export an mp_int as a fixed-width big-endian string, which is the only form
  * the vendor key entries accept. */
@@ -1806,22 +1832,17 @@ static int ElsPkcRsaFunction(const byte* in, word32 inLen, byte* out,
 
 #endif /* !NO_RSA */
 
+#endif /* ELS_PKC_HAVE_SESSION */
+
 /* ---------------------------------------------------------------------------
  * X25519
- *
- * Unlike RSA and ECDSA, MontDH is reached through the vendor's mcuxClKey
- * abstraction rather than raw buffers - the key data still lives in ordinary
- * memory, but it has to be wrapped in a key descriptor first.
- *
- * Only the shared secret is claimed. Key generation stays in software so the
- * private key keeps whatever provenance wolfCrypt gave it; the agreement is
- * where the scalar multiplication - and so all the time - actually is.
  * ------------------------------------------------------------------------ */
+
+/* Only the shared secret is claimed; key generation stays in software. */
 
 #ifdef HAVE_CURVE25519
 
 #include <mcuxClKey.h>
-#include <mcuxClEcc.h>
 
 #ifdef WOLFSSL_ELS_PKC_COUNTERS
 unsigned long wc_ElsPkc_X25519OffloadCount = 0;
