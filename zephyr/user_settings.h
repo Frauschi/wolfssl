@@ -316,16 +316,83 @@ extern "C" {
 /* ECC */
 #if defined(CONFIG_WOLFSSL_ECC)
     #define HAVE_ECC
-    #define ECC_USER_CURVES      /* Enable only ECC curves specific */
-    #undef  NO_ECC256            /* Enable SECP256R1 only (on by default) */
+    #define ECC_USER_CURVES      /* only the curves selected below */
     #define ECC_TIMING_RESISTANT /* Enable Timing Resistance */
 
+    /* Under ECC_USER_CURVES only the curves named here are compiled in, with
+     * one asymmetry: P-256 is on by default, so it is turned OFF by *defining*
+     * NO_ECC256 rather than by not asking for it. */
+    #if defined(CONFIG_WOLFSSL_ECC_256)
+        #undef  NO_ECC256
+    #else
+        #define NO_ECC256
+    #endif
+    #if defined(CONFIG_WOLFSSL_ECC_192)
+        #define HAVE_ECC192
+    #endif
+    #if defined(CONFIG_WOLFSSL_ECC_224)
+        #define HAVE_ECC224
+    #endif
+    #if defined(CONFIG_WOLFSSL_ECC_384)
+        #define HAVE_ECC384
+    #endif
+    #if defined(CONFIG_WOLFSSL_ECC_320)
+        #define HAVE_ECC320
+    #endif
+    #if defined(CONFIG_WOLFSSL_ECC_512)
+        #define HAVE_ECC512
+    #endif
+    #if defined(CONFIG_WOLFSSL_ECC_521)
+        #define HAVE_ECC521
+    #endif
+    /* Koblitz and Brainpool are not prime-field NIST curves, and wolfCrypt
+     * refuses to build either without the custom-curve support that carries
+     * them - it is a hard #error in ecc.c, not a silent omission. Pull it in
+     * here rather than making every consumer discover that for itself. */
+    #if defined(CONFIG_WOLFSSL_ECC_KOBLITZ) || \
+        defined(CONFIG_WOLFSSL_ECC_BRAINPOOL)
+        #define WOLFSSL_CUSTOM_CURVES
+    #endif
+    #if defined(CONFIG_WOLFSSL_ECC_KOBLITZ)
+        #define HAVE_ECC_KOBLITZ
+    #endif
+    #if defined(CONFIG_WOLFSSL_ECC_BRAINPOOL)
+        #define HAVE_ECC_BRAINPOOL
+    #endif
+
+    #if !defined(HAVE_ECC192) && !defined(HAVE_ECC224) && \
+        defined(NO_ECC256)   && !defined(HAVE_ECC320) && \
+        !defined(HAVE_ECC384) && !defined(HAVE_ECC512) && \
+        !defined(HAVE_ECC521)
+        /* Otherwise MAX_ECC_BITS_NEEDED never gets defined and the failure
+         * surfaces as an undeclared identifier inside ecc.h, pointing nowhere
+         * near the configuration choice that caused it. */
+        #error CONFIG_WOLFSSL_ECC requires at least one curve to be selected
+    #endif
+
+    /* Must be no larger than the smallest curve enabled above: wolfCrypt
+     * drops any curve below this bound from its table, so a mismatch makes an
+     * enabled curve vanish with no diagnostic. */
+    #if defined(CONFIG_WOLFSSL_ECC_MIN_KEY_SZ)
+        #define WOLFSSL_MIN_ECC_BITS CONFIG_WOLFSSL_ECC_MIN_KEY_SZ
+
+        /* The guard above counts selected curves; this one counts those that
+         * survive, since wolfCrypt gates each table entry on the minimum too.
+         * P-192 with a 256-bit minimum passes the first and leaves no table. */
+        #if (!defined(HAVE_ECC192) || (WOLFSSL_MIN_ECC_BITS > 192)) && \
+            (!defined(HAVE_ECC224) || (WOLFSSL_MIN_ECC_BITS > 224)) && \
+            ( defined(NO_ECC256)   || (WOLFSSL_MIN_ECC_BITS > 256)) && \
+            (!defined(HAVE_ECC320) || (WOLFSSL_MIN_ECC_BITS > 320)) && \
+            (!defined(HAVE_ECC384) || (WOLFSSL_MIN_ECC_BITS > 384)) && \
+            (!defined(HAVE_ECC512) || (WOLFSSL_MIN_ECC_BITS > 512)) && \
+            (!defined(HAVE_ECC521) || (WOLFSSL_MIN_ECC_BITS > 521))
+            #error CONFIG_WOLFSSL_ECC_MIN_KEY_SZ excludes every selected curve
+        #endif
+    #endif
+
     //#define ECC_SHAMIR         /* Optional ECC calculation speed improvement if not using SP implementation */
-    //#define WOLFSSL_CUSTOM_CURVES /* enable other curves (not just prime) */
     //#define HAVE_ECC_SECPR2
     //#define HAVE_ECC_SECPR3
-    //#define HAVE_ECC_BRAINPOOL
-    //#define HAVE_ECC_KOBLITZ
     //#define HAVE_ECC_CDH /* Co-factor */
     //#define HAVE_COMP_KEY /* Compressed key support */
     //#define FP_ECC /* Fixed point caching - speed repeated operations against same key */
@@ -533,7 +600,22 @@ extern "C" {
 /* Math Options */
 /* Multi-precision - generic math for all keys sizes and curves */
 #if 1
-    #define WOLFSSL_SP_MATH /* no multi-precision math, only single */
+    /* SP math implements curves individually: P-256 always, P-384 and P-521
+     * behind their own switches, nothing for 192, 224, 320 or 512, and no path
+     * for an arbitrary curve. A size SP lacks is not a build failure - every
+     * operation on it fails at runtime with WC_KEY_SIZE_E - so move to the
+     * generic variant instead. */
+    #if defined(WOLFSSL_CUSTOM_CURVES) || defined(HAVE_ECC192) || \
+        defined(HAVE_ECC224) || defined(HAVE_ECC320) || defined(HAVE_ECC512)
+        /* The generic variant costs size and speed on the common curves,
+         * which is why Koblitz and Brainpool are opt-in. */
+        #define WOLFSSL_SP_MATH_ALL
+        /* SP_INT_BITS is left to sp_int.h, which derives it from the enabled
+         * algorithms and always lands at or above what this module needs.
+         * Naming a value here could only lower that ceiling. */
+    #else
+        #define WOLFSSL_SP_MATH /* no multi-precision math, only single */
+    #endif
 #elif 1
     /* wolf mp math (sp_int.c) */
     #define WOLFSSL_SP_MATH_ALL /* use SP math for all key sizes and curves */
@@ -576,9 +658,17 @@ extern "C" {
 #if 1
     #ifdef HAVE_ECC
         #define WOLFSSL_HAVE_SP_ECC
-        //#define WOLFSSL_SP_NO_256
-        //#define WOLFSSL_SP_384
-        //#define WOLFSSL_SP_521
+        /* Selecting a curve without its SP switch leaves it in wolfCrypt's
+         * table with no math behind it and no build diagnostic. */
+        #if defined(NO_ECC256)
+            #define WOLFSSL_SP_NO_256
+        #endif
+        #if defined(HAVE_ECC384)
+            #define WOLFSSL_SP_384
+        #endif
+        #if defined(HAVE_ECC521)
+            #define WOLFSSL_SP_521
+        #endif
     #endif
     #ifndef NO_RSA
         #define WOLFSSL_HAVE_SP_RSA
