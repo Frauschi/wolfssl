@@ -19,3 +19,26 @@ tests:
     extra_args: CONF_FILE="prj-no-malloc.conf"
     integration_platforms:
       - qemu_x86
+  sample.crypto.wolfssl_test_ecc_nist:
+    timeout: 400
+    platform_allow: qemu_x86
+    extra_args: CONF_FILE="prj.conf;prj-ecc-nist.conf"
+    integration_platforms:
+      - qemu_x86
+  sample.crypto.wolfssl_test_ecc_small:
+    timeout: 400
+    platform_allow: qemu_x86
+    extra_args: CONF_FILE="prj.conf;prj-ecc-small.conf"
+    integration_platforms:
+      - qemu_x86
+  sample.crypto.wolfssl_test_ecc_custom:
+    # Koblitz and Brainpool force the generic SP backend, which is slower
+    # than the per-curve one, and this runs the whole suite over eight curves
+    # under QEMU. (An earlier 600s expiry here was a genuine ECC failure the
+    # harness could not distinguish from slowness - the run never printed a
+    # return code, so it waited out the clock.)
+    timeout: 1800
+    platform_allow: qemu_x86
+    extra_args: CONF_FILE="prj.conf;prj-ecc-custom.conf"
+    integration_platforms:
+      - qemu_x86
