@@ -178,7 +178,7 @@ WOLFSSL_API extern unsigned long wc_ElsPkc_HashOffloadCount;
 #ifndef NO_AES
 WOLFSSL_API extern unsigned long wc_ElsPkc_AesOffloadCount;
 #endif
-#ifdef HAVE_AESGCM
+#if defined(HAVE_AESGCM) && !defined(NO_AES)
 WOLFSSL_API extern unsigned long wc_ElsPkc_GcmOffloadCount;
 #endif
 #if defined(WOLFSSL_CMAC) && !defined(NO_AES)
@@ -190,26 +190,26 @@ WOLFSSL_API extern unsigned long wc_ElsPkc_RngOffloadCount;
 #ifdef HAVE_ECC
 WOLFSSL_API extern unsigned long wc_ElsPkc_EccOffloadCount;
 #endif
+#ifndef NO_RSA
+WOLFSSL_API extern unsigned long wc_ElsPkc_RsaOffloadCount;
+#endif
+#ifdef HAVE_CURVE25519
+WOLFSSL_API extern unsigned long wc_ElsPkc_X25519OffloadCount;
+#endif
+#endif /* WOLFSSL_ELS_PKC_COUNTERS */
 
 /* Bring the EdgeLock subsystem up and register the crypto callback.
- *
- * Must run after wolfCrypt_Init(), which calls wc_CryptoCb_Init() and zeroes
- * the device table - registering before that point is silently undone.
- *
- * Safe to call more than once; subsequent calls are no-ops. */
+ * wolfCrypt_Init() already does this; call it directly only to re-register
+ * after a wolfCrypt_Cleanup(). Safe to call more than once. */
 WOLFSSL_API int wc_ElsPkc_Init(void);
 
 /* Unregister the callback and release the lock. */
 WOLFSSL_API int wc_ElsPkc_Cleanup(void);
 
-/* The crypto callback itself. Exposed so an application that wants a different
- * device id, or several devices, can register it by hand.
- *
- * Registering does not by itself route anything here: wolfCrypt selects a
- * device per key or per context. An application opts in by initialising with
- * this devId, e.g. wc_InitSha256_ex(&sha, NULL, WOLFSSL_ELS_PKC_DEVID) or
- * wc_AesInit(&aes, NULL, WOLFSSL_ELS_PKC_DEVID). Contexts initialised with
- * INVALID_DEVID keep using software. */
+/* The crypto callback itself, exposed so an application can register it under
+ * a different device id. Registering routes nothing by itself: a context opts
+ * in by being initialised with this devId, e.g. wc_AesInit(&aes, NULL,
+ * WOLFSSL_ELS_PKC_DEVID). */
 WOLFSSL_API int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx);
 
 #ifdef __cplusplus
