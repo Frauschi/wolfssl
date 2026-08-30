@@ -50,11 +50,12 @@
 #include <errno.h>
 
 #include <zephyr/init.h>
-#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 
 #include <wolfssl/wolfcrypt/wc_port.h>
-#include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
+
+LOG_MODULE_REGISTER(wolfssl_els_pkc, CONFIG_WOLFSSL_LOG_LEVEL);
 
 static int wolfssl_els_pkc_init(void)
 {
@@ -64,11 +65,24 @@ static int wolfssl_els_pkc_init(void)
      * callback cannot be registered before it. */
     ret = wolfCrypt_Init();
     if (ret != 0) {
+        /* Log rather than rely on the return value. Zephyr passes a non-device
+         * SYS_INIT result only to a trace hook - it does not log it, assert on
+         * it, or stop the boot - so without this the system comes up with no
+         * callback registered and every operation quietly running in software.
+         * A broken init is exactly the case that otherwise leaves no evidence,
+         * and the wolfCrypt code says which of the two steps failed. */
+        LOG_ERR("wolfCrypt_Init failed: %d", ret);
         return -EIO;
     }
 
     ret = wc_ElsPkc_Init();
     if (ret != 0) {
+        /* Undo the first step rather than leave wolfCrypt half up. The boot
+         * does not stop on a SYS_INIT failure, so the alternative is running
+         * on an initialised wolfCrypt with no callback registered - worse
+         * than running on none, because it looks like it worked. */
+        LOG_ERR("wc_ElsPkc_Init failed: %d", ret);
+        (void)wolfCrypt_Cleanup();
         return -EIO;
     }
 
@@ -80,4 +94,4 @@ static int wolfssl_els_pkc_init(void)
  * bring-up has already run. */
 SYS_INIT(wolfssl_els_pkc_init, POST_KERNEL, 99);
 
-#endif /* WOLFSSL_ELS_PKC */
+#endif /* WOLFSSL_ELS_PKC && CONFIG_WOLFSSL_ELS_PKC */
