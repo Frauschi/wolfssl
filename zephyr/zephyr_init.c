@@ -39,7 +39,13 @@
  * port actually uses keeps the two in step either way. */
 #include <wolfssl/wolfcrypt/settings.h>
 
-#ifdef WOLFSSL_ELS_PKC
+/* Both symbols, deliberately. The C macro alone is what the port keys off,
+ * but CMakeLists gates the port sources on the Kconfig symbol - so a user
+ * settings file that defines the macro without the Kconfig option would
+ * compile this hook against a port that is not in the build, and the failure
+ * would be an undefined reference to a private symbol rather than anything
+ * naming the missing option. */
+#if defined(WOLFSSL_ELS_PKC) && defined(CONFIG_WOLFSSL_ELS_PKC)
 
 #include <errno.h>
 

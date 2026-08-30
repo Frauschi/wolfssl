@@ -124,6 +124,13 @@ config WOLFSSL_ELS_PKC
 	  Operations the hardware does not implement fall back to software, so
 	  enabling this never removes functionality.
 
+	  Enabling this option alone offloads nothing. The crypto callback is
+	  bound to a device id, so each context has to be created with the
+	  port's: wc_InitSha256_ex(&sha, NULL, WOLFSSL_ELS_PKC_DEVID),
+	  wc_AesInit(&aes, NULL, WOLFSSL_ELS_PKC_DEVID), or
+	  wolfSSL_CTX_SetDevId() for TLS. A context created with INVALID_DEVID
+	  stays in software, and a benchmark that does so measures no change.
+
 	  Not available in a TF-M build: els_pkc only creates its McuxElsPkc
 	  CMake target when TF-M is off, even though it defaults MCUX_ELS_PKC
 	  on for TF-M builds.
@@ -201,7 +208,161 @@ config WOLFSSL_ECC
   bool "wolfCrypt ECC support"
   default y
   help
-    Enable ECC (HAVE_ECC, SECP256R1).
+    Enable ECC (HAVE_ECC). At least one curve must be selected below - a
+    build with none is rejected, because wolfCrypt has no curve table to
+    size its types from.
+
+if WOLFSSL_ECC
+
+config WOLFSSL_ECC_192
+  bool "SECP192R1 (P-192)"
+  help
+    Enable the NIST P-192 curve (HAVE_ECC192). SP math has no implementation
+    at this size, so selecting it forces the generic SP variant.
+
+    P-192 is below every current recommendation and is offered for
+    interoperability with existing deployments only. Selecting it also lowers
+    WOLFSSL_ECC_MIN_KEY_SZ to 192, because wolfCrypt filters curves smaller
+    than that minimum out of its curve table and the option would otherwise
+    appear to do nothing.
+
+config WOLFSSL_ECC_224
+  bool "SECP224R1 (P-224)"
+  help
+    Enable the NIST P-224 curve (HAVE_ECC224). SP math has no implementation
+    at this size, so selecting it forces the generic SP variant.
+
+config WOLFSSL_ECC_256
+  bool "SECP256R1 (P-256)"
+  default y
+  help
+    Enable the NIST P-256 curve. This is the curve TLS uses by default and
+    the only one the NXP EdgeLock key store can hold, so leave it on unless
+    you know the whole application avoids it.
+
+config WOLFSSL_ECC_384
+  bool "SECP384R1 (P-384)"
+  help
+    Enable the NIST P-384 curve (HAVE_ECC384 and the SP implementation
+    behind WOLFSSL_SP_384).
+
+    Enabling a curve larger than P-256 raises MAX_ECC_BYTES, so every ECC
+    key, signature buffer and temporary grows accordingly - including on the
+    stack. Size thread stacks for the largest curve selected.
+
+config WOLFSSL_ECC_320
+  bool "320-bit curves"
+  help
+    Enable the 320-bit curve size (HAVE_ECC320). There is no NIST curve at
+    this size - it exists for brainpoolP320r1, so it is only useful together
+    with WOLFSSL_ECC_BRAINPOOL.
+
+    SP math has no implementation at this size, so selecting it moves the
+    build onto the generic variant; see WOLFSSL_ECC_KOBLITZ for what that
+    costs.
+
+config WOLFSSL_ECC_512
+  bool "512-bit curves"
+  help
+    Enable the 512-bit curve size (HAVE_ECC512). As with WOLFSSL_ECC_320
+    there is no NIST curve at this size; it exists for brainpoolP512r1, and
+    it likewise forces the generic SP variant.
+
+config WOLFSSL_ECC_521
+  bool "SECP521R1 (P-521)"
+  help
+    Enable the NIST P-521 curve (HAVE_ECC521 and the SP implementation
+    behind WOLFSSL_SP_521). This sets the largest MAX_ECC_BYTES of any
+    supported curve.
+
+    Its SP implementation is also the most stack-hungry: a thread signing on
+    P-521 overflowed a 16 KB stack during bring-up and needed roughly three
+    times that. Raise CONFIG_MAIN_STACK_SIZE and any relevant thread stack
+    accordingly.
+
+config WOLFSSL_ECC_KOBLITZ
+  bool "Koblitz curves (secp224k1, secp256k1)"
+  select WOLFSSL_ECC_521
+  help
+    Enable the Koblitz curve variants (HAVE_ECC_KOBLITZ), including
+    secp256k1.
+
+    Each Koblitz curve additionally requires its matching size to be
+    enabled: secp256k1 needs WOLFSSL_ECC_256 and secp224k1 needs
+    WOLFSSL_ECC_224. Selecting this alone adds nothing. The 160-bit and
+    192-bit Koblitz curves are not reachable from this menu, which offers no
+    160-bit size and filters 192 out through WOLFSSL_ECC_MIN_KEY_SZ.
+
+    Implies WOLFSSL_CUSTOM_CURVES, which wolfCrypt requires for any
+    non-prime-field curve and which adds the generic curve-parameter code.
+    Selects WOLFSSL_ECC_521 for a reason that is not obvious. wolfCrypt sizes
+    its bignum ceiling from the largest enabled curve, and every curve in
+    these two families lands exactly on a 64-bit digit boundary - 256, 320,
+    384 and 512 bits. The generic path needs a little more than the modulus
+    for its intermediates, so an exact fit is refused as a key-size error at
+    runtime. The NIST curves never show this because SP answers for them
+    before the generic path runs. Enabling P-521 lifts the ceiling clear of
+    every curve here.
+
+    This select cannot be turned off, and it is not free: P-521 raises
+    MAX_ECC_BITS for every ECC key, signature buffer and stack temporary in
+    the build, and pulls in the SP P-521 implementation with the stack
+    appetite described under WOLFSSL_ECC_521. Raising the ceiling any other
+    way was tried and does not work - MAX_ECC_BITS_USE in ecc.c derives from
+    MAX_ECC_BITS_NEEDED, which is computed purely from the enabled HAVE_ECCxxx
+    set, so neither MAX_ECC_BITS nor SP_INT_BITS can lift it.
+
+config WOLFSSL_ECC_BRAINPOOL
+  bool "Brainpool curves"
+  select WOLFSSL_ECC_521
+  help
+    Enable the Brainpool curve family (HAVE_ECC_BRAINPOOL). As with the
+    Koblitz curves, each one also needs its matching size enabled, and this
+    likewise implies WOLFSSL_CUSTOM_CURVES.
+
+    brainpoolP256r1 needs WOLFSSL_ECC_256, brainpoolP320r1 needs
+    WOLFSSL_ECC_320, brainpoolP384r1 needs WOLFSSL_ECC_384 and
+    brainpoolP512r1 needs WOLFSSL_ECC_512. The 320 and 512 sizes exist for
+    these curves alone.
+    Selects WOLFSSL_ECC_521 for a reason that is not obvious. wolfCrypt sizes
+    its bignum ceiling from the largest enabled curve, and every curve in
+    these two families lands exactly on a 64-bit digit boundary - 256, 320,
+    384 and 512 bits. The generic path needs a little more than the modulus
+    for its intermediates, so an exact fit is refused as a key-size error at
+    runtime. The NIST curves never show this because SP answers for them
+    before the generic path runs. Enabling P-521 lifts the ceiling clear of
+    every curve here.
+
+    This select cannot be turned off, and it is not free: P-521 raises
+    MAX_ECC_BITS for every ECC key, signature buffer and stack temporary in
+    the build, and pulls in the SP P-521 implementation with the stack
+    appetite described under WOLFSSL_ECC_521. Raising the ceiling any other
+    way was tried and does not work - MAX_ECC_BITS_USE in ecc.c derives from
+    MAX_ECC_BITS_NEEDED, which is computed purely from the enabled HAVE_ECCxxx
+    set, so neither MAX_ECC_BITS nor SP_INT_BITS can lift it.
+
+config WOLFSSL_ECC_MIN_KEY_SZ
+  int "Minimum accepted ECC key size (bits)"
+  default 192 if WOLFSSL_ECC_192
+  default 224
+  range 112 520
+  help
+    Sets WOLFSSL_MIN_ECC_BITS. This has two effects, and the second is easy
+    to miss.
+
+    It drops any curve smaller than this from wolfCrypt's table, so it must
+    be no larger than the smallest curve enabled above or that curve silently
+    disappears.
+
+    It is also the minimum ECC key the TLS layer will accept from a peer, so
+    lowering it widens which peer certificates the stack considers
+    acceptable - a security decision, not just a curve-availability one.
+
+    Must be a multiple of 8; wolfSSL rejects anything else with a hard build
+    error from inside internal.h. The range stops short of 521 for that
+    reason - P-521 keys are accepted under a 520-bit minimum.
+
+endif # WOLFSSL_ECC
 
 config WOLFSSL_CHACHA_POLY
   bool "wolfCrypt ChaCha20-Poly1305 support"
@@ -304,6 +465,10 @@ config WOLFSSL_INSTALL_PATH
 	  This option holds the path where the wolfSSL libraries and headers are
 	  installed. Make sure this option is properly set when WOLFSSL_LIBRARY
 	  is enabled otherwise the build will fail.
+
+module = WOLFSSL
+module-str = wolfssl
+source "subsys/logging/Kconfig.template.log_config"
 
 config APP_LINK_WITH_WOLFSSL
 	bool "Link 'app' with WOLFSSL"
