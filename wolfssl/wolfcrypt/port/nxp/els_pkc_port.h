@@ -190,6 +190,9 @@ WOLFSSL_API extern unsigned long wc_ElsPkc_RngOffloadCount;
 #ifdef HAVE_ECC
 WOLFSSL_API extern unsigned long wc_ElsPkc_EccOffloadCount;
 #endif
+#if defined(HAVE_ECC) && defined(HAVE_ECC_SIGN)
+WOLFSSL_API extern unsigned long wc_ElsPkc_EccPkcOffloadCount;
+#endif
 #ifndef NO_RSA
 WOLFSSL_API extern unsigned long wc_ElsPkc_RsaOffloadCount;
 #endif
