@@ -1495,14 +1495,26 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
  * ELS key store cannot hold: RSA at any size, and the curves beyond P-256.
  * ------------------------------------------------------------------------ */
 
-#if !defined(NO_RSA)
+/* The session, its workareas and the DRBG are shared by every PKC consumer -
+ * RSA, ECDSA and X25519 - so this section is guarded on the union of them, not
+ * on RSA alone. Guarding it on RSA happened to work only because every
+ * configuration tested first had RSA enabled. */
+#if !defined(NO_RSA) || defined(HAVE_ECC) || defined(HAVE_CURVE25519)
+#define ELS_PKC_HAVE_SESSION
 
 #include <mcuxClSession.h>
 #include <mcuxClPkc_Types.h>   /* MCUXCLPKC_PACKARGS4, used by the ECC
                                 * domain-parameter packing macro */
 #include <mcuxClRandom.h>
 #include <mcuxClRandomModes.h>
-#include <mcuxClRsa.h>
+#ifdef HAVE_ECC
+    #include <mcuxClEcc.h>     /* here, not in the X25519 block below: the
+                                * ECDSA code needs it whether or not the
+                                * Montgomery curves are built */
+#endif
+#ifndef NO_RSA
+    #include <mcuxClRsa.h>
+#endif
 
 /* Fixed PKC RAM window on rw61x. Mirrored from the vendor platform header so a
  * build that does not export ip_platform.h still gets the right region; the
@@ -1594,6 +1606,8 @@ static int ElsPkcSessionOpen(mcuxClSession_Descriptor_t* sess)
 
     return ret;
 }
+
+#ifndef NO_RSA
 
 /* Export an mp_int as a fixed-width big-endian string, which is the only form
  * the vendor key entries accept. */
@@ -1774,6 +1788,8 @@ static int ElsPkcRsaFunction(const byte* in, word32 inLen, byte* out,
 
 #endif /* !NO_RSA */
 
+#endif /* ELS_PKC_HAVE_SESSION */
+
 /* ---------------------------------------------------------------------------
  * X25519
  *
@@ -1789,7 +1805,6 @@ static int ElsPkcRsaFunction(const byte* in, word32 inLen, byte* out,
 #ifdef HAVE_CURVE25519
 
 #include <mcuxClKey.h>
-#include <mcuxClEcc.h>
 
 unsigned long wc_ElsPkc_X25519OffloadCount = 0;
 
