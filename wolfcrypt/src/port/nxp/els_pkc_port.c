@@ -1498,6 +1498,8 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
 #if !defined(NO_RSA)
 
 #include <mcuxClSession.h>
+#include <mcuxClPkc_Types.h>   /* MCUXCLPKC_PACKARGS4, used by the ECC
+                                * domain-parameter packing macro */
 #include <mcuxClRandom.h>
 #include <mcuxClRandomModes.h>
 #include <mcuxClRsa.h>
@@ -1524,16 +1526,25 @@ unsigned long wc_ElsPkc_RsaOffloadCount = 0;
 static uint32_t elsPkcCpuWa[(WOLFSSL_ELS_PKC_CPU_WA_SZ + 3u) / 4u];
 static uint32_t elsPkcRngCtx[64];
 
-/* The DRBG the PKC operations draw from is the ELS one, so randomness for
- * blinding and for ECDSA nonces comes from the same hardware. Caller holds the
- * lock. */
+/* The DRBG the PKC operations draw from.
+ *
+ * Not the ELS one, though that is the obvious choice and was the first: the
+ * ELS DRBG's security strength is hardware-defined and on this part it is 128
+ * bits, so mcuxClEcc_Sign refuses any curve needing more and returns
+ * RNG_ERROR. P-256 and secp256k1 work, P-384 and P-521 do not - a failure
+ * that names the random source rather than the curve, which is not where you
+ * look first.
+ *
+ * The CTR_DRBG at 256 bits covers every curve the module can select, so the
+ * PKC tier uses it throughout rather than choosing per operation. Caller holds
+ * the lock. */
 static int ElsPkcRandomInit(mcuxClSession_Descriptor_t* sess)
 {
     XMEMSET(elsPkcRngCtx, 0, sizeof(elsPkcRngCtx));
 
     MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(rr, rt, mcuxClRandom_init(
         sess, (mcuxClRandom_Context_t)elsPkcRngCtx,
-        mcuxClRandomModes_Mode_ELS_Drbg));
+        mcuxClRandomModes_Mode_CtrDrbg_AES256_DRG3));
     if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClRandom_init) != rt) ||
         (MCUXCLRANDOM_STATUS_OK != rr)) {
         return WC_NO_ERR_TRACE(WC_HW_E);
@@ -1915,6 +1926,358 @@ static int ElsPkcX25519(curve25519_key* privKey, curve25519_key* pubKey,
 #endif /* HAVE_CURVE25519 */
 
 /* ---------------------------------------------------------------------------
+ * ECDSA on the PKC
+ *
+ * The ELS tier serves P-256 with a key that lives in a slot. This serves every
+ * other curve wolfCrypt is built with, using ordinary key material - so the
+ * two do not overlap and the dispatch simply tries ELS first.
+ *
+ * Unlike ELS, the PKC has no built-in notion of a curve: every operation takes
+ * a, b, p, G and n as octet strings. wolfCrypt keeps those as hex strings, so
+ * they are converted into shared scratch under the lock rather than onto the
+ * stack, which would otherwise cost around half a kilobyte per call.
+ * ------------------------------------------------------------------------ */
+
+#if defined(HAVE_ECC) && defined(HAVE_ECC_SIGN)
+
+#define ELS_PKC_ECC_MAX_P MCUXCLECC_WEIERECC_MAX_SIZE_PRIMEP
+#define ELS_PKC_ECC_MAX_N MCUXCLECC_WEIERECC_MAX_SIZE_BASEPOINTORDER
+
+unsigned long wc_ElsPkc_EccPkcOffloadCount = 0;
+
+/* Curve constants for the operation in flight. Caller holds the lock. */
+static struct {
+    ALIGN32 byte a[ELS_PKC_ECC_MAX_P];
+    ALIGN32 byte b[ELS_PKC_ECC_MAX_P];
+    ALIGN32 byte p[ELS_PKC_ECC_MAX_P];
+    ALIGN32 byte g[2 * ELS_PKC_ECC_MAX_P];
+    ALIGN32 byte n[ELS_PKC_ECC_MAX_N];
+} elsPkcCurve;
+
+/* PrecG is (2^(byteLenN*4))*G - an input verification needs, which neither
+ * wolfCrypt nor the vendor library ships, and which costs a scalar
+ * multiplication to derive. Computed on first use and kept.
+ *
+ * One entry: alternating curves recomputes it, which is fine because P-256
+ * verification never reaches here at all - the ELS tier answers it first. */
+static struct {
+    ALIGN32 byte precG[2 * ELS_PKC_ECC_MAX_P];
+    int    curveId;
+    word32 lenP;
+} elsPkcPrecG;
+
+/* wolfCrypt stores curve constants as hex text; the engine wants fixed-width
+ * big-endian octets with leading zeros. */
+static int ElsPkcHexToBin(const char* hex, byte* out, word32 len)
+{
+    mp_int t;
+    int ret;
+
+    if (hex == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    ret = mp_init(&t);
+    if (ret != 0) {
+        return ret;
+    }
+    ret = mp_read_radix(&t, hex, MP_RADIX_HEX);
+    if (ret == 0) {
+        ret = mp_to_unsigned_bin_len(&t, out, (int)len);
+    }
+    mp_clear(&t);
+
+    return ret;
+}
+
+/* Marshal a wolfCrypt curve into the engine's parameter block. */
+static int ElsPkcLoadCurve(const ecc_key* key, mcuxClEcc_DomainParam_t* dp,
+                           word32* lenPOut)
+{
+    const ecc_set_type* set;
+    word32 lenP;
+    int ret;
+
+    if (key == NULL || key->dp == NULL) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    set  = key->dp;
+    lenP = (word32)set->size;
+    if (lenP == 0 || lenP > ELS_PKC_ECC_MAX_P) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    ret = ElsPkcHexToBin(set->Af, elsPkcCurve.a, lenP);
+    if (ret == 0) ret = ElsPkcHexToBin(set->Bf,    elsPkcCurve.b, lenP);
+    if (ret == 0) ret = ElsPkcHexToBin(set->prime, elsPkcCurve.p, lenP);
+    if (ret == 0) ret = ElsPkcHexToBin(set->Gx,    elsPkcCurve.g, lenP);
+    if (ret == 0) ret = ElsPkcHexToBin(set->Gy,    elsPkcCurve.g + lenP, lenP);
+    /* The order is carried at the same width as the prime. That holds for
+     * every curve this module can select; one whose order needs more bytes
+     * than its prime would silently truncate here, so refuse it instead. */
+    if (ret == 0) ret = ElsPkcHexToBin(set->order, elsPkcCurve.n, lenP);
+    if (ret != 0) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    /* Both leading bytes must be nonzero per the engine's contract. */
+    if (elsPkcCurve.p[0] == 0 || elsPkcCurve.n[0] == 0) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    dp->pA = elsPkcCurve.a;
+    dp->pB = elsPkcCurve.b;
+    dp->pP = elsPkcCurve.p;
+    dp->pG = elsPkcCurve.g;
+    dp->pN = elsPkcCurve.n;
+    dp->misc = mcuxClEcc_DomainParam_misc_Pack(lenP, lenP);
+
+    *lenPOut = lenP;
+
+    return 0;
+}
+
+static int ElsPkcEccSignRun(mcuxClSession_Descriptor_t* sess,
+                            mcuxClEcc_Sign_Param_t* prm)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEcc_Sign(sess, prm));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEcc_Sign) != t) ||
+        (MCUXCLECC_STATUS_OK != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return 0;
+}
+
+static int ElsPkcEccSign(const byte* in, word32 inlen, byte* out,
+                         word32* outlen, ecc_key* key)
+{
+    mcuxClSession_Descriptor_t sess;
+    mcuxClEcc_Sign_Param_t prm;
+    ALIGN32 byte priv[ELS_PKC_ECC_MAX_N];
+    ALIGN32 byte sig[2 * ELS_PKC_ECC_MAX_N];
+    ALIGN32 byte hash[ELS_PKC_ECC_MAX_N];
+    word32 lenP = 0, privSz;
+    int ret;
+
+    if (in == NULL || out == NULL || outlen == NULL || key == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    /* byteLenHash occupies eight bits of optLen. */
+    if (inlen == 0 || inlen > 255) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = ElsPkcLoadCurve(key, &prm.curveParam, &lenP);
+
+    if (ret == 0) {
+        privSz = lenP;
+        if (wc_ecc_export_private_only(key, priv, &privSz) != 0 ||
+            privSz != lenP) {
+            ret = WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+        }
+    }
+
+    if (ret == 0) {
+        XMEMCPY(hash, in, inlen);
+
+        prm.pHash       = hash;
+        prm.pPrivateKey = priv;
+        prm.pSignature  = sig;
+        prm.optLen      = mcuxClEcc_Sign_Param_optLen_Pack(inlen);
+        prm.pMode       = &mcuxClEcc_ECDSA_ProtocolDescriptor;
+
+        ret = ElsPkcSessionOpen(&sess);
+        if (ret == 0) {
+            ret = ElsPkcEccSignRun(&sess, &prm);
+        }
+    }
+
+    ElsUnlock();
+
+    if (ret == 0) {
+        /* raw R||S out of the engine, DER at the callback boundary */
+        ret = StoreECC_DSA_Sig_Bin(out, outlen, sig, lenP, sig + lenP, lenP);
+        if (ret == 0) {
+            wc_ElsPkc_EccPkcOffloadCount++;
+        }
+    }
+
+    ForceZero(priv, sizeof(priv));
+    ForceZero(hash, sizeof(hash));
+
+    return ret;
+}
+
+#ifdef HAVE_ECC_VERIFY
+
+static int ElsPkcPointMultRun(mcuxClSession_Descriptor_t* sess,
+                              mcuxClEcc_PointMult_Param_t* prm)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEcc_PointMult(sess, prm));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEcc_PointMult) != t) ||
+        (MCUXCLECC_STATUS_OK != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return 0;
+}
+
+/* Derive PrecG = (2^(byteLenN*4))*G for the loaded curve and keep it.
+ * Caller holds the lock and has loaded the curve. */
+static int ElsPkcPrecGet(mcuxClSession_Descriptor_t* sess,
+                         const mcuxClEcc_DomainParam_t* dp, int curveId,
+                         word32 lenP)
+{
+    mcuxClEcc_PointMult_Param_t prm;
+    ALIGN32 byte scalar[ELS_PKC_ECC_MAX_N];
+    int ret;
+
+    if (elsPkcPrecG.curveId == curveId && elsPkcPrecG.lenP == lenP) {
+        return 0;
+    }
+    /* The exponent byteLenN*4 is half the order's bit width, so the single set
+     * bit lands exactly halfway through the scalar. Only defined for an even
+     * byte length, which every selectable curve has. */
+    if ((lenP & 1u) != 0) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    XMEMSET(scalar, 0, sizeof(scalar));
+    scalar[lenP / 2u - 1u] = 0x01;
+
+    prm.curveParam = *dp;
+    prm.pScalar    = scalar;
+    prm.pPoint     = dp->pG;
+    prm.pResult    = elsPkcPrecG.precG;
+    prm.optLen     = 0u;
+
+    ret = ElsPkcPointMultRun(sess, &prm);
+    if (ret == 0) {
+        elsPkcPrecG.curveId = curveId;
+        elsPkcPrecG.lenP    = lenP;
+    }
+    else {
+        elsPkcPrecG.curveId = ECC_CURVE_INVALID;
+    }
+
+    return ret;
+}
+
+static int ElsPkcEccVerifyRun(mcuxClSession_Descriptor_t* sess,
+                              mcuxClEcc_Verify_Param_t* prm, int* res)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEcc_Verify(sess, prm));
+    if (MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEcc_Verify) != t) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    /* The two engines disagree about how a bad signature is reported. ELS says
+     * nothing in its status and expects the caller to compare the recomputed
+     * R; the PKC has a dedicated INVALID_SIGNATURE status, so here the status
+     * is the answer and a wrong signature is not an error. */
+    if (MCUXCLECC_STATUS_OK == r) {
+        *res = 1;
+    }
+    else if (MCUXCLECC_STATUS_INVALID_SIGNATURE == r) {
+        *res = 0;
+    }
+    else {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return 0;
+}
+
+static int ElsPkcEccVerify(const byte* sigDer, word32 sigLen,
+                           const byte* hashIn, word32 hashLen, int* res,
+                           ecc_key* key)
+{
+    mcuxClSession_Descriptor_t sess;
+    mcuxClEcc_Verify_Param_t prm;
+    ALIGN32 byte sig[2 * ELS_PKC_ECC_MAX_N];
+    ALIGN32 byte hash[ELS_PKC_ECC_MAX_N];
+    ALIGN32 byte pub[2 * ELS_PKC_ECC_MAX_P];
+    ALIGN32 byte rOut[ELS_PKC_ECC_MAX_N];
+    byte   x963[1 + 2 * ELS_PKC_ECC_MAX_P];
+    word32 x963Sz = sizeof(x963);
+    word32 lenP = 0, rLen, sLen;
+    int    ret;
+
+    if (sigDer == NULL || hashIn == NULL || res == NULL || key == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (hashLen == 0 || hashLen > 255) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    *res = 0;
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = ElsPkcLoadCurve(key, &prm.curveParam, &lenP);
+
+    if (ret == 0) {
+        rLen = lenP;
+        sLen = lenP;
+        if (DecodeECC_DSA_Sig_Bin(sigDer, sigLen, sig, &rLen,
+                                  sig + lenP, &sLen) != 0 ||
+            rLen != lenP || sLen != lenP) {
+            ret = WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+        }
+    }
+
+    if (ret == 0) {
+        if (wc_ecc_export_x963_ex(key, x963, &x963Sz, 0) != 0 ||
+            x963Sz != (1u + 2u * lenP) || x963[0] != 0x04) {
+            ret = WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+        }
+        else {
+            XMEMCPY(pub, x963 + 1, 2u * lenP);
+        }
+    }
+
+    if (ret == 0) {
+        XMEMCPY(hash, hashIn, hashLen);
+        ret = ElsPkcSessionOpen(&sess);
+    }
+    if (ret == 0) {
+        ret = ElsPkcPrecGet(&sess, &prm.curveParam, key->dp->id, lenP);
+    }
+    if (ret == 0) {
+        prm.pPrecG     = elsPkcPrecG.precG;
+        prm.pHash      = hash;
+        prm.pSignature = sig;
+        prm.pPublicKey = pub;
+        prm.pOutputR   = rOut;
+        prm.optLen     = mcuxClEcc_Verify_Param_optLen_Pack(hashLen);
+
+        ret = ElsPkcEccVerifyRun(&sess, &prm, res);
+    }
+
+    ElsUnlock();
+
+    if (ret == 0) {
+        wc_ElsPkc_EccPkcOffloadCount++;
+    }
+
+    ForceZero(hash, sizeof(hash));
+    ForceZero(rOut, sizeof(rOut));
+
+    return ret;
+}
+
+#endif /* HAVE_ECC_VERIFY */
+#endif /* HAVE_ECC && HAVE_ECC_SIGN */
+
+/* ---------------------------------------------------------------------------
  * Random
  *
  * The one genuinely stateless primitive here: ELS hands over DRBG output with
@@ -2280,9 +2643,17 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
     #endif
     #if defined(HAVE_ECC) && defined(HAVE_ECC_SIGN)
                 case WC_PK_TYPE_ECDSA_SIGN:
+                    /* ELS first: it answers only for a P-256 key that names a
+                     * slot, and declines everything else, which is exactly
+                     * the set the PKC tier covers. */
                     ret = ElsEccSign(info->pk.eccsign.in,
                             info->pk.eccsign.inlen, info->pk.eccsign.out,
                             info->pk.eccsign.outlen, info->pk.eccsign.key);
+                    if (ret == WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE)) {
+                        ret = ElsPkcEccSign(info->pk.eccsign.in,
+                                info->pk.eccsign.inlen, info->pk.eccsign.out,
+                                info->pk.eccsign.outlen, info->pk.eccsign.key);
+                    }
                     break;
     #endif
     #if defined(HAVE_ECC) && defined(HAVE_ECC_VERIFY)
@@ -2293,6 +2664,14 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
                             info->pk.eccverify.hashlen,
                             info->pk.eccverify.res,
                             info->pk.eccverify.key);
+                    if (ret == WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE)) {
+                        ret = ElsPkcEccVerify(info->pk.eccverify.sig,
+                                info->pk.eccverify.siglen,
+                                info->pk.eccverify.hash,
+                                info->pk.eccverify.hashlen,
+                                info->pk.eccverify.res,
+                                info->pk.eccverify.key);
+                    }
                     break;
     #endif
                 /* WC_PK_TYPE_ECDH is deliberately absent. ELS deposits the
