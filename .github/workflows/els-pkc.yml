@@ -1,4 +1,4 @@
-name: NXP EdgeLock (els_pkc) port cross-compile
+name: NXP EdgeLock (els_pkc) port
 
 # Cross-compile gate for the NXP EdgeLock (ELS + PKC) crypto callback port,
 # wolfcrypt/src/port/nxp/els_pkc_port.c.
@@ -36,6 +36,7 @@ on:
       - 'wolfssl/wolfcrypt/cryptocb.h'
       - 'configure.ac'
       - 'wolfcrypt/src/include.am'
+      - 'IDE/m33mu-rw612-port/**'
       - '.github/workflows/els-pkc.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -47,6 +48,7 @@ on:
       - 'wolfssl/wolfcrypt/cryptocb.h'
       - 'configure.ac'
       - 'wolfcrypt/src/include.am'
+      - 'IDE/m33mu-rw612-port/**'
       - '.github/workflows/els-pkc.yml'
 
 concurrency:
@@ -67,6 +69,9 @@ env:
   # mcux-sdk-ng verbatim and is the stable public source for them; a customer
   # points --with-mcux-sdk at their own MCUXpresso SDK install instead.
   HAL_NXP_REF: main
+  # m33mu emulates the Cortex-M33; see the emulated job for what it does and
+  # does not cover on RW612.
+  M33MU_REF: d5cf752
 
 jobs:
   cross_compile:
@@ -167,3 +172,81 @@ jobs:
       - name: ccache stats
         if: always()
         run: ccache -s || true
+
+  # WHAT: builds the bare-metal checks in IDE/m33mu-rw612-port against the same
+  #       cross-built library, and runs them on an emulated RW612 under m33mu.
+  # NOT:  this does NOT run the EdgeLock offload. m33mu's RW612 ELS uses a
+  #       register map invented for its own test firmware, so NXP's CLNS
+  #       library cannot run on it; the firmware links failing CLNS stubs
+  #       instead. What is covered is the key reference codec, the wrapped-key
+  #       container, that the port fails closed when the hardware fails, and
+  #       that the software path is undisturbed. The offload itself stays
+  #       validated on frdm_rw612 hardware.
+  emulated:
+    name: bare-metal checks under m33mu (--cpu rw612)
+    if: ${{ (github.repository_owner == 'wolfssl') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        name: Checkout wolfSSL
+
+      - name: Install dependencies
+        uses: ./.github/actions/install-apt-deps
+        with:
+          packages: autoconf automake libtool build-essential gcc-arm-none-eabi cmake
+          ghcr-debs-tag: ubuntu-24.04-minimal
+
+      - name: Fetch NXP els_pkc
+        run: |
+          git clone --depth 1 --branch "$ELS_PKC_REF" \
+            https://github.com/NXP/els_pkc.git "$RUNNER_TEMP/els_pkc"
+
+      - name: Fetch the RW612 device headers
+        run: |
+          git clone --depth 1 --branch "$HAL_NXP_REF" --filter=blob:none --sparse \
+            https://github.com/zephyrproject-rtos/hal_nxp.git "$RUNNER_TEMP/hal_nxp"
+          git -C "$RUNNER_TEMP/hal_nxp" sparse-checkout set \
+            mcux/mcux-sdk-ng/devices/Wireless/RW \
+            mcux/mcux-sdk-ng/drivers/common
+
+      # Pinned for the same reason the vendor trees are: an unrelated emulator
+      # change should not turn a wolfSSL pull request red.
+      - name: Build m33mu
+        run: |
+          git clone https://github.com/danielinux/m33mu.git "$RUNNER_TEMP/m33mu"
+          git -C "$RUNNER_TEMP/m33mu" checkout "$M33MU_REF"
+          # cargo is only needed for the external secure-element plugins, none
+          # of which this job uses.
+          cmake -S "$RUNNER_TEMP/m33mu" -B "$RUNNER_TEMP/m33mu/build" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/m33mu/build" -j"$(nproc)"
+          "$RUNNER_TEMP/m33mu/build/m33mu" --cpu list | grep -qx rw612
+
+      - name: Cross-build wolfSSL and run the checks
+        run: |
+          set -e
+          ./autogen.sh
+          ELS_PKC="$RUNNER_TEMP/els_pkc"
+          MCUX_SDK="$RUNNER_TEMP/hal_nxp/mcux/mcux-sdk-ng"
+
+          # -DNO_THREAD_LS: wolfCrypt_Init() guards recursion with a __thread
+          # variable, and bare-metal startup never sets the thread pointer, so
+          # without this it returns DEADLOCK_AVERTED_E before doing anything.
+          ./configure --host=arm-none-eabi --disable-shared --enable-static \
+            --enable-cryptonly --enable-cryptocb \
+            --enable-cryptocbutils=copy,free,keystore --enable-elspkckeyblob \
+            --enable-ecc --enable-aesgcm --enable-cmac \
+            --with-els-pkc="$ELS_PKC" --with-mcux-sdk="$MCUX_SDK" \
+            --disable-filesystem --enable-singlethreaded \
+            --disable-examples --disable-crypttests \
+            CFLAGS="-mcpu=cortex-m33+nodsp -mthumb -Os -ffreestanding --specs=nosys.specs" \
+            CPPFLAGS="-DWOLFSSL_NO_SOCK -DWOLFSSL_USER_IO -DNO_WRITEV -DNO_DEV_RANDOM -DNO_THREAD_LS"
+          make -j"$(nproc)"
+
+          make -C IDE/m33mu-rw612-port ELS_PKC="$ELS_PKC" MCUX_SDK="$MCUX_SDK"
+
+          # exit 0 only when BKPT 0x7f is reached; 1 otherwise, 127 on timeout.
+          "$RUNNER_TEMP/m33mu/build/m33mu" --cpu rw612 --uart-stdout \
+            --expect-bkpt 0x7f --timeout 60 IDE/m33mu-rw612-port/app.bin
+
