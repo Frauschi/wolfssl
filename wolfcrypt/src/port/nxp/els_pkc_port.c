@@ -1546,7 +1546,9 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
     #define WOLFSSL_ELS_PKC_CPU_WA_SZ 1024
 #endif
 
+#ifndef NO_RSA
 unsigned long wc_ElsPkc_RsaOffloadCount = 0;
+#endif
 
 static uint32_t elsPkcCpuWa[(WOLFSSL_ELS_PKC_CPU_WA_SZ + 3u) / 4u];
 static uint32_t elsPkcRngCtx[64];
@@ -3464,7 +3466,9 @@ int wc_ElsPkc_Cleanup(void)
              * paths can no longer take the lock to release them. The CMAC
              * pool also holds plaintext keys, which must not outlive a
              * shutdown. Any live wc_Sha256 or Cmac must be freed first. */
+#ifndef NO_SHA256
             ForceZero(elsHashPool, sizeof(elsHashPool));
+#endif
 #if defined(WOLFSSL_CMAC) && !defined(NO_AES)
             ForceZero(elsCmacPool, sizeof(elsCmacPool));
 #endif
