@@ -42,6 +42,19 @@
 
 #include <wolfssl/wolfcrypt/libwolfssl_sources.h>
 
+/* The port is compiled unconditionally, like every other wolfCrypt port, and
+ * everything below is gated on WOLFSSL_ELS_PKC - so without that macro this is
+ * an empty translation unit that reaches no vendor header.
+ *
+ * On Zephyr the vendor headers arrive with the els_pkc module, which is a
+ * separate choice from asking for the port. Asking for one without the other
+ * would otherwise fail as a missing mcuxClEls.h, naming a file rather than the
+ * option that was left out. */
+#if defined(WOLFSSL_ELS_PKC) && defined(__ZEPHYR__) && \
+    !defined(CONFIG_MCUX_ELS_PKC)
+    #error WOLFSSL_ELS_PKC requires the NXP els_pkc module (CONFIG_MCUX_ELS_PKC=y)
+#endif
+
 #ifdef WOLFSSL_ELS_PKC
 
 #include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
