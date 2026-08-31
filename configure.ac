@@ -3784,6 +3784,117 @@ then
 fi
 
 
+# NXP EdgeLock (ELS + PKC) crypto-callback port.
+#
+# els_pkc is NXP's CLNS middleware, delivered as an MCUXpresso SDK component
+# (github.com/NXP/els_pkc) that additionally carries a Zephyr module. Under
+# Zephyr that module hands the port its include path and these options are
+# unused; they are the MCUXpresso SDK path, where the checkout is named here.
+#
+# The vendor library is link-only and is NOT built here. The application links
+# CLNS - either its own build of els_pkc/src/comps, or the prebuilt
+# els_pkc/static_library/<soc>/libclns.a - exactly as the SE050 port does, so
+# the archive produced here carries unresolved mcuxCl* references by design.
+#
+# Example:
+#   ./configure --host=arm-none-eabi --enable-cryptonly --enable-cryptocb \
+#       --with-els-pkc=/path/to/els_pkc --with-mcux-sdk=/path/to/mcux-sdk-ng \
+#       CFLAGS="-mcpu=cortex-m33+nodsp -mthumb"
+ENABLED_ELS_PKC="no"
+els_pkc_dir=""
+mcux_sdk_dir=""
+els_pkc_platform="rw61x"
+
+# Both of these are read by the --with-els-pkc block below, so they are taken
+# first: AC_ARG_WITH runs its action where it appears in the script.
+AC_ARG_WITH([mcux-sdk],
+    [AS_HELP_STRING([--with-mcux-sdk=PATH],
+        [PATH to an MCUXpresso SDK checkout (mcux-sdk-ng), for the SoC device headers the els_pkc platform layer includes])],
+    [ mcux_sdk_dir=$withval ])
+
+AC_ARG_WITH([els-pkc-platform],
+    [AS_HELP_STRING([--with-els-pkc-platform=SOC],
+        [els_pkc platform layer to build against (default: rw61x)])],
+    [ els_pkc_platform=$withval ])
+
+AC_ARG_WITH([els-pkc],
+    [AS_HELP_STRING([--with-els-pkc=PATH],
+        [Enable the NXP EdgeLock (ELS/PKC) crypto callback port, built against the els_pkc checkout at PATH])],
+    [ AS_CASE([$withval],
+        [no],  [ ENABLED_ELS_PKC=no ],
+        [yes], [ AC_MSG_ERROR([--with-els-pkc needs the path to an els_pkc checkout, e.g. --with-els-pkc=/path/to/els_pkc]) ],
+               [ ENABLED_ELS_PKC=yes; els_pkc_dir=$withval ]) ])
+
+if test "x$ENABLED_ELS_PKC" = "xyes"
+then
+    # Diagnose a wrong path here, naming the option, rather than several
+    # hundred lines into the build with a missing mcuxClEls.h.
+    AC_MSG_CHECKING([for els_pkc in $els_pkc_dir])
+    if test ! -f "$els_pkc_dir/src/comps/mcuxClEls/inc/mcuxClEls.h"; then
+        AC_MSG_RESULT([no])
+        AC_MSG_ERROR([mcuxClEls.h not found under --with-els-pkc=$els_pkc_dir])
+    fi
+    AC_MSG_RESULT([yes])
+
+    if test "x$mcux_sdk_dir" = "x"; then
+        AC_MSG_ERROR([--with-els-pkc also needs --with-mcux-sdk=PATH: the els_pkc platform layer includes the SoC device headers (fsl_common.h, fsl_device_registers.h) from an MCUXpresso SDK checkout])
+    fi
+
+    if test ! -d "$els_pkc_dir/src/platforms/$els_pkc_platform"; then
+        AC_MSG_ERROR([els_pkc has no platform layer "$els_pkc_platform"; select one with --with-els-pkc-platform=SOC])
+    fi
+
+    # Every component's public headers, plus the internal ones the components
+    # include among themselves. Globbed rather than enumerated: the list runs
+    # to roughly fifty directories and moves with the vendor release.
+    for els_pkc_inc in "$els_pkc_dir"/src/comps/*/inc \
+                       "$els_pkc_dir"/src/comps/*/inc/internal; do
+        if test -d "$els_pkc_inc"; then
+            CPPFLAGS="$CPPFLAGS -I$els_pkc_inc"
+        fi
+    done
+
+    CPPFLAGS="$CPPFLAGS -I$els_pkc_dir/src/inc -I$els_pkc_dir/src/compiler"
+    CPPFLAGS="$CPPFLAGS -I$els_pkc_dir/src/platforms/$els_pkc_platform"
+    CPPFLAGS="$CPPFLAGS -I$els_pkc_dir/src/platforms/$els_pkc_platform/inc"
+    CPPFLAGS="$CPPFLAGS -I$els_pkc_dir/includes/platform/$els_pkc_platform"
+
+    # els_pkc carries its own CMSIS, so no separate CMSIS checkout is needed.
+    # The directory is version-stamped (cmsis_cortex_m_5_5_1), hence the glob.
+    for els_pkc_inc in "$els_pkc_dir"/src/platforms/"$els_pkc_platform"/cmsis_*/inc; do
+        if test -d "$els_pkc_inc"; then
+            CPPFLAGS="$CPPFLAGS -I$els_pkc_inc"
+        fi
+    done
+
+    # The SoC header layout is per-device and only the platforms this port has
+    # been brought up on can be named here. Anything else still configures -
+    # the paths and part number just have to arrive through CPPFLAGS/CFLAGS.
+    AS_CASE([$els_pkc_platform],
+        [rw61x], [
+            CPPFLAGS="$CPPFLAGS -I$mcux_sdk_dir/devices/Wireless/RW/RW612"
+            CPPFLAGS="$CPPFLAGS -I$mcux_sdk_dir/devices/Wireless/RW/RW612/drivers"
+            CPPFLAGS="$CPPFLAGS -I$mcux_sdk_dir/devices/Wireless/RW/periph"
+            # fsl_device_registers.h picks the register map off the part
+            # number, and only the A2 parts appear in its selector. A different
+            # package overrides this through CPPFLAGS.
+            AM_CFLAGS="$AM_CFLAGS -DCPU_RW612ETA2I"
+        ],
+        [ AC_MSG_WARN([no known MCUXpresso device header layout for els_pkc platform "$els_pkc_platform"; pass the SoC include paths in CPPFLAGS and the part number in CFLAGS]) ])
+
+    CPPFLAGS="$CPPFLAGS -I$mcux_sdk_dir/drivers/common"
+
+    # Prerequisites the port states as #error in els_pkc_port.h. Promote them
+    # the way --enable-rtl8735b does, so a plain --with-els-pkc configures
+    # instead of failing on a define the user never asked to switch off. The
+    # hash and CMAC offloads keep per-operation state on devCtx and need the
+    # copy and free callbacks to hand it over and give it back. WOLF_CRYPTO_CB
+    # itself is promoted in the crypto callback aggregation further down, and
+    # it is what brings in WOLF_PRIVATE_KEY_ID for the key slot references.
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_ELS_PKC -DWOLF_CRYPTO_CB_COPY -DWOLF_CRYPTO_CB_FREE"
+fi
+
+
 # NXP SE050
 # Example: "./configure --with-se050=/home/pi/simw_top"
 ENABLED_SE050="no"
@@ -11602,7 +11713,7 @@ then
     fi
 fi
 
-if test "x$ENABLED_PKCS11" = "xyes" || test "x$ENABLED_WOLFTPM" = "xyes" || test "$ENABLED_CAAM" != "no" || test "x$ENABLED_RTL8735B" != "xno" || test "x$ENABLED_VAULTIC" = "xyes"
+if test "x$ENABLED_PKCS11" = "xyes" || test "x$ENABLED_WOLFTPM" = "xyes" || test "$ENABLED_CAAM" != "no" || test "x$ENABLED_RTL8735B" != "xno" || test "x$ENABLED_VAULTIC" = "xyes" || test "x$ENABLED_ELS_PKC" = "xyes"
 then
     ENABLED_CRYPTOCB=yes
 fi
@@ -13501,6 +13612,7 @@ AM_CONDITIONAL([BUILD_IOTSAFE_HWRNG],[test "x$ENABLED_IOTSAFE_HWRNG" = "xyes"])
 AM_CONDITIONAL([BUILD_VAULTIC],[test "x$ENABLED_VAULTIC" = "xyes"])
 AM_CONDITIONAL([BUILD_SE050],[test "x$ENABLED_SE050" = "xyes"])
 AM_CONDITIONAL([BUILD_ELS_PKC_KEYBLOB],[test "x$ENABLED_ELS_PKC_KEYBLOB" = "xyes"])
+AM_CONDITIONAL([BUILD_ELS_PKC],[test "x$ENABLED_ELS_PKC" = "xyes"])
 AM_CONDITIONAL([BUILD_STSAFE],[test "x$ENABLED_STSAFE" != "xno"])
 AM_CONDITIONAL([BUILD_RTL8735B],[test "x$ENABLED_RTL8735B" != "xno"])
 AM_CONDITIONAL([BUILD_TROPIC01],[test "x$ENABLED_TROPIC01" = "xyes"])
@@ -14115,6 +14227,7 @@ echo "   * IoT-Safe HWRNG:             $ENABLED_IOTSAFE_HWRNG"
 echo "   * NXP SE050:                  $ENABLED_SE050"
 echo "   * STMicro STSAFE:             $ENABLED_STSAFE"
 echo "   * RealTek RTL8735B HUK:       $ENABLED_RTL8735B"
+echo "   * NXP EdgeLock ELS/PKC:       $ENABLED_ELS_PKC"
 echo "   * TROPIC01:                   $ENABLED_TROPIC01"
 echo "   * Maxim Integrated MAXQ10XX:  $ENABLED_MAXQ10XX"
 echo "   * PSA:                        $ENABLED_PSA"
