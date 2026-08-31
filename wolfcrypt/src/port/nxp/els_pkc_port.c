@@ -399,6 +399,20 @@ int wc_ElsPkc_AesUseSlot(Aes* aes, const wc_ElsPkc_KeyRef* ref,
 }
 #endif /* !NO_AES */
 
+/* Read a slot's properties. Caller holds the lock. */
+static int ElsKsProps(byte slot, mcuxClEls_KeyProp_t* prop)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t,
+        mcuxClEls_GetKeyProperties((mcuxClEls_KeyIndex_t)slot, prop));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_GetKeyProperties) != t) ||
+        (MCUXCLELS_STATUS_OK != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return 0;
+}
+
 /* The ELS permission bit each class stands for. */
 static word32 ElsClassUsageBit(byte keyClass)
 {
@@ -496,6 +510,10 @@ static int ElsCheckSlot(const wc_ElsPkc_KeyRef* ref, byte expectClass)
 #define ELS_HASH_DECLINED ((void*)(wc_ptr_t)1)
 
 typedef struct ElsHashCtx {
+    /* Set when a block failed to reach the engine. total then counts bytes the
+     * hardware never absorbed, so a later Final would pad a length it cannot
+     * honour and return a plausible-looking wrong digest. */
+    byte   failed;
     ALIGN32 byte state[ELS_SHA256_STATE]; /* intermediate digest */
     byte   buf[ELS_SHA256_BLOCK];         /* residual partial block */
     word32 buffered;
@@ -633,6 +651,12 @@ static int ElsSha256Update(wc_Sha256* sha256, const byte* in, word32 inSz)
     }
 
 out:
+    if (ret != 0) {
+        /* Bytes are counted in total that the engine never saw, so anything
+         * this context produces from here is wrong. Mark it rather than let
+         * a caller that ignores this return get a confident bad digest. */
+        ctx->failed = 1;
+    }
     ElsUnlock();
 
     return ret;
@@ -658,6 +682,14 @@ static int ElsSha256Final(wc_Sha256* sha256, byte* digest)
     }
 
     ctx = (ElsHashCtx*)sha256->devCtx;
+
+    /* A block failed earlier, so total counts bytes the engine never
+     * absorbed and the padding below would claim a length that was never
+     * hashed. Fail rather than hand back a digest that looks right. */
+    if (ctx->failed) {
+        ElsUnlock();
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
 
     /* residual, then 0x80, zeros, and a 64-bit big-endian bit count. A second
      * block is needed when the remainder leaves no room for the length. */
@@ -739,8 +771,15 @@ static int ElsSha256Copy(wc_Sha256* src, wc_Sha256* dst)
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
 
-    /* mirror the wc_Sha256Free(dst) the software path does before its copy */
-    ElsSha256FreeCtx(dst);
+    /* The full teardown, not just our pool entry. Returning success from this
+     * handler makes wc_Sha256Copy() return immediately, so the free it would
+     * have done never happens - and the struct copy below then overwrites
+     * dst->msg and dst->W with the source's pointers, stranding whatever the
+     * destination already owned. wc_Sha256Free() routes through the free
+     * callback into ElsSha256FreeCtx(), which by design reports
+     * CRYPTOCB_UNAVAILABLE so the software teardown still runs; there is no
+     * recursion back into this handler. */
+    wc_Sha256Free(dst);
 
     ret = ElsLock();
     if (ret != 0) {
@@ -1092,10 +1131,11 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
         return ret;
     }
 
-    /* Init builds the context rather than continuing one, so it is the single
-     * stage that runs with state input disabled. */
+    /* Init builds the context rather than continuing one. The vendor driver
+     * clears the state-input bit here explicitly; this port never sets it, so
+     * a zeroed option word already says the same thing and the stage is passed
+     * through unchanged. */
     stageOpt = opt;
-    stageOpt.bits.acpsie = MCUXCLELS_AEAD_STATE_IN_DISABLE;
     ret = ElsGcmInit(stageOpt, aes, j0, aeadCtx);
 
     if (ret == 0 && authInSz > 0) {
@@ -1140,7 +1180,7 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
             /* Match the software path: a failed tag check leaves no plaintext
              * behind for a caller that ignores the return value. */
             if (sz > 0) {
-                XMEMSET(out, 0, sz);
+                ForceZero(out, sz);
             }
             ret = WC_NO_ERR_TRACE(AES_GCM_AUTH_E);
         }
@@ -1291,6 +1331,26 @@ static int ElsEccKeyGen(ecc_key* key)
     ret = ElsLock();
     if (ret != 0) {
         return ret;
+    }
+
+    /* Ask the hardware about the target before writing into it. The rest of
+     * this port validates a reference before every command because a bad one
+     * resets the part rather than returning an error, and a generation is no
+     * different - it just happens to name a slot that should still be empty.
+     * An occupied slot is refused: overwriting a key nobody asked to replace
+     * is not this function's decision to make. */
+    {
+        mcuxClEls_KeyProp_t cur;
+
+        ret = ElsKsProps(ref.slot, &cur);
+        if (ret == 0 &&
+            (cur.word.value & MCUXCLELS_KEYPROPERTY_VALUE_ACTIVE)) {
+            ret = WC_NO_ERR_TRACE(BAD_STATE_E);
+        }
+        if (ret != 0) {
+            ElsUnlock();
+            return ret;
+        }
     }
 
     MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_EccKeyGen_Async(
@@ -2092,8 +2152,11 @@ static int ElsPkcEccSign(const byte* in, word32 inlen, byte* out,
     if (in == NULL || out == NULL || outlen == NULL || key == NULL) {
         return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
     }
-    /* byteLenHash occupies eight bits of optLen. */
-    if (inlen == 0 || inlen > 255) {
+    /* Two separate bounds, and only one of them is the engine's. byteLenHash
+     * occupies eight bits of optLen, but the digest is also copied into a
+     * fixed buffer here - so the buffer is the tighter limit, and checking
+     * only the field width would overflow the stack for anything larger. */
+    if (inlen == 0 || inlen > 255 || inlen > sizeof(hash)) {
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
 
@@ -2241,7 +2304,9 @@ static int ElsPkcEccVerify(const byte* sigDer, word32 sigLen,
     if (sigDer == NULL || hashIn == NULL || res == NULL || key == NULL) {
         return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
     }
-    if (hashLen == 0 || hashLen > 255) {
+    /* As in the signer: the fixed buffer bounds this more tightly than the
+     * eight-bit byteLenHash field does. */
+    if (hashLen == 0 || hashLen > 255 || hashLen > sizeof(hash)) {
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
 
@@ -2367,20 +2432,6 @@ static word32 ElsKsBitsFromProp(const mcuxClEls_KeyProp_t* prop)
 #endif
         default:                                       return 0;
     }
-}
-
-/* Read a slot's properties. Caller holds the lock. */
-static int ElsKsProps(byte slot, mcuxClEls_KeyProp_t* prop)
-{
-    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t,
-        mcuxClEls_GetKeyProperties((mcuxClEls_KeyIndex_t)slot, prop));
-    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_GetKeyProperties) != t) ||
-        (MCUXCLELS_STATUS_OK != r)) {
-        return WC_NO_ERR_TRACE(WC_HW_E);
-    }
-    MCUX_CSSL_FP_FUNCTION_CALL_END();
-
-    return 0;
 }
 
 /* Find room for a key that does not exist yet.
@@ -2609,7 +2660,7 @@ static int ElsKsExport(wc_CryptoInfo* info)
 {
     wc_ElsPkc_KeyRef key, wrap;
     mcuxClEls_KeyProp_t prop;
-    word32 need;
+    word32 need = 0;
     int ret;
 
     if (info->keystore.op.exportWrapped.blobSz == NULL) {
@@ -2837,8 +2888,37 @@ static int ElsKsGetInfo(wc_CryptoInfo* info)
 
 unsigned long wc_ElsPkc_RngOffloadCount = 0;
 
+/* Issue one DRBG request. Caller holds the lock, and len must already satisfy
+ * the engine's contract. */
+static int ElsRandomRun(byte* out, word32 len)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t,
+        mcuxClEls_Rng_DrbgRequest_Async(out, (size_t)len));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Rng_DrbgRequest_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
 static int ElsRandom(byte* out, word32 sz)
 {
+    /* The DRBG takes at least four bytes and only whole words - the driver
+     * rejects anything else, and with its parameter checks compiled out it
+     * would program the DMA with a sub-word length and write past the end of
+     * the caller's buffer.
+     *
+     * Declining odd sizes would be safe but wasteful: a single byte is an
+     * ordinary request (wc_RNG_GenerateByte), and refusing it here does not
+     * fall back to software, because only CRYPTOCB_UNAVAILABLE does that -
+     * WC_HW_E would simply fail the call. So the whole-word part is generated
+     * straight into the caller's buffer and the few remaining bytes come from
+     * a word-sized scratch. */
+    ALIGN32 byte tail[MCUXCLELS_RNG_DRBG_TEST_EXTRACT_OUTPUT_MIN_SIZE];
+    word32 whole;
+    word32 rest;
     int ret;
 
     if (out == NULL) {
@@ -2847,28 +2927,35 @@ static int ElsRandom(byte* out, word32 sz)
     if (sz == 0) {
         return 0;
     }
+    if (sz > MCUXCLELS_RNG_DRBG_TEST_EXTRACT_OUTPUT_MAX_SIZE) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    whole = sz & ~(word32)(sizeof(tail) - 1u);
+    rest  = sz - whole;
 
     ret = ElsLock();
     if (ret != 0) {
         return ret;
     }
 
-    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t,
-        mcuxClEls_Rng_DrbgRequest_Async(out, (size_t)sz));
-    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Rng_DrbgRequest_Async) != t) ||
-        (MCUXCLELS_STATUS_OK_WAIT != r)) {
-        ElsUnlock();
-        return WC_NO_ERR_TRACE(WC_HW_E);
+    if (whole > 0) {
+        ret = ElsRandomRun(out, whole);
     }
-    MCUX_CSSL_FP_FUNCTION_CALL_END();
-
-    ret = ElsWait();
+    if (ret == 0 && rest > 0) {
+        ret = ElsRandomRun(tail, (word32)sizeof(tail));
+        if (ret == 0) {
+            XMEMCPY(out + whole, tail, rest);
+        }
+    }
 
     ElsUnlock();
 
     if (ret == 0) {
         wc_ElsPkc_RngOffloadCount++;
     }
+
+    ForceZero(tail, sizeof(tail));
 
     return ret;
 }
@@ -3477,6 +3564,15 @@ int wc_ElsPkc_Cleanup(void)
         elsLockInit = 0;
         wc_FreeMutex(&elsLock);
     }
+
+#ifdef ELS_PKC_HAVE_SESSION
+    /* The DRBG context and the CPU workarea hold intermediate values from
+     * whatever ran last - key material among them for a private-key
+     * operation - and nothing else clears them, so a shutdown would leave
+     * them in .bss. */
+    ForceZero(elsPkcRngCtx, sizeof(elsPkcRngCtx));
+    ForceZero(elsPkcCpuWa, sizeof(elsPkcCpuWa));
+#endif
 
 #ifdef WOLFSSL_ZEPHYR
     /* Disarm the interrupt: the ISR gives a semaphore this port now considers
