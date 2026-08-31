@@ -1,0 +1,169 @@
+name: NXP EdgeLock (els_pkc) port cross-compile
+
+# Cross-compile gate for the NXP EdgeLock (ELS + PKC) crypto callback port,
+# wolfcrypt/src/port/nxp/els_pkc_port.c.
+#
+# The port is normally reached through the Zephyr module, but els_pkc is not a
+# Zephyr artifact: it is NXP's CLNS middleware, shipped as an MCUXpresso SDK
+# component that additionally carries a Zephyr module. This job is the
+# MCUXpresso SDK path - autoconf, a bare-metal Cortex-M33 cross compiler, and
+# the genuine vendor headers, with no Zephyr anywhere.
+#
+# WHAT: compiles libwolfssl.a for arm-none-eabi with --with-els-pkc against a
+#       real els_pkc checkout, and asserts the port's symbols are actually in
+#       the archive.
+# NOT:  no link of a firmware image, no run, no hardware. Functional crypto
+#       correctness is validated on RW612 silicon, not here.
+#
+# Unlike the TI C2000 compile gate, nothing here is login-gated: els_pkc and the
+# device headers are both public, so this job never needs to self-skip.
+#
+# NOTE the archive is expected to carry unresolved mcuxCl* references. The
+# vendor library is link-only - the application links CLNS, either its own build
+# of els_pkc/src/comps or the prebuilt els_pkc/static_library/<soc>/libclns.a -
+# exactly as the SE050 port does.
+
+# START OF COMMON SECTION
+on:
+  # Scoped to what can affect this compile, following the ti-c2000 precedent,
+  # so the job does not pull two vendor trees on unrelated PRs.
+  push:
+    branches: [ 'master', 'main', 'release/**' ]
+    paths:
+      - 'wolfcrypt/src/port/nxp/**'
+      - 'wolfssl/wolfcrypt/port/nxp/**'
+      - 'wolfcrypt/src/cryptocb.c'
+      - 'wolfssl/wolfcrypt/cryptocb.h'
+      - 'configure.ac'
+      - 'wolfcrypt/src/include.am'
+      - '.github/workflows/els-pkc.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [ '**' ]
+    paths:
+      - 'wolfcrypt/src/port/nxp/**'
+      - 'wolfssl/wolfcrypt/port/nxp/**'
+      - 'wolfcrypt/src/cryptocb.c'
+      - 'wolfssl/wolfcrypt/cryptocb.h'
+      - 'configure.ac'
+      - 'wolfcrypt/src/include.am'
+      - '.github/workflows/els-pkc.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+# END OF COMMON SECTION
+
+env:
+  # Pinned deliberately. A moving vendor tree would turn an unrelated NXP
+  # release into a red PR here; bump these when the port is validated against a
+  # newer CLNS.
+  ELS_PKC_REF: Zephyr_v4.4
+  # The RW612 device headers (fsl_common.h, fsl_device_registers.h, RW612.h)
+  # that the els_pkc rw61x platform layer includes. hal_nxp repackages NXP's
+  # mcux-sdk-ng verbatim and is the stable public source for them; a customer
+  # points --with-mcux-sdk at their own MCUXpresso SDK install instead.
+  HAL_NXP_REF: main
+
+jobs:
+  cross_compile:
+    name: arm-none-eabi cross-compile (--with-els-pkc)
+    if: ${{ (github.repository_owner == 'wolfssl') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        name: Checkout wolfSSL
+
+      - name: Install dependencies
+        uses: ./.github/actions/install-apt-deps
+        with:
+          packages: autoconf automake libtool build-essential gcc-arm-none-eabi
+          ghcr-debs-tag: ubuntu-24.04-minimal
+
+      - name: Set up ccache
+        uses: ./.github/actions/ccache-setup
+        with:
+          workflow-id: els-pkc
+          read-only: ${{ github.event_name == 'pull_request' }}
+          max-size: 150M
+
+      # els_pkc is ~190MB of working tree; only src/ and includes/ are needed to
+      # compile against it, and none of its own sources are built here.
+      - name: Fetch NXP els_pkc
+        run: |
+          git clone --depth 1 --branch "$ELS_PKC_REF" \
+            https://github.com/NXP/els_pkc.git "$RUNNER_TEMP/els_pkc"
+          test -f "$RUNNER_TEMP/els_pkc/src/comps/mcuxClEls/inc/mcuxClEls.h"
+
+      # Sparse: the full tree is >2GB, the RW612 device headers are ~6MB.
+      - name: Fetch the RW612 device headers
+        run: |
+          git clone --depth 1 --branch "$HAL_NXP_REF" --filter=blob:none --sparse \
+            https://github.com/zephyrproject-rtos/hal_nxp.git "$RUNNER_TEMP/hal_nxp"
+          git -C "$RUNNER_TEMP/hal_nxp" sparse-checkout set \
+            mcux/mcux-sdk-ng/devices/Wireless/RW \
+            mcux/mcux-sdk-ng/drivers/common
+          test -f "$RUNNER_TEMP/hal_nxp/mcux/mcux-sdk-ng/devices/Wireless/RW/RW612/fsl_device_registers.h"
+
+      - name: Cross-compile the port
+        run: |
+          set -e
+          ./autogen.sh
+
+          ELS_PKC="$RUNNER_TEMP/els_pkc"
+          MCUX_SDK="$RUNNER_TEMP/hal_nxp/mcux/mcux-sdk-ng"
+
+          # -mcpu=cortex-m33 alone trips the vendor CMSIS core_cm33.h guard
+          # "Compiler generates DSP (SIMD) instructions for a device without DSP
+          # extensions". +nodsp is the fix; -D__DSP_PRESENT=1 is NOT.
+          #
+          # --specs=nosys.specs gives newlib the syscall stubs that autoconf's
+          # link probes need without a board support package.
+          CFLAGS_CROSS="-mcpu=cortex-m33+nodsp -mthumb -Os --specs=nosys.specs"
+          # Bare metal: no sockets, no /dev/random, no writev.
+          CPPFLAGS_CROSS="-DWOLFSSL_NO_SOCK -DWOLFSSL_USER_IO -DNO_WRITEV -DNO_DEV_RANDOM"
+
+          # Two configurations. "full" turns on every algorithm the port has an
+          # arm for, so the ECC/RSA/X25519 PKC tier and the key store ops all
+          # compile; "min" leaves them off, which is what exercises the port's
+          # compile guards. Symbol counts differ between them by design.
+          for cfg in full min; do
+            case "$cfg" in
+              full) opts="--enable-cryptocbutils=copy,free,keystore --enable-ecc
+                          --enable-aesgcm --enable-cmac --enable-curve25519
+                          --enable-rsa" ;;
+              min)  opts="--enable-ecc --enable-aesgcm --enable-cmac" ;;
+            esac
+
+            echo "::group::configure + make ($cfg)"
+            make distclean >/dev/null 2>&1 || true
+            ./configure --host=arm-none-eabi --disable-shared --enable-static \
+              --enable-cryptonly --enable-cryptocb $opts \
+              --with-els-pkc="$ELS_PKC" --with-mcux-sdk="$MCUX_SDK" \
+              --disable-filesystem --enable-singlethreaded \
+              --disable-examples --disable-crypttests \
+              CC="ccache arm-none-eabi-gcc" \
+              CFLAGS="$CFLAGS_CROSS" CPPFLAGS="$CPPFLAGS_CROSS"
+            make -j"$(nproc)"
+
+            # Assert the port is really in the archive. It gates itself on
+            # WOLFSSL_ELS_PKC, so a mis-wired build compiles it to an empty
+            # translation unit and still reports success - checking the object
+            # exists proves nothing, checking its symbols does.
+            n=$(arm-none-eabi-nm src/.libs/libwolfssl.a \
+                  | grep -E ' (T|B|D) ' | grep -c 'wc_ElsPkc' || true)
+            echo "$cfg: $n wc_ElsPkc symbols"
+            if [ "$n" -lt 10 ]; then
+              echo "::error::$cfg built without the EdgeLock port ($n wc_ElsPkc symbols)"
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: ccache stats
+        if: always()
+        run: ccache -s || true
