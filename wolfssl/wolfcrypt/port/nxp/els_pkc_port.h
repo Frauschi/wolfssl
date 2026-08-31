@@ -160,6 +160,22 @@ WOLFSSL_API int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz,
 #ifdef WOLF_CRYPTO_CB_KEYSTORE
 WOLFSSL_API int wc_ElsPkc_ReserveSlot(byte keyClass, wc_ElsPkc_KeyRef* ref);
 
+/* Derive NXP_DIE_KEK_SK, the key encryption key the boot ROM uses to unwrap
+ * RFC 3394 key blobs, into a free pair of slots. ref receives a KWK reference
+ * naming it; delete it with wc_KeyStore_Delete() when the import or export is
+ * finished.
+ *
+ * It is a CKDF child of the die master key, and NXP publishes both the parent
+ * and the derivation constant, so an application can derive its own copy
+ * instead of provisioning a wrapping key. The ROM's own copy is not available:
+ * it lives in slots 12 and 13 only while SB file loading is in progress and is
+ * deleted when that finishes.
+ *
+ * Deriving the same key as the ROM depends on NXP's recipe being reproduced
+ * exactly, and that has only been checked here to the extent that the result
+ * wraps and unwraps correctly. A blob wrapped by the provisioning tooling and
+ * programmed into OTP has not been round-tripped against it. */
+WOLFSSL_API int wc_ElsPkc_DeriveDieKek(wc_ElsPkc_KeyRef* ref);
 #endif
 
 #ifdef HAVE_ECC

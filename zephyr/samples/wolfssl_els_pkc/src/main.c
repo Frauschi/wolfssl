@@ -1339,6 +1339,66 @@ int main(void)
                                      WC_ELSPKC_KEYREF_SZ, NULL);
         }
 
+        /* NXP_DIE_KEK_SK, derived from the recipe NXP publishes, so a blob
+         * wrapped by the provisioning tooling can be imported without the
+         * application provisioning a wrapping key of its own. A positive
+         * round trip only: a mismatched unwrap trips the tamper reset. */
+        {
+            wc_ElsPkc_KeyRef kek;
+            byte kekRef[WC_ELSPKC_KEYREF_SZ];
+            byte kekBlob[48];
+            word32 kekRefSz = sizeof(kekRef), kekBlobSz = sizeof(kekBlob);
+            word32 kt2 = 0, ks2 = 0, at2 = 0;
+
+            memset(&kek, 0, sizeof(kek));
+            r = wc_ElsPkc_DeriveDieKek(&kek);
+            check("NXP_DIE_KEK_SK derived from the die master key", r == 0);
+
+            if (r == 0) {
+                r = wc_ElsPkc_MakeKeyRef(&kek, kekRef, &kekRefSz);
+                check("die KEK reference built", r == 0);
+            }
+            if (r == 0) {
+                r = wc_KeyStore_GetInfo(WOLFSSL_ELS_PKC_DEVID, kekRef,
+                                        WC_ELSPKC_KEYREF_SZ,
+                                        &kt2, &ks2, &at2, NULL);
+                check("die KEK is 256 bits", r == 0 && ks2 == 256);
+            }
+            if (r == 0) {
+                (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, aesRef,
+                                         WC_ELSPKC_KEYREF_SZ, NULL);
+                r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
+                                       aesRef, WC_ELSPKC_KEYREF_SZ,
+                                       dukRef, WC_ELSPKC_KEYREF_SZ,
+                                       0, deriv2, sizeof(deriv2),
+                                       WC_KEYSTORE_ATTR_EXPORTABLE, NULL);
+                check("exportable key derived for the die KEK", r == 0);
+            }
+            if (r == 0) {
+                r = wc_KeyStore_ExportWrapped(WOLFSSL_ELS_PKC_DEVID,
+                        aesRef, WC_ELSPKC_KEYREF_SZ,
+                        kekRef, WC_ELSPKC_KEYREF_SZ,
+                        kekBlob, &kekBlobSz,
+                        WC_KEYWRAP_FORMAT_VENDOR, NULL);
+                check("key wrapped under the die KEK", r == 0);
+            }
+            if (r == 0) {
+                r = wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, aesRef,
+                                       WC_ELSPKC_KEYREF_SZ, NULL);
+            }
+            if (r == 0) {
+                r = wc_KeyStore_ImportWrapped(WOLFSSL_ELS_PKC_DEVID,
+                        aesRef, WC_ELSPKC_KEYREF_SZ,
+                        kekRef, WC_ELSPKC_KEYREF_SZ,
+                        kekBlob, kekBlobSz,
+                        WC_KEYWRAP_FORMAT_VENDOR, NULL);
+                check("blob unwrapped again under the die KEK", r == 0);
+            }
+
+            (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, kekRef,
+                                     WC_ELSPKC_KEYREF_SZ, NULL);
+        }
+
         /* leave the store as we found it */
         (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, aesRef,
                                  WC_ELSPKC_KEYREF_SZ, NULL);
