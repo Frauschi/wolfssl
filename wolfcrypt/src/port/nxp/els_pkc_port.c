@@ -2933,6 +2933,55 @@ static int ElsKsProps(byte slot, mcuxClEls_KeyProp_t* prop)
     return 0;
 }
 
+/* Find room for a key that does not exist yet, since PSA's generate has no way
+ * for a caller to name a slot. The store is not empty on a fresh part, so the
+ * only safe test is the hardware's active bit, and a 256-bit key needs a
+ * consecutive pair. Advisory: reserve and generate together. */
+int wc_ElsPkc_ReserveSlot(byte keyClass, wc_ElsPkc_KeyRef* ref)
+{
+    mcuxClEls_KeyProp_t prop;
+    int need;
+    int run = 0;
+    int slot;
+    int ret;
+
+    if (ref == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (ElsClassUsageBit(keyClass) == 0) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    need = (keyClass == WC_ELSPKC_KEY_ECC_SIGN ||
+            keyClass == WC_ELSPKC_KEY_ECC_DH) ? 2 : 1;
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    for (slot = 0; slot <= WC_ELSPKC_MAX_SLOT; slot++) {
+        ret = ElsKsProps((byte)slot, &prop);
+        if (ret != 0) {
+            break;
+        }
+        if (prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_ACTIVE) {
+            run = 0;
+            continue;
+        }
+        if (++run == need) {
+            XMEMSET(ref, 0, sizeof(*ref));
+            ref->keyClass = keyClass;
+            ref->slot     = (byte)(slot - (need - 1));
+            ElsUnlock();
+            return 0;
+        }
+    }
+
+    ElsUnlock();
+
+    return (ret == 0) ? WC_NO_ERR_TRACE(MEMORY_E) : ret;
+}
+
 /* Parse a reference and, when it must already exist, confirm the slot carries
  * the permission its class claims. */
 static int ElsKsRef(const byte* ref, word32 refSz, byte expectClass,

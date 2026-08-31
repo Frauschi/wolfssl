@@ -140,6 +140,18 @@ WOLFSSL_API int wc_ElsPkc_MakeKeyRef(const wc_ElsPkc_KeyRef* ref, byte* out,
 WOLFSSL_API int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz,
                                       wc_ElsPkc_KeyRef* ref);
 
+/* Choose a free slot for a key that does not exist yet, and fill in a
+ * reference naming it. Needed because PSA's key generation gives a caller no
+ * way to say where the key should go.
+ *
+ * The store is occupied in places on a fresh part, so this asks the hardware
+ * which slots are active rather than assuming. Returns MEMORY_E when the store
+ * has no room. The answer is advisory: nothing is marked taken until a key is
+ * written, so reserve and generate together. */
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+WOLFSSL_API int wc_ElsPkc_ReserveSlot(byte keyClass, wc_ElsPkc_KeyRef* ref);
+#endif
+
 #ifdef HAVE_ECC
 /* Initialise an ecc_key that names an ELS slot instead of holding a private
  * key, and bind it to the port's devId and to P-256.
