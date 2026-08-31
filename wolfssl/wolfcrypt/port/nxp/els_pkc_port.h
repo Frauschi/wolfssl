@@ -159,6 +159,7 @@ WOLFSSL_API int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz,
  * written, so reserve and generate together. */
 #ifdef WOLF_CRYPTO_CB_KEYSTORE
 WOLFSSL_API int wc_ElsPkc_ReserveSlot(byte keyClass, wc_ElsPkc_KeyRef* ref);
+
 #endif
 
 #ifdef HAVE_ECC
@@ -197,7 +198,7 @@ WOLFSSL_API int wc_ElsPkc_AesUseSlot(Aes* aes, const wc_ElsPkc_KeyRef* ref,
 WOLFSSL_API extern unsigned long wc_ElsPkc_IrqWaitCount;
 WOLFSSL_API extern unsigned long wc_ElsPkc_PollWaitCount;
 WOLFSSL_API extern unsigned long wc_ElsPkc_TimeoutCount;
-#ifndef NO_SHA256
+#if !defined(NO_SHA256) || defined(WOLFSSL_SHA384) || defined(WOLFSSL_SHA512)
 WOLFSSL_API extern unsigned long wc_ElsPkc_HashOffloadCount;
 #endif
 #ifndef NO_AES

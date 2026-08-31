@@ -65,10 +65,9 @@
  * Peripheral serialization
  * ------------------------------------------------------------------------ */
 
-/* instrumentation: how many times the hardware path actually ran. Guarded to
- * match the declaration in the header - a definition without a visible
- * declaration loses its WOLFSSL_API linkage decoration. */
-#ifndef NO_SHA256
+/* Guarded to match the header declaration, which is what carries the
+ * WOLFSSL_API linkage decoration. */
+#if !defined(NO_SHA256) || defined(WOLFSSL_SHA384) || defined(WOLFSSL_SHA512)
 unsigned long wc_ElsPkc_HashOffloadCount = 0;
 #endif
 /* which completion path ran: interrupt-driven vs polled fallback */
@@ -530,6 +529,7 @@ static void ElsHashRelease(ElsHashCtx* ctx)
 static int ElsHashBlocks(ElsHashCtx* ctx, const byte* in, word32 len)
 {
     mcuxClEls_HashOption_t opt;
+    int ret;
 
     if (len == 0) {
         return 0;
@@ -557,12 +557,16 @@ static int ElsHashBlocks(ElsHashCtx* ctx, const byte* in, word32 len)
 
     ctx->started = 1;
 
-    return ElsWait();
+    ret = ElsWait();
+    if (ret == 0) {
+        wc_ElsPkc_HashOffloadCount++;
+    }
+
+    return ret;
 }
 
-/* Absorb bytes into the context hanging off *devCtx, claiming one on the first
- * call. Every wolfCrypt hash object the port serves keeps its state here, so
- * the caller passes the address of its devCtx rather than the object. */
+/* Absorb into the context hanging off *devCtx, claiming one on the first call.
+ * The caller passes the address of its devCtx rather than the object. */
 static int ElsHashUpdate(void** devCtx, byte mode, const byte* in, word32 inSz)
 {
     ElsHashCtx* ctx;
@@ -2384,6 +2388,16 @@ int wc_ElsPkc_ReserveSlot(byte keyClass, wc_ElsPkc_KeyRef* ref)
             run = 0;
             continue;
         }
+        /* Free is not the same as usable. The store has retention and
+         * hardware-out slots, and slots the ROM keeps for its own keys, and
+         * the engine will grant a key there without the usage bit that was
+         * asked for rather than refusing outright. Only general purpose slots
+         * take an ordinary key. */
+        if ((prop.word.value &
+             MCUXCLELS_KEYPROPERTY_VALUE_GENERAL_PURPOSE_SLOT) == 0) {
+            run = 0;
+            continue;
+        }
         if (++run == need) {
             XMEMSET(ref, 0, sizeof(*ref));
             ref->keyClass = keyClass;
@@ -3304,9 +3318,6 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
                         ret = 0;
                         break;
                     }
-                    if (ret == 0) {
-                        wc_ElsPkc_HashOffloadCount++;
-                    }
                     break;
     #endif
     #ifdef WOLFSSL_SHA384
@@ -3327,9 +3338,6 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
                         ret = 0;
                         break;
                     }
-                    if (ret == 0) {
-                        wc_ElsPkc_HashOffloadCount++;
-                    }
                     break;
     #endif
     #ifdef WOLFSSL_SHA512
@@ -3349,9 +3357,6 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
                     else {
                         ret = 0;
                         break;
-                    }
-                    if (ret == 0) {
-                        wc_ElsPkc_HashOffloadCount++;
                     }
                     break;
     #endif
