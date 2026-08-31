@@ -20,29 +20,20 @@
  */
 
 /* wolfCrypt crypto-callback port for the NXP EdgeLock secure subsystem (ELS).
- *
- * Two properties of the hardware shape everything here:
- *
- *  1. ELS is a *single* peripheral with global busy state. Every operation is
- *     an _Async call followed by mcuxClEls_WaitForOperation(), and nothing may
- *     start between the two. One lock is held across each pair.
- *
- *  2. ELS answers a rejected request by resetting the SoC, not by returning an
- *     error: a wrong key permission or a failed unwrap trips the Intrusion and
- *     Tamper Response Controller, which drives a chip reset. Validation must
- *     therefore happen in software *before* the call. Getting this wrong does
- *     not produce a bad result, it reboots the device.
- *
- * The lock below serializes wolfSSL's own callers and nothing else. ELS is a
- * system-wide peripheral: NXP's PSA driver, an application calling mcuxClEls
- * directly, or a second OS task can all drive it behind our back, and no mutex
- * held here can prevent that. An integration that mixes wolfSSL with another
- * ELS user has to arbitrate above both of them.
- */
+ * ELS is one peripheral with global busy state, so every _Async call and its
+ * WaitForOperation run under the lock below. That lock serializes wolfSSL's
+ * own callers only; any other ELS user has to be arbitrated above both. */
 
 #include <wolfssl/wolfcrypt/libwolfssl_sources.h>
 
 #ifdef WOLFSSL_ELS_PKC
+
+/* On Zephyr the vendor headers arrive with the els_pkc module, which is a
+ * separate choice from asking for the port. Name the option that was left out
+ * rather than fail on a missing mcuxClEls.h. */
+#if defined(__ZEPHYR__) && !defined(CONFIG_MCUX_ELS_PKC)
+    #error "WOLFSSL_ELS_PKC requires the NXP els_pkc module (CONFIG_MCUX_ELS_PKC=y)"
+#endif
 
 #include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>

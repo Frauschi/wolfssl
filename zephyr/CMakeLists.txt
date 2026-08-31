@@ -136,19 +136,16 @@ if(CONFIG_WOLFSSL)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/psa/psa_pkcbs.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/st/stm32.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/realtek/rtl8735b.c)
+    zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/nxp/els_pkc_port.c)
 
-    # NXP EdgeLock offload. The port needs the els_pkc module's headers, and
-    # picks up its transitive device includes from the McuxElsPkc target the
-    # same way an application would.
-    if(CONFIG_WOLFSSL_ELS_PKC)
-      zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/nxp/els_pkc_port.c)
-      # Take the include set from the els_pkc target rather than naming
-      # directories, and scope it to this library so no header can be injected
-      # ahead of the right one in another module's compilation.
-      #
-      # Note this only carries src/platforms/<soc> on RW6XX - els_pkc guards
-      # those directories with CONFIG_SOC_SERIES_RW6XX - which is why the
-      # Kconfig symbol is restricted to that series.
+    # Vendor headers for the EdgeLock port, taken from the module's own target
+    # so no directory is named here, and scoped to this library so nothing can
+    # be injected ahead of them elsewhere. Keyed on the module rather than on a
+    # wolfSSL feature, so a user settings file works too.
+    # NOT TF-M: els_pkc defaults MCUX_ELS_PKC on for TF-M builds but creates
+    # McuxElsPkc only when TF-M is off, and naming a nonexistent target is a
+    # generate-time error. wolfSSL's own Kconfig already excludes TF-M.
+    if(CONFIG_MCUX_ELS_PKC AND NOT CONFIG_BUILD_WITH_TFM)
       zephyr_library_include_directories(
         $<TARGET_PROPERTY:McuxElsPkc,INTERFACE_INCLUDE_DIRECTORIES>
       )
