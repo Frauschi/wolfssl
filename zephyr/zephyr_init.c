@@ -19,33 +19,17 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
  */
 
-/* The wolfSSL Zephyr module needs no boot-time SYS_INIT hook. wolfCrypt's
- * Hash-DRBG is seeded on demand by wc_GenerateSeed() -- which on Zephyr draws
- * from the hardware entropy driver when one is present (see
- * wolfcrypt/src/random.c) -- and wolfCrypt_Init()/wolfSSL_Init() run lazily
- * from the first library call. This translation unit is kept (it is referenced
- * by the module CMakeLists) as the place for any future module init.
- *
- * The one exception is the NXP EdgeLock port, which does need a boot hook: its
- * crypto callback has to be registered with wolfCrypt before anything asks for
- * a cipher, and registration must happen *after* wolfCrypt_Init(), which zeroes
- * the callback device table. Calling wolfCrypt_Init() here makes that ordering
- * explicit rather than depending on which library call happens to run first. */
+/* The module needs no boot-time SYS_INIT hook of its own: wolfCrypt_Init() and
+ * the DRBG seed both happen lazily. The EdgeLock port is the exception - its
+ * crypto callback must be registered before anything asks for a cipher, and
+ * after wolfCrypt_Init(), which zeroes the callback device table. */
 
-/* Key the hook off WOLFSSL_ELS_PKC, not CONFIG_WOLFSSL_ELS_PKC. A user-supplied
- * settings file is authoritative and the Kconfig build-profile knobs are not
- * applied on top of it, so the Kconfig symbol can be set while the port itself
- * compiles to nothing. Including settings.h first and testing the macro the
- * port actually uses keeps the two in step either way. */
+/* Key the hook off WOLFSSL_ELS_PKC, not CONFIG_WOLFSSL_ELS_PKC: a user-supplied
+ * settings file is authoritative, so the Kconfig symbol can be set while the
+ * port itself compiles to nothing. Include settings.h first to get it. */
 #include <wolfssl/wolfcrypt/settings.h>
 
-/* Both symbols, deliberately. The C macro alone is what the port keys off,
- * but CMakeLists gates the port sources on the Kconfig symbol - so a user
- * settings file that defines the macro without the Kconfig option would
- * compile this hook against a port that is not in the build, and the failure
- * would be an undefined reference to a private symbol rather than anything
- * naming the missing option. */
-#if defined(WOLFSSL_ELS_PKC) && defined(CONFIG_WOLFSSL_ELS_PKC)
+#if defined(WOLFSSL_ELS_PKC)
 
 #include <errno.h>
 
@@ -87,4 +71,4 @@ static int wolfssl_els_pkc_init(void)
  * bring-up has already run. */
 SYS_INIT(wolfssl_els_pkc_init, POST_KERNEL, 99);
 
-#endif /* WOLFSSL_ELS_PKC && CONFIG_WOLFSSL_ELS_PKC */
+#endif /* WOLFSSL_ELS_PKC */
