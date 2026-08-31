@@ -419,62 +419,89 @@ static int ElsCheckSlot(const wc_ElsPkc_KeyRef* ref, byte expectClass)
 }
 
 /* ---------------------------------------------------------------------------
- * SHA-256
- *
- * ELS keeps its hash state in the peripheral, which at first looks like it
- * rules out incremental hashing: a second digest, or any other ELS operation,
- * would trample a hash in progress. It does not, because the engine can hand
- * the intermediate state back and take it again later - hashoe writes it to
- * pDigest, hashld reloads it (verified on hardware: feeding two blocks in one
- * call and feeding them either side of a state round-trip give the same
- * result).
- *
- * So the state lives in the caller's wc_Sha256 rather than in the hardware,
- * and the lock is only ever held for the duration of one call. Holding it from
- * first update to final would have been simpler but deadlocks: TLS 1.3 keeps
- * several transcript hashes alive at once, so a second hash would wait for a
- * first that cannot finish, and any AES or ECDSA between update and final
- * would block on a mutex its own thread already holds.
- *
- * ELS also never pads - inputLength must be a whole number of blocks - so the
- * port carries a residual partial block and appends the SHA-256 padding itself.
+ * SHA-256 / SHA-384 / SHA-512
  * ------------------------------------------------------------------------ */
 
-#ifndef NO_SHA256
+/* The engine round-trips its intermediate state (hashoe writes it, hashld
+ * reloads it), so the state lives in the caller's object and the lock is held
+ * for one call - holding it from update to final deadlocks TLS 1.3, which
+ * keeps several transcript hashes alive at once. ELS never pads. */
+
+#if !defined(NO_SHA256) || defined(WOLFSSL_SHA384) || defined(WOLFSSL_SHA512)
 
 #define ELS_SHA256_BLOCK MCUXCLELS_HASH_BLOCK_SIZE_SHA_256
 #define ELS_SHA256_STATE MCUXCLELS_HASH_STATE_SIZE_SHA_256
 
-/* Contexts come from a fixed pool rather than the heap: this port runs on
- * parts that are routinely built with WOLFSSL_NO_MALLOC, and a bounded pool
- * degrades gracefully - when it is empty the hash simply runs in software. */
+/* SHA-384 and SHA-512 share the engine's block and state size, differing in
+ * the mode selector, the digest truncation and a 128-bit length field. */
+#if defined(WOLFSSL_SHA384) || defined(WOLFSSL_SHA512)
+    #define ELS_HASH_SHA512
+    #define ELS_HASH_MAX_BLOCK MCUXCLELS_HASH_BLOCK_SIZE_SHA_512
+    #define ELS_HASH_MAX_STATE MCUXCLELS_HASH_STATE_SIZE_SHA_512
+#else
+    #define ELS_HASH_MAX_BLOCK ELS_SHA256_BLOCK
+    #define ELS_HASH_MAX_STATE ELS_SHA256_STATE
+#endif
+
+/* A fixed pool rather than the heap: these parts are routinely built with
+ * WOLFSSL_NO_MALLOC, and an empty pool degrades to software. */
 #ifndef WOLFSSL_ELS_PKC_HASH_CTX_COUNT
     #define WOLFSSL_ELS_PKC_HASH_CTX_COUNT 4
 #endif
 
 /* Parked in devCtx when the pool was empty at the first update, so later calls
- * on the same hash keep going to software instead of starting a fresh ELS
- * digest that would be missing everything already absorbed. */
+ * keep going to software instead of starting a digest missing earlier data. */
 #define ELS_HASH_DECLINED ((void*)(wc_ptr_t)1)
 
 typedef struct ElsHashCtx {
     /* Set when a block failed to reach the engine. total then counts bytes the
      * hardware never absorbed, so a later Final would pad a length it cannot
-     * honour and return a plausible-looking wrong digest. */
+     * honour. */
     byte   failed;
-    ALIGN32 byte state[ELS_SHA256_STATE]; /* intermediate digest */
-    byte   buf[ELS_SHA256_BLOCK];         /* residual partial block */
+    ALIGN32 byte state[ELS_HASH_MAX_STATE]; /* intermediate digest */
+    byte   buf[ELS_HASH_MAX_BLOCK];         /* residual partial block */
     word32 buffered;
     word64 total;                         /* message length, for the padding */
     byte   started;                       /* has the engine seen a block yet */
     byte   inUse;
-    void*  owner;                         /* the wc_Sha256 this belongs to */
+    byte   mode;                          /* MCUXCLELS_HASH_MODE_* in force */
+    void*  owner;                         /* the hash object this belongs to */
 } ElsHashCtx;
 
 static ElsHashCtx elsHashPool[WOLFSSL_ELS_PKC_HASH_CTX_COUNT];
 
+/* Engine block size for a hash mode. */
+static word32 ElsHashBlockSz(byte mode)
+{
+    (void)mode;
+
+#ifdef ELS_HASH_SHA512
+    if (mode == MCUXCLELS_HASH_MODE_SHA_384 ||
+        mode == MCUXCLELS_HASH_MODE_SHA_512) {
+        return (word32)MCUXCLELS_HASH_BLOCK_SIZE_SHA_512;
+    }
+#endif
+
+    return (word32)ELS_SHA256_BLOCK;
+}
+
+/* Width of the length field the padding ends with. */
+static word32 ElsHashLenSz(byte mode)
+{
+    (void)mode;
+
+#ifdef ELS_HASH_SHA512
+    if (mode == MCUXCLELS_HASH_MODE_SHA_384 ||
+        mode == MCUXCLELS_HASH_MODE_SHA_512) {
+        return 16u;
+    }
+#endif
+
+    return 8u;
+}
+
 /* Claim a pool entry for this hash. Caller must hold the lock. */
-static ElsHashCtx* ElsHashClaim(void* owner)
+static ElsHashCtx* ElsHashClaim(void* owner, byte mode)
 {
     int i;
 
@@ -483,6 +510,7 @@ static ElsHashCtx* ElsHashClaim(void* owner)
             XMEMSET(&elsHashPool[i], 0, sizeof(elsHashPool[i]));
             elsHashPool[i].inUse = 1;
             elsHashPool[i].owner = owner;
+            elsHashPool[i].mode  = mode;
             return &elsHashPool[i];
         }
     }
@@ -508,7 +536,7 @@ static int ElsHashBlocks(ElsHashCtx* ctx, const byte* in, word32 len)
     }
 
     opt.word.value = 0u;
-    opt.bits.hashmd = MCUXCLELS_HASH_MODE_SHA_256;
+    opt.bits.hashmd = ctx->mode;
     opt.bits.hashoe = MCUXCLELS_HASH_OUTPUT_ENABLE;
     if (ctx->started) {
         opt.bits.hashini = MCUXCLELS_HASH_INIT_DISABLE;
@@ -532,13 +560,16 @@ static int ElsHashBlocks(ElsHashCtx* ctx, const byte* in, word32 len)
     return ElsWait();
 }
 
-static int ElsSha256Update(wc_Sha256* sha256, const byte* in, word32 inSz)
+/* Absorb bytes into the context hanging off *devCtx, claiming one on the first
+ * call. Every wolfCrypt hash object the port serves keeps its state here, so
+ * the caller passes the address of its devCtx rather than the object. */
+static int ElsHashUpdate(void** devCtx, byte mode, const byte* in, word32 inSz)
 {
     ElsHashCtx* ctx;
-    word32 take, whole;
+    word32 blockSz, take, whole;
     int ret;
 
-    if (sha256->devCtx == ELS_HASH_DECLINED) {
+    if (*devCtx == ELS_HASH_DECLINED) {
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
 
@@ -547,23 +578,24 @@ static int ElsSha256Update(wc_Sha256* sha256, const byte* in, word32 inSz)
         return ret;
     }
 
-    ctx = (ElsHashCtx*)sha256->devCtx;
+    ctx = (ElsHashCtx*)*devCtx;
     if (ctx == NULL) {
-        ctx = ElsHashClaim(sha256);
+        ctx = ElsHashClaim(devCtx, mode);
         if (ctx == NULL) {
             /* pool empty - hand this hash to software, permanently */
-            sha256->devCtx = ELS_HASH_DECLINED;
+            *devCtx = ELS_HASH_DECLINED;
             ElsUnlock();
             return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
         }
-        sha256->devCtx = ctx;
+        *devCtx = ctx;
     }
 
+    blockSz = ElsHashBlockSz(ctx->mode);
     ctx->total += inSz;
 
     /* top up the residual block first */
     if (ctx->buffered > 0) {
-        take = ELS_SHA256_BLOCK - ctx->buffered;
+        take = blockSz - ctx->buffered;
         if (take > inSz) {
             take = inSz;
         }
@@ -572,8 +604,8 @@ static int ElsSha256Update(wc_Sha256* sha256, const byte* in, word32 inSz)
         in += take;
         inSz -= take;
 
-        if (ctx->buffered == ELS_SHA256_BLOCK) {
-            ret = ElsHashBlocks(ctx, ctx->buf, ELS_SHA256_BLOCK);
+        if (ctx->buffered == blockSz) {
+            ret = ElsHashBlocks(ctx, ctx->buf, blockSz);
             if (ret != 0) {
                 goto out;
             }
@@ -582,7 +614,7 @@ static int ElsSha256Update(wc_Sha256* sha256, const byte* in, word32 inSz)
     }
 
     /* whole blocks straight from the caller's buffer */
-    whole = (inSz / ELS_SHA256_BLOCK) * ELS_SHA256_BLOCK;
+    whole = (inSz / blockSz) * blockSz;
     if (whole > 0) {
         ret = ElsHashBlocks(ctx, in, whole);
         if (ret != 0) {
@@ -609,16 +641,17 @@ out:
     return ret;
 }
 
-static int ElsSha256Final(wc_Sha256* sha256, byte* digest)
+/* Pad, absorb the tail, and take the digest from the running state. */
+static int ElsHashFinal(void** devCtx, byte* digest, word32 digestSz)
 {
-    ALIGN32 byte tail[2u * ELS_SHA256_BLOCK];
+    ALIGN32 byte tail[2u * ELS_HASH_MAX_BLOCK];
     ElsHashCtx* ctx;
-    word32 tailSz;
+    word32 blockSz, lenSz, tailSz;
     word64 bitLen;
     int ret;
     int i;
 
-    if (sha256->devCtx == NULL || sha256->devCtx == ELS_HASH_DECLINED) {
+    if (*devCtx == NULL || *devCtx == ELS_HASH_DECLINED) {
         /* never claimed, so software holds the whole message */
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
@@ -628,25 +661,26 @@ static int ElsSha256Final(wc_Sha256* sha256, byte* digest)
         return ret;
     }
 
-    ctx = (ElsHashCtx*)sha256->devCtx;
+    ctx = (ElsHashCtx*)*devCtx;
+    blockSz = ElsHashBlockSz(ctx->mode);
+    lenSz   = ElsHashLenSz(ctx->mode);
 
-    /* A block failed earlier, so total counts bytes the engine never
-     * absorbed and the padding below would claim a length that was never
-     * hashed. Fail rather than hand back a digest that looks right. */
+    /* A block failed earlier, so the padding below would claim a length that
+     * was never hashed. Fail rather than hand back a plausible digest. */
     if (ctx->failed) {
         ElsUnlock();
         return WC_NO_ERR_TRACE(WC_HW_E);
     }
 
-    /* residual, then 0x80, zeros, and a 64-bit big-endian bit count. A second
-     * block is needed when the remainder leaves no room for the length. */
+    /* residual, then 0x80, zeros, and a big-endian bit count of lenSz bytes. A
+     * second block is needed when the remainder leaves no room for it. */
     XMEMSET(tail, 0, sizeof(tail));
     if (ctx->buffered > 0) {
         XMEMCPY(tail, ctx->buf, ctx->buffered);
     }
     tail[ctx->buffered] = 0x80;
-    tailSz = (ctx->buffered + 1u + 8u > ELS_SHA256_BLOCK)
-                 ? (2u * ELS_SHA256_BLOCK) : ELS_SHA256_BLOCK;
+    tailSz = (ctx->buffered + 1u + lenSz > blockSz)
+                 ? (2u * blockSz) : blockSz;
 
     bitLen = ctx->total * 8u;
     for (i = 0; i < 8; i++) {
@@ -655,12 +689,13 @@ static int ElsSha256Final(wc_Sha256* sha256, byte* digest)
 
     ret = ElsHashBlocks(ctx, tail, tailSz);
     if (ret == 0) {
-        /* after the padded tail the running state IS the digest */
-        XMEMCPY(digest, ctx->state, WC_SHA256_DIGEST_SIZE);
+        /* after the padded tail the running state IS the digest, truncated
+         * for the modes whose output is shorter than the state */
+        XMEMCPY(digest, ctx->state, digestSz);
     }
 
     ElsHashRelease(ctx);
-    sha256->devCtx = NULL;
+    *devCtx = NULL;
 
     ElsUnlock();
     ForceZero(tail, sizeof(tail));
@@ -669,46 +704,64 @@ static int ElsSha256Final(wc_Sha256* sha256, byte* digest)
 }
 
 /* Release a pool entry when the caller frees its hash without finalising. */
-static void ElsSha256FreeCtx(wc_Sha256* sha256)
+static void ElsHashFreeCtx(void** devCtx)
 {
-    if (sha256 == NULL) {
+    if (*devCtx == ELS_HASH_DECLINED) {
+        *devCtx = NULL;
         return;
     }
-    if (sha256->devCtx == ELS_HASH_DECLINED) {
-        sha256->devCtx = NULL;
-        return;
-    }
-    if (sha256->devCtx != NULL) {
+    if (*devCtx != NULL) {
         if (ElsLock() == 0) {
-            ElsHashRelease((ElsHashCtx*)sha256->devCtx);
+            ElsHashRelease((ElsHashCtx*)*devCtx);
             ElsUnlock();
         }
-        sha256->devCtx = NULL;
+        *devCtx = NULL;
     }
 }
 
-/* Duplicate a hash.
- *
- * wc_Sha256Copy() otherwise falls through to a struct-wide XMEMCPY, which
- * copies devCtx verbatim and leaves two wc_Sha256 objects sharing one pool
- * entry. That is not a corner case: wc_Sha256GetHash() is Copy-then-Final and
- * is how TLS 1.3 snapshots its transcript hash on every handshake. Finalising
- * the copy would write through the shared state and hand the entry back to the
- * pool while the original still pointed at it.
- *
- * Note the callback runs BEFORE wc_Sha256Copy()'s own XMEMCPY and returning
- * anything but CRYPTOCB_UNAVAILABLE makes it return immediately - so this
- * handler owns the entire duplication, struct included, not just the devCtx
- * fix-up.
- *
- * CRYPTOCB_UNAVAILABLE is returned only when the source has no hardware state,
- * where the plain struct copy is exactly right. When the source IS on hardware
- * there is no software state to fall back on, so pool exhaustion has to be an
- * error rather than a silent alias. */
+/* Duplicate the hardware half of a hash. Caller has already established that
+ * the source is on hardware, and owns the struct copy afterwards. */
+static int ElsHashCopyCtx(void** srcCtx, void** dstCtx, void* dstOwner)
+{
+    ElsHashCtx* src;
+    ElsHashCtx* dst;
+    int ret;
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    src = (ElsHashCtx*)*srcCtx;
+
+    dst = ElsHashClaim(dstOwner, src->mode);
+    if (dst == NULL) {
+        ElsUnlock();
+        return WC_NO_ERR_TRACE(MEMORY_E);
+    }
+
+    /* running state first, then re-own it - the copy overwrote owner/inUse */
+    XMEMCPY(dst, src, sizeof(*dst));
+    dst->owner = dstOwner;
+    dst->inUse = 1;
+
+    ElsUnlock();
+
+    *dstCtx = dst;
+
+    return 0;
+}
+
+
+#ifndef NO_SHA256
+
+/* Duplicate a hash. The callback runs BEFORE wc_Sha256Copy()'s own XMEMCPY and
+ * returning anything but CRYPTOCB_UNAVAILABLE makes it return immediately, so
+ * this handler owns the whole duplication, struct included. A source on
+ * hardware has no software state to fall back on, so pool exhaustion errors. */
 static int ElsSha256Copy(wc_Sha256* src, wc_Sha256* dst)
 {
-    ElsHashCtx* srcCtx;
-    ElsHashCtx* dstCtx;
+    void* dstCtx = NULL;
     int ret;
 
     if (src == NULL || dst == NULL) {
@@ -718,35 +771,15 @@ static int ElsSha256Copy(wc_Sha256* src, wc_Sha256* dst)
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
 
-    /* The full teardown, not just our pool entry. Returning success from this
-     * handler makes wc_Sha256Copy() return immediately, so the free it would
-     * have done never happens - and the struct copy below then overwrites
-     * dst->msg and dst->W with the source's pointers, stranding whatever the
-     * destination already owned. wc_Sha256Free() routes through the free
-     * callback into ElsSha256FreeCtx(), which by design reports
-     * CRYPTOCB_UNAVAILABLE so the software teardown still runs; there is no
-     * recursion back into this handler. */
+    /* The full teardown, not just our pool entry: success here skips the free
+     * wc_Sha256Copy() would have done, and the struct copy below would then
+     * strand whatever dst->msg and dst->W already owned. */
     wc_Sha256Free(dst);
 
-    ret = ElsLock();
+    ret = ElsHashCopyCtx(&src->devCtx, &dstCtx, dst);
     if (ret != 0) {
         return ret;
     }
-
-    srcCtx = (ElsHashCtx*)src->devCtx;
-
-    dstCtx = ElsHashClaim(dst);
-    if (dstCtx == NULL) {
-        ElsUnlock();
-        return WC_NO_ERR_TRACE(MEMORY_E);
-    }
-
-    /* running state first, then re-own it - the copy overwrote owner/inUse */
-    XMEMCPY(dstCtx, srcCtx, sizeof(*dstCtx));
-    dstCtx->owner = dst;
-    dstCtx->inUse = 1;
-
-    ElsUnlock();
 
     XMEMCPY(dst, src, sizeof(wc_Sha256));
     dst->devCtx = dstCtx;
@@ -758,7 +791,7 @@ static int ElsSha256Copy(wc_Sha256* src, wc_Sha256* dst)
     dst->W = (word32*)XMALLOC(sizeof(word32) * WC_SHA256_BLOCK_SIZE,
                               dst->heap, DYNAMIC_TYPE_DIGEST);
     if (dst->W == NULL) {
-        ElsSha256FreeCtx(dst);
+        ElsHashFreeCtx(&dst->devCtx);
         XMEMSET(dst, 0, sizeof(wc_Sha256));
         return WC_NO_ERR_TRACE(MEMORY_E);
     }
@@ -773,7 +806,7 @@ static int ElsSha256Copy(wc_Sha256* src, wc_Sha256* dst)
         dst->msg = (byte*)XMALLOC(src->len, dst->heap,
                                   DYNAMIC_TYPE_TMP_BUFFER);
         if (dst->msg == NULL) {
-            ElsSha256FreeCtx(dst);
+            ElsHashFreeCtx(&dst->devCtx);
             XMEMSET(dst, 0, sizeof(wc_Sha256));
             return WC_NO_ERR_TRACE(MEMORY_E);
         }
@@ -786,20 +819,49 @@ static int ElsSha256Copy(wc_Sha256* src, wc_Sha256* dst)
 
 #endif /* !NO_SHA256 */
 
+#ifdef ELS_HASH_SHA512
+
+/* The SHA-512 counterpart of ElsSha256Copy. wc_Sha512Copy() has no allocation
+ * to hand back, so there is no fix-up after the struct copy. */
+static int ElsSha512Copy(wc_Sha512* src, wc_Sha512* dst)
+{
+    void* dstCtx = NULL;
+    int ret;
+
+    if (src == NULL || dst == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (src->devCtx == NULL || src->devCtx == ELS_HASH_DECLINED) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    wc_Sha512Free(dst);
+
+    ret = ElsHashCopyCtx(&src->devCtx, &dstCtx, dst);
+    if (ret != 0) {
+        return ret;
+    }
+
+    XMEMCPY(dst, src, sizeof(wc_Sha512));
+    dst->devCtx = dstCtx;
+
+#ifdef WOLFSSL_HASH_FLAGS
+    dst->flags |= WC_HASH_FLAG_ISCOPY;
+#endif
+
+    return 0;
+}
+
+#endif /* ELS_HASH_SHA512 */
+
+#endif /* !NO_SHA256 || WOLFSSL_SHA384 || WOLFSSL_SHA512 */
+
 /* ---------------------------------------------------------------------------
  * AES-ECB / CBC / CTR
- *
- * Simpler than hashing: mcuxClEls_Cipher_Async takes the key and the data
- * together, so nothing has to survive between calls and the lock is held for
- * one operation. wolfCrypt keeps the raw key in aes->devKey precisely for
- * offload, and aes->reg carries the IV or counter, which ELS updates in place
- * through its in/out pIV - so chained calls continue correctly with no extra
- * bookkeeping here.
- *
- * ELS only knows 128- and 256-bit keys, and only whole blocks. AES-192 and any
- * trailing partial block are declined so software handles them; that is the
- * whole reason the fallback contract exists.
  * ------------------------------------------------------------------------ */
+
+/* ELS knows only 128- and 256-bit keys and only whole blocks. AES-192 and any
+ * trailing partial block are declined so software handles them. */
 
 #ifndef NO_AES
 
@@ -3218,43 +3280,111 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
             break;
 #endif /* !NO_AES */
 
-#if !defined(NO_SHA256)
+#if !defined(NO_SHA256) || defined(WOLFSSL_SHA384) || defined(WOLFSSL_SHA512)
         case WC_ALGO_TYPE_HASH:
-            if (info->hash.type != WC_HASH_TYPE_SHA256 ||
-                info->hash.sha256 == NULL) {
-                break;
-            }
-            /* sha256.c calls this two ways and never both at once: update
-             * passes (data, len, NULL) and final passes (NULL, 0, digest).
-             * Claim each separately - the running state lives in the caller's
-             * context, so there is no reason to see the whole message at once. */
-            if (info->hash.digest != NULL) {
-                ret = ElsSha256Final(info->hash.sha256, info->hash.digest);
-                if (ret == 0) {
-                    wc_ElsPkc_HashOffloadCount++;
-                }
-            }
-            else if (info->hash.in != NULL) {
-                ret = ElsSha256Update(info->hash.sha256, info->hash.in,
-                                      info->hash.inSz);
-                if (ret == 0) {
-                    wc_ElsPkc_HashOffloadCount++;
-                }
-            }
-            else {
-                /* update of zero bytes with no buffer: nothing to absorb */
-                ret = 0;
+            /* update passes (data, len, NULL) and final passes (NULL, 0,
+             * digest), never both. Claim each separately. */
+            switch (info->hash.type) {
+    #if !defined(NO_SHA256)
+                case WC_HASH_TYPE_SHA256:
+                    if (info->hash.sha256 == NULL) {
+                        break;
+                    }
+                    if (info->hash.digest != NULL) {
+                        ret = ElsHashFinal(&info->hash.sha256->devCtx,
+                                info->hash.digest, WC_SHA256_DIGEST_SIZE);
+                    }
+                    else if (info->hash.in != NULL) {
+                        ret = ElsHashUpdate(&info->hash.sha256->devCtx,
+                                MCUXCLELS_HASH_MODE_SHA_256,
+                                info->hash.in, info->hash.inSz);
+                    }
+                    else {
+                        /* update of zero bytes with no buffer */
+                        ret = 0;
+                        break;
+                    }
+                    if (ret == 0) {
+                        wc_ElsPkc_HashOffloadCount++;
+                    }
+                    break;
+    #endif
+    #ifdef WOLFSSL_SHA384
+                case WC_HASH_TYPE_SHA384:
+                    if (info->hash.sha384 == NULL) {
+                        break;
+                    }
+                    if (info->hash.digest != NULL) {
+                        ret = ElsHashFinal(&info->hash.sha384->devCtx,
+                                info->hash.digest, WC_SHA384_DIGEST_SIZE);
+                    }
+                    else if (info->hash.in != NULL) {
+                        ret = ElsHashUpdate(&info->hash.sha384->devCtx,
+                                MCUXCLELS_HASH_MODE_SHA_384,
+                                info->hash.in, info->hash.inSz);
+                    }
+                    else {
+                        ret = 0;
+                        break;
+                    }
+                    if (ret == 0) {
+                        wc_ElsPkc_HashOffloadCount++;
+                    }
+                    break;
+    #endif
+    #ifdef WOLFSSL_SHA512
+                case WC_HASH_TYPE_SHA512:
+                    if (info->hash.sha512 == NULL) {
+                        break;
+                    }
+                    if (info->hash.digest != NULL) {
+                        ret = ElsHashFinal(&info->hash.sha512->devCtx,
+                                info->hash.digest, WC_SHA512_DIGEST_SIZE);
+                    }
+                    else if (info->hash.in != NULL) {
+                        ret = ElsHashUpdate(&info->hash.sha512->devCtx,
+                                MCUXCLELS_HASH_MODE_SHA_512,
+                                info->hash.in, info->hash.inSz);
+                    }
+                    else {
+                        ret = 0;
+                        break;
+                    }
+                    if (ret == 0) {
+                        wc_ElsPkc_HashOffloadCount++;
+                    }
+                    break;
+    #endif
+                default:
+                    break;
             }
             break;
 #endif
 
-#if defined(WOLF_CRYPTO_CB_COPY) && !defined(NO_SHA256)
+#if defined(WOLF_CRYPTO_CB_COPY) && (!defined(NO_SHA256) || \
+    defined(WOLFSSL_SHA384) || defined(WOLFSSL_SHA512))
         case WC_ALGO_TYPE_COPY:
-            if (info->copy.algo == WC_ALGO_TYPE_HASH &&
-                info->copy.type == WC_HASH_TYPE_SHA256) {
+            if (info->copy.algo != WC_ALGO_TYPE_HASH) {
+                break;
+            }
+    #if !defined(NO_SHA256)
+            if (info->copy.type == WC_HASH_TYPE_SHA256) {
                 ret = ElsSha256Copy((wc_Sha256*)info->copy.src,
                                     (wc_Sha256*)info->copy.dst);
             }
+    #endif
+    #ifdef WOLFSSL_SHA384
+            if (info->copy.type == WC_HASH_TYPE_SHA384) {
+                ret = ElsSha512Copy((wc_Sha384*)info->copy.src,
+                                    (wc_Sha384*)info->copy.dst);
+            }
+    #endif
+    #ifdef WOLFSSL_SHA512
+            if (info->copy.type == WC_HASH_TYPE_SHA512) {
+                ret = ElsSha512Copy((wc_Sha512*)info->copy.src,
+                                    (wc_Sha512*)info->copy.dst);
+            }
+    #endif
             break;
 #endif
 
@@ -3262,8 +3392,23 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
         case WC_ALGO_TYPE_FREE:
     #if !defined(NO_SHA256)
             if (info->free.algo == WC_ALGO_TYPE_HASH &&
-                info->free.type == WC_HASH_TYPE_SHA256) {
-                ElsSha256FreeCtx((wc_Sha256*)info->free.obj);
+                info->free.type == WC_HASH_TYPE_SHA256 &&
+                info->free.obj != NULL) {
+                ElsHashFreeCtx(&((wc_Sha256*)info->free.obj)->devCtx);
+            }
+    #endif
+    #ifdef WOLFSSL_SHA384
+            if (info->free.algo == WC_ALGO_TYPE_HASH &&
+                info->free.type == WC_HASH_TYPE_SHA384 &&
+                info->free.obj != NULL) {
+                ElsHashFreeCtx(&((wc_Sha384*)info->free.obj)->devCtx);
+            }
+    #endif
+    #ifdef WOLFSSL_SHA512
+            if (info->free.algo == WC_ALGO_TYPE_HASH &&
+                info->free.type == WC_HASH_TYPE_SHA512 &&
+                info->free.obj != NULL) {
+                ElsHashFreeCtx(&((wc_Sha512*)info->free.obj)->devCtx);
             }
     #endif
     #if defined(WOLFSSL_CMAC) && !defined(NO_AES)
