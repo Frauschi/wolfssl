@@ -1508,13 +1508,19 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
     #define WOLFSSL_ELS_PKC_RAM_SIZE 0x2000u
 #endif
 
-/* Large enough for every operation this port claims: RSA sign/verify tops out
- * at 536 bytes (4096-bit, NoEncode) and ECC at 504. */
+/* mcuxClSession takes two work areas: this one in ordinary RAM, for the
+ * library's own bookkeeping, and separately the fixed PKC window above. Large
+ * enough for every operation this port claims: RSA sign/verify tops out at 536
+ * bytes (4096-bit, NoEncode) and ECC at 504. */
 #ifndef WOLFSSL_ELS_PKC_CPU_WA_SZ
     #define WOLFSSL_ELS_PKC_CPU_WA_SZ 1024
 #endif
 
+#ifndef NO_RSA
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
 unsigned long wc_ElsPkc_RsaOffloadCount = 0;
+#endif
+#endif
 
 static uint32_t elsPkcCpuWa[(WOLFSSL_ELS_PKC_CPU_WA_SZ + 3u) / 4u];
 static uint32_t elsPkcRngCtx[64];
@@ -4009,19 +4015,17 @@ int wc_ElsPkc_Cleanup(void)
     }
 
     if (elsLockInit) {
+        /* Close the gate from inside the lock, so a caller that has already
+         * passed ElsLock()'s test either completed before this point or is
+         * blocked on the mutex we hold. Only then is elsLockInit cleared -
+         * ElsUnlock() keys off it, so clearing it under a caller that still
+         * holds the lock would strand the mutex held forever. */
         if (wc_LockMutex(&elsLock) == 0) {
-            /* Drop every claimed pool entry. Left alone they stay marked in
-             * use across the cleanup, so a later wc_ElsPkc_Init() comes up
-             * with reduced or zero offload capacity for no visible reason -
-             * and unrecoverably, because once elsLockInit is clear the free
-             * paths can no longer take the lock to release them. The CMAC
-             * pool also holds plaintext keys, which must not outlive a
-             * shutdown. Any live wc_Sha256 or Cmac must be freed first. */
-            ForceZero(elsHashPool, sizeof(elsHashPool));
-#if defined(WOLFSSL_CMAC) && !defined(NO_AES)
-            ForceZero(elsCmacPool, sizeof(elsCmacPool));
-#endif
+            elsReady = 0;
             (void)wc_UnLockMutex(&elsLock);
+        }
+        else {
+            elsReady = 0;
         }
         elsLockInit = 0;
         wc_FreeMutex(&elsLock);
