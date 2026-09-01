@@ -68,7 +68,9 @@ env:
   # that the els_pkc rw61x platform layer includes. hal_nxp repackages NXP's
   # mcux-sdk-ng verbatim and is the stable public source for them; a customer
   # points --with-mcux-sdk at their own MCUXpresso SDK install instead.
-  HAL_NXP_REF: main
+  # Pinned to a commit rather than to master: the branch moves, and an
+  # unrelated hal_nxp change should not turn a wolfSSL pull request red.
+  HAL_NXP_REF: 7e2ce62b0e8a066e2a7ec5b224c7b7f31387a274
   # m33mu emulates the Cortex-M33; see the emulated job for what it does and
   # does not cover on RW612.
   M33MU_REF: d5cf752
@@ -107,11 +109,16 @@ jobs:
       # Sparse: the full tree is >2GB, the RW612 device headers are ~6MB.
       - name: Fetch the RW612 device headers
         run: |
-          git clone --depth 1 --branch "$HAL_NXP_REF" --filter=blob:none --sparse \
-            https://github.com/zephyrproject-rtos/hal_nxp.git "$RUNNER_TEMP/hal_nxp"
-          git -C "$RUNNER_TEMP/hal_nxp" sparse-checkout set \
+          git init -q "$RUNNER_TEMP/hal_nxp"
+          git -C "$RUNNER_TEMP/hal_nxp" remote add origin \
+            https://github.com/zephyrproject-rtos/hal_nxp.git
+          git -C "$RUNNER_TEMP/hal_nxp" config core.sparseCheckout true
+          git -C "$RUNNER_TEMP/hal_nxp" sparse-checkout set --cone \
             mcux/mcux-sdk-ng/devices/Wireless/RW \
             mcux/mcux-sdk-ng/drivers/common
+          git -C "$RUNNER_TEMP/hal_nxp" fetch --depth 1 --filter=blob:none \
+            origin "$HAL_NXP_REF"
+          git -C "$RUNNER_TEMP/hal_nxp" checkout -q FETCH_HEAD
           test -f "$RUNNER_TEMP/hal_nxp/mcux/mcux-sdk-ng/devices/Wireless/RW/RW612/fsl_device_registers.h"
 
       - name: Cross-compile the port
@@ -204,11 +211,16 @@ jobs:
 
       - name: Fetch the RW612 device headers
         run: |
-          git clone --depth 1 --branch "$HAL_NXP_REF" --filter=blob:none --sparse \
-            https://github.com/zephyrproject-rtos/hal_nxp.git "$RUNNER_TEMP/hal_nxp"
-          git -C "$RUNNER_TEMP/hal_nxp" sparse-checkout set \
+          git init -q "$RUNNER_TEMP/hal_nxp"
+          git -C "$RUNNER_TEMP/hal_nxp" remote add origin \
+            https://github.com/zephyrproject-rtos/hal_nxp.git
+          git -C "$RUNNER_TEMP/hal_nxp" config core.sparseCheckout true
+          git -C "$RUNNER_TEMP/hal_nxp" sparse-checkout set --cone \
             mcux/mcux-sdk-ng/devices/Wireless/RW \
             mcux/mcux-sdk-ng/drivers/common
+          git -C "$RUNNER_TEMP/hal_nxp" fetch --depth 1 --filter=blob:none \
+            origin "$HAL_NXP_REF"
+          git -C "$RUNNER_TEMP/hal_nxp" checkout -q FETCH_HEAD
 
       # Pinned for the same reason the vendor trees are: an unrelated emulator
       # change should not turn a wolfSSL pull request red.
