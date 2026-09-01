@@ -43,6 +43,11 @@ extern "C" {
  * the guard reads garbage and the call fails with DEADLOCK_AVERTED_E (-1000)
  * before doing any work. */
 #define NO_THREAD_LS
+
+/* newlib does not declare getpid(), but --specs=nosys.specs makes configure's
+ * link probe for it succeed, so random.c would compile against an implicit
+ * declaration. There are no processes here to identify. */
+#define WOLFSSL_NO_GETPID
 #define NO_FILESYSTEM
 #define NO_WRITEV
 #define WOLFSSL_NO_SOCK
