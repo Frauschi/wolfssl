@@ -31,14 +31,27 @@ wolfSSL never builds or vendors CLNS. The port calls into it and the application
 | `-DCPU_RW612ETA2I` | `fsl_device_registers.h` selects the register map from the part number. Use the macro matching your part; only the A2 parts appear in its selector. |
 | `-mcmse` | Matches how NXP builds CLNS. |
 | `-DNO_THREAD_LS` | Required on bare metal. See below. |
+| `-DWOLFSSL_NO_GETPID` | Required with newlib. See below. |
 
 ### wolfCrypt_Init() returning -1000
 
 `wolfCrypt_Init()` guards against recursive entry with a `__thread` variable whenever the toolchain advertises thread-local storage. On bare metal nothing sets the thread pointer, so that read returns garbage, the guard fires, and the call returns `DEADLOCK_AVERTED_E` (-1000) before initialising anything. Define `NO_THREAD_LS` unless your runtime really does set up TLS.
 
+### random.c and an implicit declaration of getpid()
+
+`--specs=nosys.specs` gives the linker a stub for every syscall, which is what
+lets autoconf's link probes succeed without a board support package. It also
+makes the probe for `getpid()` succeed, so `HAVE_GETPID` ends up defined even
+though newlib's headers never declare the function, and `random.c` then fails
+to compile on an implicit declaration. Define `WOLFSSL_NO_GETPID`; a bare metal
+target has no processes to identify.
+
+Toolchains shipping picolibc rather than newlib, such as the Zephyr SDK's
+`arm-zephyr-eabi`, declare `getpid()` and do not need this.
+
 ## Building with autoconf instead
 
-The same result from a source tarball or checkout, which is also what CI compiles:
+The same result from a source tarball or checkout. Note that no CI job builds this port today - it needs the vendor library and the SoC headers, neither of which the CI images carry - so a green run says nothing about it:
 
 ```sh
 ./autogen.sh
@@ -50,7 +63,8 @@ The same result from a source tarball or checkout, which is also what CI compile
     --with-mcux-sdk=/path/to/mcux-sdk-ng \
     --disable-filesystem --enable-singlethreaded \
     CFLAGS="-mcpu=cortex-m33+nodsp -mthumb -Os --specs=nosys.specs" \
-    CPPFLAGS="-DWOLFSSL_NO_SOCK -DWOLFSSL_USER_IO -DNO_WRITEV -DNO_DEV_RANDOM -DNO_THREAD_LS"
+    CPPFLAGS="-DWOLFSSL_NO_SOCK -DWOLFSSL_USER_IO -DNO_WRITEV -DNO_DEV_RANDOM \
+              -DNO_THREAD_LS -DWOLFSSL_NO_GETPID"
 make
 ```
 
