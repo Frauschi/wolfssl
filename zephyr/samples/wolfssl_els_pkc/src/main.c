@@ -1242,6 +1242,7 @@ int main(void)
         before = wc_ElsPkc_KeyStoreOffloadCount;
         r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
                                kwkRef, WC_ELSPKC_KEYREF_SZ,
+                               WC_KEYSTORE_KEY_WRAP,
                                dukRef, WC_ELSPKC_KEYREF_SZ,
                                0, deriv1, sizeof(deriv1), 0, NULL);
         check("KWK derived from the DUK", r == 0);
@@ -1252,6 +1253,7 @@ int main(void)
          * cannot be added afterwards */
         r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
                                aesRef, WC_ELSPKC_KEYREF_SZ,
+                               WC_KEYSTORE_KEY_AES,
                                dukRef, WC_ELSPKC_KEYREF_SZ,
                                0, deriv2, sizeof(deriv2),
                                WC_KEYSTORE_ATTR_EXPORTABLE, NULL);
@@ -1270,8 +1272,8 @@ int main(void)
         r = wc_KeyStore_ExportWrapped(WOLFSSL_ELS_PKC_DEVID,
                                       aesRef, WC_ELSPKC_KEYREF_SZ,
                                       kwkRef, WC_ELSPKC_KEYREF_SZ,
-                                      NULL, &blobSz, WC_KEYWRAP_FORMAT_VENDOR,
-                                      NULL);
+                                      WC_KEYWRAP_FORMAT_VENDOR,
+                                      NULL, &blobSz, NULL);
         check("export size query returns 32", blobSz == 32);
 
         blobSz = sizeof(blob);
@@ -1279,8 +1281,8 @@ int main(void)
         r = wc_KeyStore_ExportWrapped(WOLFSSL_ELS_PKC_DEVID,
                                       aesRef, WC_ELSPKC_KEYREF_SZ,
                                       kwkRef, WC_ELSPKC_KEYREF_SZ,
-                                      blob, &blobSz, WC_KEYWRAP_FORMAT_VENDOR,
-                                      NULL);
+                                      WC_KEYWRAP_FORMAT_VENDOR,
+                                      blob, &blobSz, NULL);
         check("key exported under the KWK", r == 0 && blobSz == 32);
 
         /* destroy it, then bring the same key back from the blob */
@@ -1295,17 +1297,42 @@ int main(void)
 
         r = wc_KeyStore_ImportWrapped(WOLFSSL_ELS_PKC_DEVID,
                                       aesRef, WC_ELSPKC_KEYREF_SZ,
+                                      WC_KEYSTORE_KEY_AES,
                                       kwkRef, WC_ELSPKC_KEYREF_SZ,
-                                      blob, blobSz, WC_KEYWRAP_FORMAT_VENDOR,
-                                      NULL);
+                                      WC_KEYWRAP_FORMAT_VENDOR,
+                                      blob, blobSz, 0, NULL);
         check("blob imported back into the slot", r == 0);
+
+        /* A mismatch is refused in software, before the unwrap, so a wrong
+         * blob never reaches the engine. */
+        r = wc_KeyStore_ImportWrapped(WOLFSSL_ELS_PKC_DEVID,
+                                      aesRef, WC_ELSPKC_KEYREF_SZ,
+                                      WC_KEYSTORE_KEY_HMAC,
+                                      kwkRef, WC_ELSPKC_KEYREF_SZ,
+                                      WC_KEYWRAP_FORMAT_VENDOR,
+                                      blob, blobSz, 0, NULL);
+        check("import REFUSES a keyType the slot contradicts", r != 0);
+
+        before = wc_ElsPkc_KeyStoreOffloadCount;
+        r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
+                               aesRef, WC_ELSPKC_KEYREF_SZ,
+                               WC_KEYSTORE_KEY_ECC_SIGN,
+                               dukRef, WC_ELSPKC_KEYREF_SZ,
+                               0, deriv2, sizeof(deriv2), 0, NULL);
+        check("derive REFUSES a keyType the slot contradicts", r != 0);
+        check("...and it never reached the hardware",
+              wc_ElsPkc_KeyStoreOffloadCount == before);
 
         kt = ks = attrs = 0;
         r = wc_KeyStore_GetInfo(WOLFSSL_ELS_PKC_DEVID, aesRef,
                                 WC_ELSPKC_KEYREF_SZ, &kt, &ks, &attrs, NULL);
+        /* The import above asked for no attributes. The container carries
+         * its own and they win: the restored key is still exportable. */
         check("restored key has the original properties",
               r == 0 && kt == WC_KEYSTORE_KEY_AES && ks == 128 &&
               (attrs & WC_KEYSTORE_ATTR_EXPORTABLE));
+        check("the container's attributes won over the caller's",
+              (attrs & WC_KEYSTORE_ATTR_EXPORTABLE) != 0);
 
         /* a key that was never made exportable must not be able to leave */
         {
@@ -1324,6 +1351,7 @@ int main(void)
 
             r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
                                    sealedRef, WC_ELSPKC_KEYREF_SZ,
+                                   WC_KEYSTORE_KEY_AES,
                                    dukRef, WC_ELSPKC_KEYREF_SZ,
                                    0, d3, sizeof(d3), 0, NULL);
             check("non-exportable key derived", r == 0);
@@ -1332,8 +1360,8 @@ int main(void)
             r = wc_KeyStore_ExportWrapped(WOLFSSL_ELS_PKC_DEVID,
                                           sealedRef, WC_ELSPKC_KEYREF_SZ,
                                           kwkRef, WC_ELSPKC_KEYREF_SZ,
-                                          blob, &blobSz,
-                                          WC_KEYWRAP_FORMAT_VENDOR, NULL);
+                                          WC_KEYWRAP_FORMAT_VENDOR,
+                                          blob, &blobSz, NULL);
             check("export REFUSED for a sealed key", r != 0);
             (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, sealedRef,
                                      WC_ELSPKC_KEYREF_SZ, NULL);
@@ -1369,6 +1397,7 @@ int main(void)
                                          WC_ELSPKC_KEYREF_SZ, NULL);
                 r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
                                        aesRef, WC_ELSPKC_KEYREF_SZ,
+                                       WC_KEYSTORE_KEY_AES,
                                        dukRef, WC_ELSPKC_KEYREF_SZ,
                                        0, deriv2, sizeof(deriv2),
                                        WC_KEYSTORE_ATTR_EXPORTABLE, NULL);
@@ -1378,8 +1407,8 @@ int main(void)
                 r = wc_KeyStore_ExportWrapped(WOLFSSL_ELS_PKC_DEVID,
                         aesRef, WC_ELSPKC_KEYREF_SZ,
                         kekRef, WC_ELSPKC_KEYREF_SZ,
-                        kekBlob, &kekBlobSz,
-                        WC_KEYWRAP_FORMAT_VENDOR, NULL);
+                        WC_KEYWRAP_FORMAT_VENDOR,
+                        kekBlob, &kekBlobSz, NULL);
                 check("key wrapped under the die KEK", r == 0);
             }
             if (r == 0) {
@@ -1389,9 +1418,10 @@ int main(void)
             if (r == 0) {
                 r = wc_KeyStore_ImportWrapped(WOLFSSL_ELS_PKC_DEVID,
                         aesRef, WC_ELSPKC_KEYREF_SZ,
+                        WC_KEYSTORE_KEY_AES,
                         kekRef, WC_ELSPKC_KEYREF_SZ,
-                        kekBlob, kekBlobSz,
-                        WC_KEYWRAP_FORMAT_VENDOR, NULL);
+                        WC_KEYWRAP_FORMAT_VENDOR,
+                        kekBlob, kekBlobSz, 0, NULL);
                 check("blob unwrapped again under the die KEK", r == 0);
             }
 

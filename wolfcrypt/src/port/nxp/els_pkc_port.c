@@ -6,7 +6,7 @@
  *
  * wolfSSL is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
+ * the Free Software Foundation; either version 3 of the License, or
  * (at your option) any later version.
  *
  * wolfSSL is distributed in the hope that it will be useful,
@@ -2342,8 +2342,48 @@ static word32 ElsKsTypeFromProp(const mcuxClEls_KeyProp_t* prop)
     if (prop->word.value & MCUXCLELS_KEYPROPERTY_VALUE_AES) {
         return WC_KEYSTORE_KEY_AES;
     }
+    /* Reported after the algorithm usages on purpose: a slot carrying both is
+     * more usefully described by what it computes than by what it wraps. */
+    if (prop->word.value & (MCUXCLELS_KEYPROPERTY_VALUE_KWK |
+                            MCUXCLELS_KEYPROPERTY_VALUE_KUOK)) {
+        return WC_KEYSTORE_KEY_WRAP;
+    }
+    if (prop->word.value & (MCUXCLELS_KEYPROPERTY_VALUE_CKDF |
+                            MCUXCLELS_KEYPROPERTY_VALUE_HKDF)) {
+        return WC_KEYSTORE_KEY_DERIVE;
+    }
 
     return WC_KEYSTORE_KEY_NONE;
+}
+
+/* The facility's key type for a reference's class. */
+static word32 ElsKsTypeFromClass(byte keyClass)
+{
+    switch (keyClass) {
+        case WC_ELSPKC_KEY_ECC_SIGN: return WC_KEYSTORE_KEY_ECC_SIGN;
+        case WC_ELSPKC_KEY_ECC_DH:   return WC_KEYSTORE_KEY_ECC_DH;
+        case WC_ELSPKC_KEY_AES:      return WC_KEYSTORE_KEY_AES;
+        case WC_ELSPKC_KEY_HMAC:     return WC_KEYSTORE_KEY_HMAC;
+        case WC_ELSPKC_KEY_CMAC:     return WC_KEYSTORE_KEY_CMAC;
+        case WC_ELSPKC_KEY_KWK:      return WC_KEYSTORE_KEY_WRAP;
+        case WC_ELSPKC_KEY_CKDF:     /* fall through */
+        case WC_ELSPKC_KEY_HKDF:     return WC_KEYSTORE_KEY_DERIVE;
+        default:                     return WC_KEYSTORE_KEY_NONE;
+    }
+}
+
+/* Check the caller's stated keyType against what the target reference names.
+ * WC_KEYSTORE_KEY_NONE is unspecified, not a claim to disagree with. */
+static int ElsKsCheckType(word32 keyType, byte keyClass)
+{
+    if (keyType == WC_KEYSTORE_KEY_NONE) {
+        return 0;
+    }
+    if (keyType != ElsKsTypeFromClass(keyClass)) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+
+    return 0;
 }
 
 /* Key size in bits, from the two-bit size field. */
@@ -2558,6 +2598,14 @@ static int ElsKsImport(wc_CryptoInfo* info)
                                 info->keystore.op.importWrapped.keyRefSz,
                                 &target);
     if (ret == 0) {
+        /* A cross-check, not a source: the container's property word decides.
+         * Catches the right blob aimed at the wrong slot, before the unwrap. */
+        ret = ElsKsCheckType(info->keystore.op.importWrapped.keyType,
+                             target.keyClass);
+    }
+    /* attrs is not consulted: the container's property word decides, and it is
+     * inside the wrap, so there is nothing to compare against yet. */
+    if (ret == 0) {
         ret = ElsKsWrapRef(info->keystore.op.importWrapped.wrapKeyRef,
                            info->keystore.op.importWrapped.wrapKeyRefSz,
                            0, &wrap);
@@ -2678,8 +2726,12 @@ static int ElsKsDerive(wc_CryptoInfo* info)
                                     &target);
     }
     if (ret == 0) {
+        ret = ElsKsCheckType(info->keystore.op.derive.keyType,
+                             target.keyClass);
+    }
+    if (ret == 0) {
         /* The derived key's permissions come from the target reference's
-         * class - that is what the caller is asking to create. */
+         * class, which keyType has just been checked against. */
         prop.word.value = 0u;
         prop.bits.upprot_priv = MCUXCLELS_KEYPROPERTY_PRIVILEGED_FALSE;
         prop.bits.upprot_sec  = MCUXCLELS_KEYPROPERTY_SECURE_FALSE;
@@ -3267,6 +3319,11 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
 #ifdef WOLF_CRYPTO_CB_KEYSTORE
         case WC_ALGO_TYPE_KEYSTORE:
             switch (info->keystore.type) {
+                /* No plaintext path in either direction: a key enters only as
+                 * an unwrapped blob or a derivation, and leaves only wrapped. */
+                case WC_KEYSTORE_IMPORT_PLAIN:
+                case WC_KEYSTORE_EXPORT_PLAIN:
+                    break;
                 case WC_KEYSTORE_IMPORT_WRAPPED:
                     ret = ElsKsImport(info);
                     break;
