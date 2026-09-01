@@ -1719,6 +1719,202 @@ int main(void)
                                  WC_ELSPKC_KEYREF_SZ, NULL);
     }
 
+    /* ---- CMAC under a key that never leaves the store --------------------
+     * ucmac is a permission of its own, so this is a second reference class.
+     * wc_InitCmac_Id() is given no key material, which looks like a
+     * zero-length update at the callback boundary; the port tells them apart
+     * by whether a device context exists yet. */
+#if defined(WOLFSSL_CMAC) && !defined(NO_AES)
+    {
+        wc_ElsPkc_KeyRef duk, cmA, cmB;
+        byte dukRef[WC_ELSPKC_KEYREF_SZ];
+        byte cmABlob[WC_ELSPKC_KEYREF_SZ];
+        byte cmBBlob[WC_ELSPKC_KEYREF_SZ];
+        byte msg[48], tagA[16], tagB[16], tagSplit[16];
+        word32 refSz, tagSz;
+        byte dA[12], dB[12];
+        unsigned long before;
+        unsigned k;
+        int r, ok;
+
+        for (k = 0; k < sizeof(msg); k++) msg[k] = (byte)(k * 3u + 5u);
+        memcpy(dA, "wolfcmac-aaa", 12);
+        memcpy(dB, "wolfcmac-bbb", 12);
+
+        memset(&duk, 0, sizeof(duk));
+        duk.keyClass = WC_ELSPKC_KEY_CKDF;
+        duk.slot     = 0;
+        refSz = sizeof(dukRef);
+        (void)wc_ElsPkc_MakeKeyRef(&duk, dukRef, &refSz);
+
+        memset(&cmA, 0, sizeof(cmA));
+        cmA.keyClass = WC_ELSPKC_KEY_CMAC;
+        cmA.slot     = 15;
+        refSz = sizeof(cmABlob);
+        (void)wc_ElsPkc_MakeKeyRef(&cmA, cmABlob, &refSz);
+
+        memset(&cmB, 0, sizeof(cmB));
+        cmB.keyClass = WC_ELSPKC_KEY_CMAC;
+        cmB.slot     = 16;
+        refSz = sizeof(cmBBlob);
+        (void)wc_ElsPkc_MakeKeyRef(&cmB, cmBBlob, &refSz);
+
+        (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, cmABlob,
+                                 WC_ELSPKC_KEYREF_SZ, NULL);
+        (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, cmBBlob,
+                                 WC_ELSPKC_KEYREF_SZ, NULL);
+
+        r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
+                               cmABlob, WC_ELSPKC_KEYREF_SZ,
+                               WC_KEYSTORE_KEY_CMAC,
+                               dukRef, WC_ELSPKC_KEYREF_SZ,
+                               0, dA, sizeof(dA), 0, NULL);
+        check("slot CMAC key A derived", r == 0);
+
+        r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
+                               cmBBlob, WC_ELSPKC_KEYREF_SZ,
+                               WC_KEYSTORE_KEY_CMAC,
+                               dukRef, WC_ELSPKC_KEYREF_SZ,
+                               0, dB, sizeof(dB), 0, NULL);
+        check("slot CMAC key B derived", r == 0);
+
+        /* one shot over the whole message */
+        {
+            Cmac cmac;
+
+            memset(tagA, 0, sizeof(tagA));
+            tagSz = sizeof(tagA);
+            before = wc_ElsPkc_CmacOffloadCount;
+
+            ok = 0;
+            if (wc_ElsPkc_CmacUseSlot(&cmac, &cmA, NULL,
+                                      WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_CmacUpdate(&cmac, msg, sizeof(msg));
+                if (r == 0) r = wc_CmacFinal(&cmac, tagA, &tagSz);
+                ok = (r == 0) && (tagSz == 16);
+            }
+            check("CMAC runs under a slot key", ok);
+            check("...on the hardware", wc_ElsPkc_CmacOffloadCount > before);
+            check("...and produced a tag",
+                  ok && memcmp(tagA, msg, 16) != 0);
+        }
+
+        /* the same key over the same message must agree with itself */
+        {
+            Cmac cmac;
+            byte again[16];
+
+            memset(again, 0, sizeof(again));
+            tagSz = sizeof(again);
+            ok = 0;
+            if (wc_ElsPkc_CmacUseSlot(&cmac, &cmA, NULL,
+                                      WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_CmacUpdate(&cmac, msg, sizeof(msg));
+                if (r == 0) r = wc_CmacFinal(&cmac, again, &tagSz);
+                ok = (r == 0) && (memcmp(again, tagA, 16) == 0);
+            }
+            check("CMAC under a slot key is repeatable", ok);
+        }
+
+        /* split updates must reach the same tag: the initialize and finalize
+         * bits are carried across commands and each names the slot again */
+        {
+            Cmac cmac;
+
+            memset(tagSplit, 0, sizeof(tagSplit));
+            tagSz = sizeof(tagSplit);
+            ok = 0;
+            if (wc_ElsPkc_CmacUseSlot(&cmac, &cmA, NULL,
+                                      WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_CmacUpdate(&cmac, msg, 5);
+                if (r == 0) r = wc_CmacUpdate(&cmac, msg + 5, 27);
+                if (r == 0) r = wc_CmacUpdate(&cmac, msg + 32, 16);
+                if (r == 0) r = wc_CmacFinal(&cmac, tagSplit, &tagSz);
+                ok = (r == 0) && (memcmp(tagSplit, tagA, 16) == 0);
+            }
+            check("split updates give the same tag under a slot key", ok);
+        }
+
+        /* the slot index must select the key here too */
+        {
+            Cmac cmac;
+
+            memset(tagB, 0, sizeof(tagB));
+            tagSz = sizeof(tagB);
+            ok = 0;
+            if (wc_ElsPkc_CmacUseSlot(&cmac, &cmB, NULL,
+                                      WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_CmacUpdate(&cmac, msg, sizeof(msg));
+                if (r == 0) r = wc_CmacFinal(&cmac, tagB, &tagSz);
+                ok = (r == 0);
+            }
+            check("CMAC runs under a second slot key", ok);
+            check("a different slot gives a different tag",
+                  ok && memcmp(tagA, tagB, 16) != 0);
+        }
+
+        /* an AES reference is not a CMAC reference, even for the same slot */
+        {
+            Cmac cmac;
+            wc_ElsPkc_KeyRef asAes = cmA;
+
+            asAes.keyClass = WC_ELSPKC_KEY_AES;
+            check("CmacUseSlot rejects a non-CMAC key class",
+                  wc_ElsPkc_CmacUseSlot(&cmac, &asAes, NULL,
+                                        WOLFSSL_ELS_PKC_DEVID) != 0);
+        }
+
+        /* a slot holding a key without ucmac must be refused by the hardware
+         * check, not merely by the class field the caller filled in */
+        {
+            wc_ElsPkc_KeyRef aesOnly;
+            byte aesOnlyBlob[WC_ELSPKC_KEYREF_SZ];
+            byte dC[12];
+            Cmac cmac;
+
+            memcpy(dC, "wolfaes-only", 12);
+            memset(&aesOnly, 0, sizeof(aesOnly));
+            aesOnly.keyClass = WC_ELSPKC_KEY_AES;
+            aesOnly.slot     = 17;
+            refSz = sizeof(aesOnlyBlob);
+            (void)wc_ElsPkc_MakeKeyRef(&aesOnly, aesOnlyBlob, &refSz);
+            (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, aesOnlyBlob,
+                                     WC_ELSPKC_KEYREF_SZ, NULL);
+
+            r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
+                                   aesOnlyBlob, WC_ELSPKC_KEYREF_SZ,
+                                   WC_KEYSTORE_KEY_AES,
+                                   dukRef, WC_ELSPKC_KEYREF_SZ,
+                                   0, dC, sizeof(dC), 0, NULL);
+            check("AES-only key derived for the negative case", r == 0);
+
+            /* the caller claims CMAC on a slot that carries only uaes */
+            aesOnly.keyClass = WC_ELSPKC_KEY_CMAC;
+            before = wc_ElsPkc_CmacOffloadCount;
+            ok = 0;
+            if (wc_ElsPkc_CmacUseSlot(&cmac, &aesOnly, NULL,
+                                      WOLFSSL_ELS_PKC_DEVID) != 0) {
+                ok = 1;   /* refused at init, which is where it should stop */
+            }
+            check("a slot without ucmac cannot drive a CMAC", ok);
+            check("...and the CMAC never ran",
+                  wc_ElsPkc_CmacOffloadCount == before);
+
+            (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, aesOnlyBlob,
+                                     WC_ELSPKC_KEYREF_SZ, NULL);
+        }
+
+        /* leave the store as we found it */
+        (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, cmABlob,
+                                 WC_ELSPKC_KEYREF_SZ, NULL);
+        (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, cmBBlob,
+                                 WC_ELSPKC_KEYREF_SZ, NULL);
+
+        printk("  >>> ELS CMAC offload ran %lu time(s) <<<\n",
+               wc_ElsPkc_CmacOffloadCount);
+    }
+#endif
+
     /* ---- regressions from the port-source review ------------------------
      * The DRBG takes whole words only, so a one-byte request used to fail
      * outright rather than fall back - and a single byte is an ordinary ask. */
