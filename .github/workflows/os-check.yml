@@ -92,11 +92,13 @@ jobs:
       - uses: actions/checkout@v5
 
       # tlslite-ng is consumed by scripts/multi-msg-record.test (run from
-      # `make check`); without it that test is SKIPped.
+      # `make check`); without it that test is SKIPped. Pinned because it
+      # is the TLS peer in that test, so an unpinned upgrade changes what
+      # every --enable-all entry in the matrix is tested against.
       - uses: actions/setup-python@v6
         with:
           python-version: '3.x'
-      - run: pip install tlslite-ng
+      - run: pip install 'tlslite-ng==0.8.2'
 
       - name: Install dependencies
         uses: ./.github/actions/install-apt-deps
@@ -221,11 +223,13 @@ jobs:
       - uses: actions/checkout@v5
 
       # tlslite-ng is consumed by scripts/multi-msg-record.test (run from
-      # `make check`); without it that test is SKIPped.
+      # `make check`); without it that test is SKIPped. Pinned because it
+      # is the TLS peer in that test, so an unpinned upgrade changes what
+      # every --enable-all entry in the matrix is tested against.
       - uses: actions/setup-python@v6
         with:
           python-version: '3.x'
-      - run: pip install tlslite-ng
+      - run: pip install 'tlslite-ng==0.8.2'
 
       # The macos runner images ship without autotools (the old per-config
       # matrix got them via wolfSSL/actions-build-autotools-project).
