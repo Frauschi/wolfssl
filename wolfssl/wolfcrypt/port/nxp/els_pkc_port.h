@@ -49,6 +49,9 @@
 #ifndef NO_AES
     #include <wolfssl/wolfcrypt/aes.h>
 #endif
+#if defined(WOLFSSL_CMAC) && !defined(NO_AES)
+    #include <wolfssl/wolfcrypt/cmac.h>
+#endif
 
 #ifdef __cplusplus
     extern "C" {
@@ -123,89 +126,56 @@ typedef struct wc_ElsPkc_KeyRef {
     byte bind[WC_ELSPKC_BIND_SZ];
 } wc_ElsPkc_KeyRef;
 
-/* Serialise the reference into out, which must hold WC_ELSPKC_KEYREF_SZ bytes.
- * outSz is in/out: on entry the capacity of out, on return the number of bytes
- * written. Passing out == NULL is a size query - outSz receives the required
- * size and the call returns LENGTH_ONLY_E, matching the convention used across
- * wolfCrypt.
- *
- * Parse rejects a wrong magic, an unknown version, an unassigned class and an
- * out-of-range slot, returning BAD_STATE_E for each - the blob is rejected
- * content rather than a caller mistake. A blob longer than the reference is
- * accepted and only its prefix read, because wolfPSA stores the public point
- * immediately after it. Parsing touches no hardware, so a reference that
- * parses is still only a claim; ElsCheckSlot() is what tests it. */
+/* Serialise into out, which must hold WC_ELSPKC_KEYREF_SZ bytes. outSz is
+ * in/out; out == NULL is a size query returning LENGTH_ONLY_E. Parse returns
+ * BAD_STATE_E for a bad magic, version, class or slot, and accepts a longer
+ * blob, reading only the prefix. Parsing touches no hardware. */
 WOLFSSL_API int wc_ElsPkc_MakeKeyRef(const wc_ElsPkc_KeyRef* ref, byte* out,
                                      word32* outSz);
 WOLFSSL_API int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz,
                                       wc_ElsPkc_KeyRef* ref);
 
-/* Choose a free slot for a key that does not exist yet, and fill in a
- * reference naming it. Needed because PSA's key generation gives a caller no
- * way to say where the key should go.
- *
- * The store is occupied in places on a fresh part, so this asks the hardware
- * which slots are active rather than assuming. Returns MEMORY_E when the store
- * has no room. The answer is advisory: nothing is marked taken until a key is
- * written, so reserve and generate together. */
 #ifdef WOLF_CRYPTO_CB_KEYSTORE
+/* Choose a free slot for a key that does not exist yet and fill in a reference
+ * naming it. Returns MEMORY_E when the store has no room. Advisory: nothing is
+ * marked taken until a key is written, so reserve and generate together. */
 WOLFSSL_API int wc_ElsPkc_ReserveSlot(byte keyClass, wc_ElsPkc_KeyRef* ref);
 
 /* Derive NXP_DIE_KEK_SK, the key encryption key the boot ROM uses to unwrap
- * RFC 3394 key blobs, into a free pair of slots. ref receives a KWK reference
- * naming it; delete it with wc_KeyStore_Delete() when the import or export is
- * finished.
- *
- * It is a CKDF child of the die master key, and NXP publishes both the parent
- * and the derivation constant, so an application can derive its own copy
- * instead of provisioning a wrapping key. The ROM's own copy is not available:
- * it lives in slots 12 and 13 only while SB file loading is in progress and is
- * deleted when that finishes.
- *
- * Deriving the same key as the ROM depends on NXP's recipe being reproduced
- * exactly, and that has only been checked here to the extent that the result
- * wraps and unwraps correctly. A blob wrapped by the provisioning tooling and
- * programmed into OTP has not been round-tripped against it. */
+ * RFC 3394 blobs, into a free pair of slots; ref receives a KWK reference
+ * naming it. Delete it with wc_KeyStore_Delete() when done. */
 WOLFSSL_API int wc_ElsPkc_DeriveDieKek(wc_ElsPkc_KeyRef* ref);
 #endif
 
 #ifdef HAVE_ECC
 /* Initialise an ecc_key that names an ELS slot instead of holding a private
- * key, and bind it to the port's devId and to P-256.
- *
- * For a sign or ECDH operation the slot must already hold a key. For a key
- * generation the reference is a *request*: slot and the exportable/persistent
- * flags say where the key should land and what it should be allowed to do,
- * and the key does not exist until wc_ecc_make_key() returns. */
+ * key, and bind it to the port's devId and to P-256. For a key generation the
+ * reference is a request: the key does not exist until wc_ecc_make_key(). */
 WOLFSSL_API int wc_ElsPkc_EccUseSlot(ecc_key* key, const wc_ElsPkc_KeyRef* ref,
                                      void* heap, int devId);
 #endif
 
 #ifndef NO_AES
-/* Same, for an Aes that names a slot rather than carrying key material.
- *
- * The bound Aes then drives AES-ECB/CBC/CTR and AES-GCM against the slot: the
- * port issues those with the ELS internal-key option, so the key never leaves
- * the store. aes->keylen stays 0 throughout, because wc_AesInit_Id() runs no
- * key schedule; the size the engine uses is the ksize field of the slot's own
- * property word.
- *
- * WC_ELSPKC_KEY_KWK is accepted so a wrapping key can be named the same way,
- * but only WC_ELSPKC_KEY_AES will drive a cipher - a slot must carry uaes to
- * be usable for bulk encryption, and that is checked against the hardware on
- * every call. */
+/* Same, for an Aes that names a slot. aes->keylen stays 0, because
+ * wc_AesInit_Id() runs no key schedule and the engine takes the size from the
+ * slot's own property word. WC_ELSPKC_KEY_KWK is accepted so a wrapping key
+ * can be named the same way, but only WC_ELSPKC_KEY_AES drives a cipher. */
 WOLFSSL_API int wc_ElsPkc_AesUseSlot(Aes* aes, const wc_ElsPkc_KeyRef* ref,
                                      void* heap, int devId);
 #endif
 
-/* Instrumentation: how many times each hardware path actually ran, and which
- * completion route was taken.
- *
- * These exist so a test can assert the offload ran rather than only that its
- * result agrees with software - a handler that never fires produces a passing
- * comparison of software against itself. They are incremented without
- * atomics, some outside the ELS lock, so treat them as best-effort under
- * concurrency: fine for a counter that only has to be non-zero. */
+#if defined(WOLFSSL_CMAC) && !defined(NO_AES)
+/* Same, for a Cmac. The slot must carry ucmac, which is a separate permission
+ * from uaes, so a slot holding both needs one reference per class. */
+WOLFSSL_API int wc_ElsPkc_CmacUseSlot(Cmac* cmac, const wc_ElsPkc_KeyRef* ref,
+                                      void* heap, int devId);
+#endif
+
+/* Instrumentation, so a test can assert the offload ran rather than only that
+ * its result agrees with software. Off by default: it exists for bring-up and
+ * costs a counter per operation. Incremented without atomics and some outside
+ * the lock, so best-effort under concurrency. */
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
 WOLFSSL_API extern unsigned long wc_ElsPkc_IrqWaitCount;
 WOLFSSL_API extern unsigned long wc_ElsPkc_PollWaitCount;
 WOLFSSL_API extern unsigned long wc_ElsPkc_TimeoutCount;

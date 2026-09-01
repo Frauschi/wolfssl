@@ -3713,94 +3713,113 @@ static int ElsRandom(byte* out, word32 sz)
 
 #if defined(WOLFSSL_CMAC) && !defined(NO_AES)
 
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
 unsigned long wc_ElsPkc_CmacOffloadCount = 0;
+#endif
 
 #define ELS_CMAC_BLOCK MCUXCLELS_CIPHER_BLOCK_SIZE_AES
 #define ELS_CMAC_STATE MCUXCLELS_CMAC_OUT_SIZE
 
-#ifndef WOLFSSL_ELS_PKC_CMAC_CTX_COUNT
-    #define WOLFSSL_ELS_PKC_CMAC_CTX_COUNT 2
-#endif
+/* As with the hash, the offload lives in the caller's object: digest[] is the
+ * running state, buffer[] the residual block, and the software-only subkeys
+ * k1||k2 are exactly an AES-256 key's worth of room for a plaintext key. They
+ * are free because wc_InitCmac() derives them only on the path this callback
+ * displaces, and wc_CmacFree() zeroes the struct either way. */
+wc_static_assert(ELS_CMAC_STATE == WC_AES_BLOCK_SIZE);
+wc_static_assert(ELS_CMAC_BLOCK == WC_AES_BLOCK_SIZE);
 
-typedef struct ElsCmacCtx {
-    ALIGN32 byte state[ELS_CMAC_STATE];
-    byte   key[32];
-    word32 keySz;
-    byte   buf[ELS_CMAC_BLOCK];
-    word32 buffered;
-    byte   started;
-    byte   inUse;
-    void*  owner;
-} ElsCmacCtx;
-
-static ElsCmacCtx elsCmacPool[WOLFSSL_ELS_PKC_CMAC_CTX_COUNT];
-
-static ElsCmacCtx* ElsCmacClaim(void* owner)
-{
-    int i;
-
-    for (i = 0; i < WOLFSSL_ELS_PKC_CMAC_CTX_COUNT; i++) {
-        if (!elsCmacPool[i].inUse) {
-            XMEMSET(&elsCmacPool[i], 0, sizeof(elsCmacPool[i]));
-            elsCmacPool[i].inUse = 1;
-            elsCmacPool[i].owner = owner;
-            return &elsCmacPool[i];
-        }
-    }
-
-    return NULL;
-}
+/* Parked in devCtx, tagged like the hash's. The slot index needs a byte; the
+ * rest are flags. */
+#define ELS_CMAC_OWNED     ((wc_ptr_t)0x01)
+#define ELS_CMAC_STARTED   ((wc_ptr_t)0x02)
+#define ELS_CMAC_SLOTTED   ((wc_ptr_t)0x04)
+#define ELS_CMAC_KEY256    ((wc_ptr_t)0x08)
+#define ELS_CMAC_SLOT_SHIFT 8
+#define ELS_CMAC_SLOT(st)  ((byte)(((st) >> ELS_CMAC_SLOT_SHIFT) & 0xFFu))
 
 /* Feed one chunk. Caller holds the lock. */
-static int ElsCmacChunk(ElsCmacCtx* ctx, const byte* in, word32 len, int final)
+static int ElsCmacChunk(Cmac* cmac, const byte* in, word32 len, int final)
 {
     mcuxClEls_CmacOption_t opt;
+    wc_ptr_t st = (wc_ptr_t)cmac->devCtx;
+    byte key[2 * WC_AES_BLOCK_SIZE];
+    size_t keySz = 0;
+    int ret;
 
     opt.word.value = 0u;
-    opt.bits.extkey = MCUXCLELS_CMAC_EXTERNAL_KEY_ENABLE;
-    opt.bits.initialize = ctx->started ? MCUXCLELS_CMAC_INITIALIZE_DISABLE
-                                       : MCUXCLELS_CMAC_INITIALIZE_ENABLE;
+    opt.bits.extkey = (st & ELS_CMAC_SLOTTED)
+                          ? MCUXCLELS_CMAC_EXTERNAL_KEY_DISABLE
+                          : MCUXCLELS_CMAC_EXTERNAL_KEY_ENABLE;
+    opt.bits.initialize = (st & ELS_CMAC_STARTED)
+                              ? MCUXCLELS_CMAC_INITIALIZE_DISABLE
+                              : MCUXCLELS_CMAC_INITIALIZE_ENABLE;
     opt.bits.finalize = final ? MCUXCLELS_CMAC_FINALIZE_ENABLE
                               : MCUXCLELS_CMAC_FINALIZE_DISABLE;
 
+    if (!(st & ELS_CMAC_SLOTTED)) {
+        /* k1 and k2 are separate members, so the engine's contiguous key is
+         * assembled here rather than assumed of the struct layout. */
+        XMEMCPY(key, cmac->k1, WC_AES_BLOCK_SIZE);
+        XMEMCPY(key + WC_AES_BLOCK_SIZE, cmac->k2, WC_AES_BLOCK_SIZE);
+        keySz = (st & ELS_CMAC_KEY256) ? sizeof(key) : WC_AES_BLOCK_SIZE;
+    }
+
+    /* As in the cipher path, the unused half of the key pair is passed as
+     * nothing rather than as an empty key[]. */
     MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Cmac_Async(
-        opt, 0u, ctx->key, (size_t)ctx->keySz, in, (size_t)len, ctx->state));
+        opt, (mcuxClEls_KeyIndex_t)ELS_CMAC_SLOT(st),
+        (st & ELS_CMAC_SLOTTED) ? NULL : key, keySz,
+        in, (size_t)len, cmac->digest));
     if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Cmac_Async) != t) ||
         (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        ForceZero(key, sizeof(key));
         return WC_NO_ERR_TRACE(WC_HW_E);
     }
     MCUX_CSSL_FP_FUNCTION_CALL_END();
 
-    ctx->started = 1;
+    cmac->devCtx = (void*)(st | ELS_CMAC_STARTED);
 
-    return ElsWait();
+    ret = ElsWait();
+    ForceZero(key, sizeof(key));
+
+    return ret;
 }
 
-/* Release the pool entry behind an abandoned CMAC - one started on hardware
- * and dropped without a Final. Left alone the entry stays claimed forever, and
- * it also holds a plaintext AES key. */
-static void ElsCmacFreeCtx(Cmac* cmac)
+/* Read the slot reference a Cmac carries, if it carries one at all. */
+static int ElsCmacRef(const Cmac* cmac, wc_ElsPkc_KeyRef* ref)
 {
-    if (cmac == NULL || cmac->devCtx == NULL) {
-        return;
+    if (cmac == NULL || cmac->idLen <= 0) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
-    if (ElsLock() == 0) {
-        ForceZero(cmac->devCtx, sizeof(ElsCmacCtx));
-        ElsUnlock();
-    }
-    cmac->devCtx = NULL;
+
+    return wc_ElsPkc_ParseKeyRef(cmac->id, (word32)cmac->idLen, ref);
 }
 
+/* key == NULL means the key is in the store and the Cmac names the slot. */
 static int ElsCmacInit(Cmac* cmac, const byte* key, word32 keySz)
 {
-    ElsCmacCtx* ctx;
+    wc_ElsPkc_KeyRef ref;
+    wc_ptr_t st = ELS_CMAC_OWNED;
     int ret;
 
-    if (cmac == NULL || key == NULL) {
+    if (cmac == NULL) {
         return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
     }
-    if (keySz != 16 && keySz != 32) {
+
+    XMEMSET(&ref, 0, sizeof(ref));
+    if (key == NULL) {
+        ret = ElsCmacRef(cmac, &ref);
+        if (ret != 0) {
+            return ret;
+        }
+        st |= ELS_CMAC_SLOTTED |
+              ((wc_ptr_t)ref.slot << ELS_CMAC_SLOT_SHIFT);
+    }
+    else if (keySz != WC_AES_BLOCK_SIZE && keySz != 2 * WC_AES_BLOCK_SIZE) {
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    else if (keySz == 2 * WC_AES_BLOCK_SIZE) {
+        st |= ELS_CMAC_KEY256;
     }
 
     ret = ElsLock();
@@ -3808,24 +3827,61 @@ static int ElsCmacInit(Cmac* cmac, const byte* key, word32 keySz)
         return ret;
     }
 
-    ctx = ElsCmacClaim(cmac);
-    if (ctx == NULL) {
-        ElsUnlock();
-        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    /* Validate the slot before claiming the object, so a bad reference leaves
+     * the Cmac to software untouched. */
+    if (st & ELS_CMAC_SLOTTED) {
+        ret = ElsCheckSlot(&ref, WC_ELSPKC_KEY_CMAC);
+        if (ret != 0) {
+            ElsUnlock();
+            return ret;
+        }
+    }
+    else {
+        XMEMCPY(cmac->k1, key, WC_AES_BLOCK_SIZE);
+        if (keySz == 2 * WC_AES_BLOCK_SIZE) {
+            XMEMCPY(cmac->k2, key + WC_AES_BLOCK_SIZE, WC_AES_BLOCK_SIZE);
+        }
     }
 
-    XMEMCPY(ctx->key, key, keySz);
-    ctx->keySz = keySz;
-    cmac->devCtx = ctx;
+    cmac->bufferSz = 0;
+    cmac->devCtx   = (void*)st;
 
     ElsUnlock();
 
     return 0;
 }
 
+int wc_ElsPkc_CmacUseSlot(Cmac* cmac, const wc_ElsPkc_KeyRef* ref,
+                          void* heap, int devId)
+{
+    byte   blob[WC_ELSPKC_KEYREF_SZ];
+    word32 blobSz = sizeof(blob);
+    int    ret;
+
+    if (cmac == NULL || ref == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    /* ucmac is its own permission; a uaes slot is not automatically usable
+     * here, and a reference for one is not a reference for the other. */
+    if (ref->keyClass != WC_ELSPKC_KEY_CMAC) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+
+    ret = wc_ElsPkc_MakeKeyRef(ref, blob, &blobSz);
+    if (ret == 0) {
+        /* No key and no size: both live in the slot, and passing NULL is what
+         * tells the callback this is a key store init. */
+        ret = wc_InitCmac_Id(cmac, NULL, 0, WC_CMAC_AES, NULL,
+                             blob, (int)blobSz, heap, devId);
+    }
+
+    ForceZero(blob, sizeof(blob));
+
+    return ret;
+}
+
 static int ElsCmacUpdate(Cmac* cmac, const byte* in, word32 inSz)
 {
-    ElsCmacCtx* ctx;
     word32 take;
     int ret;
 
@@ -3946,13 +4002,14 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
     switch (info->algo_type) {
 #if defined(WOLFSSL_CMAC) && !defined(NO_AES)
         case WC_ALGO_TYPE_CMAC:
-            if (info->cmac.type != WC_CMAC_AES) {
+            if (info->cmac.type != WC_CMAC_AES || info->cmac.cmac == NULL) {
                 break;
             }
-            /* cmac.c drives this as init / update / final, distinguished by
-             * which pointers are present (see wc_CryptoCb_Cmac call sites). */
-            if (info->cmac.key != NULL && info->cmac.in == NULL &&
-                info->cmac.out == NULL) {
+            /* cmac.c distinguishes init / update / final by which pointers
+             * are present. A key store init carries no key material, which
+             * looks like a zero-length update; devCtx separates them. */
+            if (info->cmac.in == NULL && info->cmac.out == NULL &&
+                (info->cmac.key != NULL || info->cmac.cmac->devCtx == NULL)) {
                 ret = ElsCmacInit(info->cmac.cmac, info->cmac.key,
                                   info->cmac.keySz);
             }
