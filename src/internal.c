@@ -12639,17 +12639,29 @@ int GrowInputBuffer(WOLFSSL* ssl, int size, int usedLength)
     byte  frontOffset = 0;
     int   ret;
 #if defined(WOLFSSL_DTLS) || WOLFSSL_GENERAL_ALIGNMENT > 0
-    byte  align = ssl->options.dtls ? WOLFSSL_GENERAL_ALIGNMENT : 0;
-    byte  hdrSz = DTLS_RECORD_HEADER_SZ;
+    byte  align = WOLFSSL_GENERAL_ALIGNMENT;
+    byte  hdrSz = ssl->options.dtls ? DTLS_RECORD_HEADER_SZ : RECORD_HEADER_SZ;
 #else
     const byte align = WOLFSSL_GENERAL_ALIGNMENT;
 #endif
 
 #if defined(WOLFSSL_DTLS) || WOLFSSL_GENERAL_ALIGNMENT > 0
-    /* the encrypted data will be offset from the front of the buffer by
-       the dtls record header, if the user wants encrypted alignment they need
-       to define their alignment requirement. in tls we read record header
-       to get size of record and put actual data back at front, so don't need */
+    /* The encrypted data is offset from the front of the buffer by the record
+       header, so aligning the allocation itself leaves the ciphertext
+       misaligned. Offset the front by (align - hdrSz) instead, which is what
+       GrowAnOutputBuffer does for the send side, so that buffer + hdrSz - where
+       the record payload starts, and where a crypto callback is handed a
+       pointer - lands on the requested boundary.
+
+       This used to be applied for DTLS only, on the grounds that TLS reads the
+       record header first and puts the data back at the front of the buffer.
+       That holds for a software cipher, which does not care, but not for
+       hardware that requires an aligned input: TriCore, for one, takes an
+       alignment trap on an unaligned word access, so a DMA-capable engine
+       cannot be handed buffer + 5 at all.
+
+       No effect unless WOLFSSL_GENERAL_ALIGNMENT is set, which is opt-in and
+       already documented as the hint for exactly this situation. */
 
     if (align) {
        while (align < hdrSz)
