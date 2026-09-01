@@ -11520,26 +11520,26 @@ int wc_PKCS7_PadData(byte* in, word32 inSz, byte* out, word32 outSz,
 static const byte oriKemOid[] =
     {42, 134, 72, 134, 247, 13, 1, 9, 16, 13, 3};
 
-/* Map a KEMRecipientInfo KDF OID to the size of the digest it derives with.
+/* Map a KEMRecipientInfo KDF OID to the hash HKDF runs with.
  * Returns 0 on success, negative upon error */
-static int wc_PKCS7_KemriKdfOutMax(int kdfOID, word32* maxOut)
+static int wc_PKCS7_KemriKdfHash(int kdfOID, int* hashType)
 {
     int ret = 0;
 
     switch (kdfOID) {
     #ifndef NO_SHA256
         case HKDF_SHA256_OID:
-            *maxOut = WC_SHA256_DIGEST_SIZE;
+            *hashType = WC_SHA256;
             break;
     #endif
     #ifdef WOLFSSL_SHA384
         case HKDF_SHA384_OID:
-            *maxOut = WC_SHA384_DIGEST_SIZE;
+            *hashType = WC_SHA384;
             break;
     #endif
     #ifdef WOLFSSL_SHA512
         case HKDF_SHA512_OID:
-            *maxOut = WC_SHA512_DIGEST_SIZE;
+            *hashType = WC_SHA512;
             break;
     #endif
         default:
@@ -11558,46 +11558,17 @@ static int wc_PKCS7_KemriKdf(int kdfOID, const byte* ss, word32 ssSz,
                              word32 outSz)
 {
     int ret;
-    word32 maxOut = 0;
+    int hashType = 0;
 
     if (ss == NULL || info == NULL || out == NULL || outSz == 0)
         return BAD_FUNC_ARG;
 
-    ret = wc_PKCS7_KemriKdfOutMax(kdfOID, &maxOut);
-    if (ret != 0)
-        return ret;
-
-    /* HKDF expands to at most 255 times its digest size */
-    if (outSz > maxOut * 255) {
-        WOLFSSL_MSG("KEK longer than the KDF can derive");
-        return BAD_FUNC_ARG;
+    ret = wc_PKCS7_KemriKdfHash(kdfOID, &hashType);
+    if (ret == 0) {
+        PRIVATE_KEY_UNLOCK();
+        ret = wc_HKDF(hashType, ss, ssSz, NULL, 0, info, infoSz, out, outSz);
+        PRIVATE_KEY_LOCK();
     }
-
-    PRIVATE_KEY_UNLOCK();
-    switch (kdfOID) {
-    #ifndef NO_SHA256
-        case HKDF_SHA256_OID:
-            ret = wc_HKDF(WC_SHA256, ss, ssSz, NULL, 0, info, infoSz, out,
-                          outSz);
-            break;
-    #endif
-    #ifdef WOLFSSL_SHA384
-        case HKDF_SHA384_OID:
-            ret = wc_HKDF(WC_SHA384, ss, ssSz, NULL, 0, info, infoSz, out,
-                          outSz);
-            break;
-    #endif
-    #ifdef WOLFSSL_SHA512
-        case HKDF_SHA512_OID:
-            ret = wc_HKDF(WC_SHA512, ss, ssSz, NULL, 0, info, infoSz, out,
-                          outSz);
-            break;
-    #endif
-        default:
-            ret = BAD_FUNC_ARG;
-            break;
-    }
-    PRIVATE_KEY_LOCK();
 
     return ret;
 }
@@ -11869,6 +11840,7 @@ int wc_PKCS7_AddRecipient_KEMRI(wc_PKCS7* pkcs7, const byte* cert,
     int ret = 0;
     int decodedInit = 0;
     int sidType;
+    int hashType = 0;
 
     if (pkcs7 == NULL || cert == NULL || certSz == 0)
         return BAD_FUNC_ARG;
@@ -11883,6 +11855,8 @@ int wc_PKCS7_AddRecipient_KEMRI(wc_PKCS7* pkcs7, const byte* cert,
     if (!wc_PKCS7_KemriWrapAllowed(wrapOID) || kekLen <= 0 ||
             (word32)kekLen > sizeof(kek))
         return BAD_KEYWRAP_ALG_E;
+    if (wc_PKCS7_KemriKdfHash(kdfOID, &hashType) != 0)
+        return BAD_FUNC_ARG;
 
     blockKeySz = wc_PKCS7_GetOIDKeySize(pkcs7->encryptOID);
     if (blockKeySz < 0)
@@ -12168,12 +12142,15 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     const byte* kemCt = NULL;
     const byte* ukm = NULL;
     const byte* encKey = NULL;
+    byte wrapAlg[MAX_ALGO_SZ];
+    word32 wrapStart;
     word32 idx = 0;
     word32 kemOID = 0, kdfOID = 0, wrapOID = 0;
     word32 kemCtSz = 0, ukmSz = 0, encKeySz = 0, ssSz = 0;
     word32 keyIdx = 0;
-    int length = 0, version = 0, kekLen = 0, level = 0;
+    int length = 0, version = 0, kekLen = 0, level = 0, hashType = 0;
     int kemInited = 0;
+    word32 ukmEnd;
     int ret;
 
     if (pkcs7 == NULL || in == NULL || decryptedKey == NULL ||
@@ -12188,6 +12165,9 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     if (GetSequence(in, &idx, &length, inSz) < 0)
         return ASN_PARSE_E;
 
+    if ((word32)length != inSz - idx)
+        return ASN_PARSE_E;
+
     if (GetMyVersion(in, &idx, &version, inSz) < 0)
         return ASN_PARSE_E;
     if (version != 0) {
@@ -12196,7 +12176,9 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     }
 
     /* rid, either an IssuerAndSerialNumber SEQUENCE or a [0] key identifier.
-     * Only one recipient is supported, so step over it. */
+     * The reader holds only a private key, so there is nothing to match it
+     * against here; a wrong guess shows up as a key unwrap failure and the
+     * caller moves on to the next recipient. */
     if (idx >= inSz)
         return ASN_PARSE_E;
     if (in[idx] == (ASN_CONSTRUCTED | ASN_SEQUENCE)) {
@@ -12233,6 +12215,10 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     /* kdf */
     if (GetAlgoId(in, &idx, &kdfOID, oidKdfType, inSz) < 0)
         return ASN_PARSE_E;
+    if (wc_PKCS7_KemriKdfHash((int)kdfOID, &hashType) != 0) {
+        WOLFSSL_MSG("KEMRecipientInfo KDF is not supported");
+        return PKCS7_RECIP_E;
+    }
 
     /* kekLength */
     if (GetMyVersion(in, &idx, &kekLen, inSz) < 0)
@@ -12247,16 +12233,29 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
         idx++;
         if (GetLength(in, &idx, &length, inSz) < 0)
             return ASN_PARSE_E;
-        if (GetOctetString(in, &idx, &length, inSz) < 0)
+        ukmEnd = idx + (word32)length;
+        if (GetOctetString(in, &idx, &length, ukmEnd) < 0 ||
+                idx + (word32)length != ukmEnd)
             return ASN_PARSE_E;
         ukm = in + idx;
         ukmSz = (word32)length;
         idx += ukmSz;
     }
 
-    /* wrap */
+    /* wrap; the KDF info re-encodes it, so take only the DER form */
+    wrapStart = idx;
     if (GetAlgoId(in, &idx, &wrapOID, oidKeyWrapType, inSz) < 0)
         return ASN_PARSE_E;
+    if (!wc_PKCS7_KemriWrapAllowed((int)wrapOID)) {
+        WOLFSSL_MSG("KEMRecipientInfo wrap is not an AES key wrap");
+        return BAD_KEYWRAP_ALG_E;
+    }
+    if ((SetAlgoID((int)wrapOID, wrapAlg, oidKeyWrapType, 0) !=
+            idx - wrapStart) ||
+            (XMEMCMP(in + wrapStart, wrapAlg, idx - wrapStart) != 0)) {
+        WOLFSSL_MSG("KEMRecipientInfo wrap carries parameters");
+        return ASN_PARSE_E;
+    }
 
     /* RFC 9936 Section 2.2.1: kekLength must match the wrap key size */
     if (wc_PKCS7_GetOIDKeySize((int)wrapOID) != kekLen) {
@@ -12269,6 +12268,8 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
         return ASN_PARSE_E;
     encKey = in + idx;
     encKeySz = (word32)length;
+    if (idx + encKeySz != inSz)
+        return ASN_PARSE_E;
 
     kem = (MlKemKey*)XMALLOC(sizeof(MlKemKey), pkcs7->heap,
                              DYNAMIC_TYPE_TMP_BUFFER);
