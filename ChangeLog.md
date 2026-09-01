@@ -2,7 +2,7 @@
 
 ## PKCS#7 / CMS
 
-* Fixed EnvelopedData decoding to try the next recipient when an OtherRecipientInfo is not the reader's, so a message addressed to several KEMRecipientInfo recipients can be opened by each of them rather than only the first. by @Frauschi
+* Fixed EnvelopedData and AuthEnvelopedData decoding to try the next recipient when an OtherRecipientInfo is not the reader's, so a message addressed to several KEMRecipientInfo recipients can be opened by each of them rather than only the first. by @Frauschi
 * **Behavioral change (OtherRecipientInfo decode error codes)**: a non-zero return from a `wc_PKCS7_SetOriDecryptCb` callback, and an OtherRecipientInfo for which no callback is registered, now mean "this RecipientInfo is not the reader's" and let the decode try the remaining recipients, where before either ended the decode. An application that ran out of recipients saw `PKCS7_RECIP_E` before and still does; one that registered no callback saw `BAD_FUNC_ARG` and now sees `PKCS7_RECIP_E`. `MEMORY_E` from a callback is the one value still returned unchanged. by @Frauschi
 
 ## Post-Quantum Cryptography (PQC)

@@ -15180,6 +15180,9 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                 case WC_PKCS7_DECRYPT_KTRI_3:
                     retry = 1;
                     break;
+                case WC_PKCS7_DECRYPT_ORI:
+                    retry = (ret == WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+                    break;
                 default:
                     /* kari, kekri and pwri do not walk on in either path */
                     break;
@@ -15375,43 +15378,18 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                                           decryptedKey, decryptedKeySz,
                                           recipFound);
                 if (ret != 0) {
-                    word32 peekIdx = *idx;
-                    byte   nextTag = 0;
-
-                    /* Not this recipient, so move on to the next one if there
-                     * demonstrably is one. wc_PKCS7_DecryptOri has already
-                     * stepped over the whole OtherRecipientInfo, so *idx is
-                     * at whatever follows.
-                     *
-                     * Only the implicitly tagged alternatives are followed.
-                     * A KeyTransRecipientInfo is a bare SEQUENCE and so is the
-                     * EncryptedContentInfo that ends the set, and this loop is
-                     * not told where the set stops, so the two cannot be told
-                     * apart here. Treating a SEQUENCE as another recipient
-                     * would parse the encrypted content as a RecipientInfo and
-                     * report a parse error in place of the recipient error the
-                     * caller expects, so a SEQUENCE stops the search instead.
-                     * Every recipient of a KEM-addressed message is an ori, so
-                     * this covers the case that matters. */
-                    if ((ret != WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E)) &&
-                            (*recipFound == 0) &&
-                            (GetASNTag(pkiMsg, &peekIdx, &nextTag,
-                                       pkiMsgSz) == 0) &&
-                            ((nextTag == (ASN_CONSTRUCTED |
-                                          ASN_CONTEXT_SPECIFIC | 1)) ||
-                             (nextTag == (ASN_CONSTRUCTED |
-                                          ASN_CONTEXT_SPECIFIC | 2)) ||
-                             (nextTag == (ASN_CONSTRUCTED |
-                                          ASN_CONTEXT_SPECIFIC | 3)) ||
-                             (nextTag == (ASN_CONSTRUCTED |
-                                          ASN_CONTEXT_SPECIFIC | 4)))) {
-                        /* savedIdx has to follow, or the "no RecipientInfo
-                         * here" path below would rewind onto the one just
-                         * rejected and spin. */
-                        savedIdx = *idx;
+                    /* DecryptOri returns PKCS7_RECIP_E for all but framing
+                     * and memory errors, missing callback included. */
+                    if ((ret == WC_NO_ERR_TRACE(PKCS7_RECIP_E)) &&
+                            (*recipFound == 0)) {
+                        ret = wc_PKCS7_RecipientRetry(pkcs7, idx, &savedIdx,
+                                &tmpIdx, decryptedKeySz, keyCap, setEnd);
+                        if (ret != 0) {
+                            return ret;
+                        }
                         continue; /* try next recipient */
                     }
-                    return ret; /* no other recipient to try */
+                    return ret; /* found recipient and failed decrypt */
                 }
             }
             else {
