@@ -813,12 +813,36 @@ static int ElsAesKeyOk(const Aes* aes)
     return (aes->keylen == 16 || aes->keylen == 32);
 }
 
-/* Issue one cipher command. Caller holds the lock. */
-static int ElsCipherRun(mcuxClEls_CipherOption_t opt, Aes* aes,
+/* Read the slot reference an Aes carries, if any. CRYPTOCB_UNAVAILABLE means
+ * no reference; a parse failure is a hard error, because an Aes bound to a
+ * slot has no key material for software to fall back to. */
+static int ElsAesRef(const Aes* aes, wc_ElsPkc_KeyRef* ref)
+{
+    if (aes == NULL || aes->idLen <= 0) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    return wc_ElsPkc_ParseKeyRef(aes->id, (word32)aes->idLen, ref);
+}
+
+/* Issue one cipher command. Caller holds the lock. keyIdx is read only when
+ * opt says the key is internal, in which case the memory pair is ignored -
+ * pass nothing rather than a stale devKey. */
+/* Only the block-cipher arms use these; a GCM-only build has no caller. */
+#if defined(HAVE_AES_CBC) || defined(WOLFSSL_AES_COUNTER) || \
+    defined(HAVE_AES_ECB) || defined(WOLFSSL_AES_DIRECT)
+#define ELS_HAVE_AES_CIPHER
+
+static int ElsCipherRun(mcuxClEls_CipherOption_t opt,
+                        mcuxClEls_KeyIndex_t keyIdx, Aes* aes,
                         const byte* in, word32 sz, byte* out, int useIv)
 {
+    int extKey = (opt.bits.extkey == MCUXCLELS_CIPHER_EXTERNAL_KEY);
+
     MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Cipher_Async(
-        opt, 0u, (const uint8_t*)aes->devKey, (size_t)aes->keylen,
+        opt, keyIdx,
+        extKey ? (const uint8_t*)aes->devKey : NULL,
+        extKey ? (size_t)aes->keylen : 0u,
         in, sz, useIv ? (uint8_t*)aes->reg : NULL, out));
     if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Cipher_Async) != t) ||
         (MCUXCLELS_STATUS_OK_WAIT != r)) {
@@ -833,24 +857,34 @@ static int ElsAesCipher(Aes* aes, byte* out, const byte* in, word32 sz,
                         int mode, int encrypt, int useIv)
 {
     mcuxClEls_CipherOption_t opt;
+    wc_ElsPkc_KeyRef ref;
     byte lastCipher[MCUXCLELS_CIPHER_BLOCK_SIZE_AES];
+    int slotted = 0;
     int ret;
 
     if (aes == NULL || out == NULL || in == NULL) {
         return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
     }
-    /* whole blocks only, and only key sizes the hardware represents */
+
+    XMEMSET(&ref, 0, sizeof(ref));
+    ret = ElsAesRef(aes, &ref);
+    if (ret == 0) {
+        slotted = 1;
+    }
+    else if (ret != WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE)) {
+        return ret;
+    }
+
+    /* Whole blocks only. keylen matters only for a key held in memory: a slot
+     * key carries its size in its property word and aes->keylen is 0. */
     if (sz == 0 || (sz % MCUXCLELS_CIPHER_BLOCK_SIZE_AES) != 0 ||
-        !ElsAesKeyOk(aes)) {
+        (!slotted && !ElsAesKeyOk(aes))) {
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
 #ifdef WOLFSSL_AES_COUNTER
-    /* CTR additionally needs an empty software keystream remainder. A partial
-     * call leaves the unused tail of a generated block in aes->tmp and has
-     * already advanced aes->reg past it, and the callback runs before that
-     * remainder is consumed - so starting the hardware from aes->reg here
-     * would silently drop it and desynchronise the stream. Hand the whole
-     * message back to software once it has buffered anything. */
+    /* CTR keeps an unconsumed keystream remainder in aes->tmp and has already
+     * advanced aes->reg past it, and this callback runs before that remainder
+     * is used - so starting from aes->reg would desynchronise the stream. */
     if (mode == MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CTR && aes->left != 0) {
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
@@ -860,16 +894,12 @@ static int ElsAesCipher(Aes* aes, byte* out, const byte* in, word32 sz,
     opt.bits.cphmde = (uint32_t)mode;
     opt.bits.dcrpt  = encrypt ? MCUXCLELS_CIPHER_ENCRYPT
                               : MCUXCLELS_CIPHER_DECRYPT;
-    opt.bits.extkey = MCUXCLELS_CIPHER_EXTERNAL_KEY;
+    opt.bits.extkey = slotted ? MCUXCLELS_CIPHER_INTERNAL_KEY
+                              : MCUXCLELS_CIPHER_EXTERNAL_KEY;
     if (useIv && mode == MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CTR) {
-        /* CTR: pIV carries the counter, and cphsoe is what makes ELS write the
-         * updated counter back so a chained call continues correctly.
-         *
-         * NOT set for CBC. The documentation says both flags are ignored
-         * there and pIV is always read and written - but setting them made
-         * ELS produce output that was self-consistent yet disagreed with
-         * software, i.e. it took pIV as an internal state blob rather than a
-         * plain IV. Left off, CBC matches software exactly. */
+        /* cphsoe makes ELS write the updated counter back. NOT set for CBC:
+         * the documentation says it is ignored there, but setting it made ELS
+         * take pIV as an internal state blob and disagree with software. */
         opt.bits.cphsie = MCUXCLELS_CIPHER_STATE_IN_ENABLE;
         opt.bits.cphsoe = MCUXCLELS_CIPHER_STATE_OUT_ENABLE;
     }
@@ -883,7 +913,15 @@ static int ElsAesCipher(Aes* aes, byte* out, const byte* in, word32 sz,
 
     ret = ElsLock();
     if (ret == 0) {
-        ret = ElsCipherRun(opt, aes, in, sz, out, useIv);
+        /* Prove the slot holds an active AES key: the class check alone would
+         * pass a hand-built reference against, say, a wrapping key. */
+        if (slotted) {
+            ret = ElsCheckSlot(&ref, WC_ELSPKC_KEY_AES);
+        }
+        if (ret == 0) {
+            ret = ElsCipherRun(opt, (mcuxClEls_KeyIndex_t)ref.slot, aes,
+                               in, sz, out, useIv);
+        }
         ElsUnlock();
     }
 
@@ -914,31 +952,42 @@ static int ElsAesCipher(Aes* aes, byte* out, const byte* in, word32 sz,
 
 /* ---------------------------------------------------------------------------
  * AES-GCM
- *
- * ELS drives GCM as a four-stage sequence - Init, UpdateAad, UpdateData,
- * Finalize - threaded through an 80-byte context. wolfCrypt's callback hands
- * the whole message over at once, so the sequence runs start to finish under a
- * single lock and no state has to survive between calls.
- *
- * Every stage consumes whole 16-byte blocks. The true AAD and data lengths
- * reach the hardware only through Finalize, plus msgendw for the final partial
- * data block; getting either wrong yields a clean-looking but wrong tag.
  * ------------------------------------------------------------------------ */
+
+/* Init / UpdateAad / UpdateData / Finalize, threaded through an 80-byte
+ * context. Every stage consumes whole blocks, and the true AAD and data
+ * lengths reach the hardware only through Finalize; getting either wrong
+ * yields a clean-looking wrong tag. */
 
 #ifdef HAVE_AESGCM
 
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
 unsigned long wc_ElsPkc_GcmOffloadCount = 0;
+#endif
 
 #define ELS_GCM_BLOCK MCUXCLELS_AEAD_IV_BLOCK_SIZE
+
+/* An internal key is named by keyIdx and the memory pair is then ignored. */
+static const uint8_t* ElsGcmKeyPtr(mcuxClEls_AeadOption_t opt, const Aes* aes)
+{
+    return (opt.bits.extkey == MCUXCLELS_AEAD_EXTERN_KEY)
+           ? (const uint8_t*)aes->devKey : NULL;
+}
+
+static size_t ElsGcmKeyLen(mcuxClEls_AeadOption_t opt, const Aes* aes)
+{
+    return (opt.bits.extkey == MCUXCLELS_AEAD_EXTERN_KEY)
+           ? (size_t)aes->keylen : 0u;
+}
 
 /* Each stage below is its own function so the flow-protection macro pair stays
  * within one scope, matching the rest of this port. Caller holds the lock. */
 
-static int ElsGcmInit(mcuxClEls_AeadOption_t opt, const Aes* aes,
-                      const byte* j0, byte* aeadCtx)
+static int ElsGcmInit(mcuxClEls_AeadOption_t opt, mcuxClEls_KeyIndex_t keyIdx,
+                      const Aes* aes, const byte* j0, byte* aeadCtx)
 {
     MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Aead_Init_Async(
-        opt, 0u, (const uint8_t*)aes->devKey, (size_t)aes->keylen,
+        opt, keyIdx, ElsGcmKeyPtr(opt, aes), ElsGcmKeyLen(opt, aes),
         j0, (size_t)ELS_GCM_BLOCK, aeadCtx));
     if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Aead_Init_Async) != t) ||
         (MCUXCLELS_STATUS_OK_WAIT != r)) {
@@ -949,11 +998,12 @@ static int ElsGcmInit(mcuxClEls_AeadOption_t opt, const Aes* aes,
     return ElsWait();
 }
 
-static int ElsGcmAadChunk(mcuxClEls_AeadOption_t opt, const Aes* aes,
+static int ElsGcmAadChunk(mcuxClEls_AeadOption_t opt,
+                          mcuxClEls_KeyIndex_t keyIdx, const Aes* aes,
                           const byte* aad, word32 len, byte* aeadCtx)
 {
     MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Aead_UpdateAad_Async(
-        opt, 0u, (const uint8_t*)aes->devKey, (size_t)aes->keylen,
+        opt, keyIdx, ElsGcmKeyPtr(opt, aes), ElsGcmKeyLen(opt, aes),
         aad, (size_t)len, aeadCtx));
     if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Aead_UpdateAad_Async) != t) ||
         (MCUXCLELS_STATUS_OK_WAIT != r)) {
@@ -964,12 +1014,13 @@ static int ElsGcmAadChunk(mcuxClEls_AeadOption_t opt, const Aes* aes,
     return ElsWait();
 }
 
-static int ElsGcmDataChunk(mcuxClEls_AeadOption_t opt, const Aes* aes,
+static int ElsGcmDataChunk(mcuxClEls_AeadOption_t opt,
+                           mcuxClEls_KeyIndex_t keyIdx, const Aes* aes,
                            const byte* in, word32 len, byte* out,
                            byte* aeadCtx)
 {
     MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Aead_UpdateData_Async(
-        opt, 0u, (const uint8_t*)aes->devKey, (size_t)aes->keylen,
+        opt, keyIdx, ElsGcmKeyPtr(opt, aes), ElsGcmKeyLen(opt, aes),
         in, (size_t)len, out, aeadCtx));
     if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Aead_UpdateData_Async) != t) ||
         (MCUXCLELS_STATUS_OK_WAIT != r)) {
@@ -980,11 +1031,12 @@ static int ElsGcmDataChunk(mcuxClEls_AeadOption_t opt, const Aes* aes,
     return ElsWait();
 }
 
-static int ElsGcmFinal(mcuxClEls_AeadOption_t opt, const Aes* aes,
-                       word32 aadSz, word32 dataSz, byte* tag, byte* aeadCtx)
+static int ElsGcmFinal(mcuxClEls_AeadOption_t opt, mcuxClEls_KeyIndex_t keyIdx,
+                       const Aes* aes, word32 aadSz, word32 dataSz,
+                       byte* tag, byte* aeadCtx)
 {
     MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Aead_Finalize_Async(
-        opt, 0u, (const uint8_t*)aes->devKey, (size_t)aes->keylen,
+        opt, keyIdx, ElsGcmKeyPtr(opt, aes), ElsGcmKeyLen(opt, aes),
         (size_t)aadSz, (size_t)dataSz, tag, aeadCtx));
     if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Aead_Finalize_Async) != t) ||
         (MCUXCLELS_STATUS_OK_WAIT != r)) {
@@ -995,11 +1047,11 @@ static int ElsGcmFinal(mcuxClEls_AeadOption_t opt, const Aes* aes,
     return ElsWait();
 }
 
-/* AAD is fed as whole blocks; the tail goes through a zero-padded scratch
- * block, and Finalize's aadLength is what tells the hardware how much of that
- * last block was real. */
-static int ElsGcmAad(mcuxClEls_AeadOption_t opt, const Aes* aes,
-                     const byte* aad, word32 aadSz, byte* aeadCtx)
+/* AAD is fed as whole blocks; Finalize's aadLength says how much of the
+ * zero-padded last block was real. */
+static int ElsGcmAad(mcuxClEls_AeadOption_t opt, mcuxClEls_KeyIndex_t keyIdx,
+                     const Aes* aes, const byte* aad, word32 aadSz,
+                     byte* aeadCtx)
 {
     ALIGN32 byte block[ELS_GCM_BLOCK];
     word32 full = aadSz & ~(word32)(ELS_GCM_BLOCK - 1u);
@@ -1007,13 +1059,13 @@ static int ElsGcmAad(mcuxClEls_AeadOption_t opt, const Aes* aes,
     int ret = 0;
 
     if (full > 0u) {
-        ret = ElsGcmAadChunk(opt, aes, aad, full, aeadCtx);
+        ret = ElsGcmAadChunk(opt, keyIdx, aes, aad, full, aeadCtx);
     }
 
     if (ret == 0 && tail > 0u) {
         XMEMSET(block, 0, sizeof(block));
         XMEMCPY(block, aad + full, tail);
-        ret = ElsGcmAadChunk(opt, aes, block, ELS_GCM_BLOCK, aeadCtx);
+        ret = ElsGcmAadChunk(opt, keyIdx, aes, block, ELS_GCM_BLOCK, aeadCtx);
         ForceZero(block, sizeof(block));
     }
 
@@ -1027,12 +1079,14 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
 {
     mcuxClEls_AeadOption_t opt;
     mcuxClEls_AeadOption_t stageOpt;
+    wc_ElsPkc_KeyRef ref;
     ALIGN32 byte aeadCtx[MCUXCLELS_AEAD_CONTEXT_SIZE];
     ALIGN32 byte j0[ELS_GCM_BLOCK];
     ALIGN32 byte inBlock[ELS_GCM_BLOCK];
     ALIGN32 byte outBlock[ELS_GCM_BLOCK];
     byte   tag[MCUXCLELS_AEAD_TAG_SIZE];
     word32 full, tail;
+    int    slotted = 0;
     int ret;
 
     if (aes == NULL || iv == NULL || authTag == NULL) {
@@ -1042,14 +1096,22 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
         (authInSz > 0 && authIn == NULL)) {
         return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
     }
-    /* Decline what the hardware does not represent:
-     *  - only a 12-byte IV maps onto the single-block J0 that Aead_Init takes;
-     *    other lengths need the GHASH-based derivation via Aead_PartialInit.
-     *  - ELS produces a 16-byte tag. A shorter one is its leftmost bytes,
-     *    which is what GCM truncation means, so those are still served.
-     *  - AES-192 has no ELS key size. */
+
+    XMEMSET(&ref, 0, sizeof(ref));
+    ret = ElsAesRef(aes, &ref);
+    if (ret == 0) {
+        slotted = 1;
+    }
+    else if (ret != WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE)) {
+        return ret;
+    }
+    /* Only a 12-byte IV maps onto the single-block J0 Aead_Init takes. A
+     * shorter tag is the leftmost bytes of the 16-byte one, so those are
+     * served. AES-192 has no ELS key size, which only an in-memory key can
+     * claim. */
     if (ivSz != GCM_NONCE_MID_SZ || authTagSz == 0 ||
-        authTagSz > MCUXCLELS_AEAD_TAG_SIZE || !ElsAesKeyOk(aes)) {
+        authTagSz > MCUXCLELS_AEAD_TAG_SIZE ||
+        (!slotted && !ElsAesKeyOk(aes))) {
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
 
@@ -1061,7 +1123,8 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
     opt.word.value   = 0u;
     opt.bits.dcrpt   = encrypt ? MCUXCLELS_AEAD_ENCRYPT
                                : MCUXCLELS_AEAD_DECRYPT;
-    opt.bits.extkey  = MCUXCLELS_AEAD_EXTERN_KEY;
+    opt.bits.extkey  = slotted ? MCUXCLELS_AEAD_INTERN_KEY
+                               : MCUXCLELS_AEAD_EXTERN_KEY;
     opt.bits.acpsie  = MCUXCLELS_AEAD_STATE_IN_ENABLE;
     opt.bits.lastinit = MCUXCLELS_AEAD_LASTINIT_FALSE;
 
@@ -1070,15 +1133,25 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
         return ret;
     }
 
-    /* Init builds the context rather than continuing one. The vendor driver
-     * clears the state-input bit here explicitly; this port never sets it, so
-     * a zeroed option word already says the same thing and the stage is passed
-     * through unchanged. */
+    /* Prove the slot before the four-stage sequence starts, so a bad reference
+     * fails before any context is built. */
+    if (slotted) {
+        ret = ElsCheckSlot(&ref, WC_ELSPKC_KEY_AES);
+        if (ret != 0) {
+            ElsUnlock();
+            return ret;
+        }
+    }
+
+    /* Init builds the context rather than continuing one: a zeroed option word
+     * already clears the state-input bit the vendor driver clears by hand. */
     stageOpt = opt;
-    ret = ElsGcmInit(stageOpt, aes, j0, aeadCtx);
+    ret = ElsGcmInit(stageOpt, (mcuxClEls_KeyIndex_t)ref.slot, aes, j0,
+                     aeadCtx);
 
     if (ret == 0 && authInSz > 0) {
-        ret = ElsGcmAad(opt, aes, authIn, authInSz, aeadCtx);
+        ret = ElsGcmAad(opt, (mcuxClEls_KeyIndex_t)ref.slot, aes, authIn,
+                        authInSz, aeadCtx);
     }
 
     if (ret == 0 && sz > 0) {
@@ -1086,19 +1159,20 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
         tail = sz - full;
 
         if (full > 0) {
-            ret = ElsGcmDataChunk(opt, aes, in, full, out, aeadCtx);
+            ret = ElsGcmDataChunk(opt, (mcuxClEls_KeyIndex_t)ref.slot, aes,
+                                  in, full, out, aeadCtx);
         }
         if (ret == 0 && tail > 0) {
-            /* msgendw carries the real byte count of the final block while the
-             * block itself still arrives zero-padded - the same split between
-             * padded buffer and true length that CMAC needs. */
+            /* msgendw carries the real byte count of the final block while
+             * the block itself still arrives zero-padded. */
             stageOpt = opt;
             stageOpt.bits.msgendw = (uint32_t)tail;
 
             XMEMSET(inBlock, 0, sizeof(inBlock));
             XMEMCPY(inBlock, in + full, tail);
-            ret = ElsGcmDataChunk(stageOpt, aes, inBlock, ELS_GCM_BLOCK,
-                                  outBlock, aeadCtx);
+            ret = ElsGcmDataChunk(stageOpt, (mcuxClEls_KeyIndex_t)ref.slot,
+                                  aes, inBlock, ELS_GCM_BLOCK, outBlock,
+                                  aeadCtx);
             if (ret == 0) {
                 XMEMCPY(out + full, outBlock, tail);
             }
@@ -1106,7 +1180,8 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
     }
 
     if (ret == 0) {
-        ret = ElsGcmFinal(opt, aes, authInSz, sz, tag, aeadCtx);
+        ret = ElsGcmFinal(opt, (mcuxClEls_KeyIndex_t)ref.slot, aes, authInSz,
+                          sz, tag, aeadCtx);
     }
 
     ElsUnlock();

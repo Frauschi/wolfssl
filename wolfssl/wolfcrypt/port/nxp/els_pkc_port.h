@@ -184,12 +184,16 @@ WOLFSSL_API int wc_ElsPkc_EccUseSlot(ecc_key* key, const wc_ElsPkc_KeyRef* ref,
 #ifndef NO_AES
 /* Same, for an Aes that names a slot rather than carrying key material.
  *
- * The key store can now put an AES key into a slot, but the cipher path still
- * does not consume the reference - an encrypt under a slot-resident AES key
- * needs the ELS internal-key option, which is separate work. Until then this
- * builds the reference and binds the Aes to it, and an encrypt against it
- * fails rather than silently using an empty key, because wc_AesInit_Id()
- * deliberately leaves keyInstalled clear. */
+ * The bound Aes then drives AES-ECB/CBC/CTR and AES-GCM against the slot: the
+ * port issues those with the ELS internal-key option, so the key never leaves
+ * the store. aes->keylen stays 0 throughout, because wc_AesInit_Id() runs no
+ * key schedule; the size the engine uses is the ksize field of the slot's own
+ * property word.
+ *
+ * WC_ELSPKC_KEY_KWK is accepted so a wrapping key can be named the same way,
+ * but only WC_ELSPKC_KEY_AES will drive a cipher - a slot must carry uaes to
+ * be usable for bulk encryption, and that is checked against the hardware on
+ * every call. */
 WOLFSSL_API int wc_ElsPkc_AesUseSlot(Aes* aes, const wc_ElsPkc_KeyRef* ref,
                                      void* heap, int devId);
 #endif
