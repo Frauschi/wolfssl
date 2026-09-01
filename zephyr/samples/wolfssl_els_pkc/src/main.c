@@ -1439,6 +1439,286 @@ int main(void)
                wc_ElsPkc_KeyStoreOffloadCount);
     }
 
+    /* ---- AES under a key that never leaves the store ---------------------
+     * The key's value cannot be compared against software, so the assertions
+     * with teeth are: a round trip returns the plaintext; two different slots
+     * produce different ciphertext, which stops being true if the slot index
+     * is ignored; and CBC under a zero IV agrees with ECB on one block. */
+    {
+        wc_ElsPkc_KeyRef duk, refA, refB;
+        byte dukRef[WC_ELSPKC_KEYREF_SZ];
+        byte refABlob[WC_ELSPKC_KEYREF_SZ];
+        byte refBBlob[WC_ELSPKC_KEYREF_SZ];
+        byte plain[32], cipherA[32], cipherB[32], back[32], ecbOut[16];
+        byte iv[16];
+        word32 refSz;
+        byte dA[12], dB[12];
+        unsigned long before;
+        unsigned k;
+        int r, ok;
+
+        for (k = 0; k < sizeof(plain); k++) plain[k] = (byte)(k * 7u + 1u);
+        memset(iv, 0, sizeof(iv));
+        memcpy(dA, "wolfslot-aaa", 12);
+        memcpy(dB, "wolfslot-bbb", 12);
+
+        memset(&duk, 0, sizeof(duk));
+        duk.keyClass = WC_ELSPKC_KEY_CKDF;
+        duk.slot     = 0;
+        refSz = sizeof(dukRef);
+        (void)wc_ElsPkc_MakeKeyRef(&duk, dukRef, &refSz);
+
+        memset(&refA, 0, sizeof(refA));
+        refA.keyClass = WC_ELSPKC_KEY_AES;
+        refA.slot     = 15;
+        refSz = sizeof(refABlob);
+        (void)wc_ElsPkc_MakeKeyRef(&refA, refABlob, &refSz);
+
+        memset(&refB, 0, sizeof(refB));
+        refB.keyClass = WC_ELSPKC_KEY_AES;
+        refB.slot     = 16;
+        refSz = sizeof(refBBlob);
+        (void)wc_ElsPkc_MakeKeyRef(&refB, refBBlob, &refSz);
+
+        (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, refABlob,
+                                 WC_ELSPKC_KEYREF_SZ, NULL);
+        (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, refBBlob,
+                                 WC_ELSPKC_KEYREF_SZ, NULL);
+
+        r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
+                               refABlob, WC_ELSPKC_KEYREF_SZ,
+                               WC_KEYSTORE_KEY_AES,
+                               dukRef, WC_ELSPKC_KEYREF_SZ,
+                               0, dA, sizeof(dA), 0, NULL);
+        check("slot AES key A derived", r == 0);
+
+        r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
+                               refBBlob, WC_ELSPKC_KEYREF_SZ,
+                               WC_KEYSTORE_KEY_AES,
+                               dukRef, WC_ELSPKC_KEYREF_SZ,
+                               0, dB, sizeof(dB), 0, NULL);
+        check("slot AES key B derived", r == 0);
+
+        /* CBC, the case that used to fail with MISSING_KEY */
+        {
+            Aes enc, dec;
+
+            memset(cipherA, 0, sizeof(cipherA));
+            memset(back, 0, sizeof(back));
+            before = wc_ElsPkc_AesOffloadCount;
+
+            ok = 0;
+            if (wc_ElsPkc_AesUseSlot(&enc, &refA, NULL,
+                                     WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_AesSetIV(&enc, iv);
+                if (r == 0) r = wc_AesCbcEncrypt(&enc, cipherA, plain, 32);
+                ok = (r == 0);
+                wc_AesFree(&enc);
+            }
+            check("CBC encrypts under a slot key", ok);
+            check("...on the hardware", wc_ElsPkc_AesOffloadCount > before);
+            check("...and produced ciphertext",
+                  memcmp(cipherA, plain, 32) != 0);
+
+            ok = 0;
+            if (wc_ElsPkc_AesUseSlot(&dec, &refA, NULL,
+                                     WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_AesSetIV(&dec, iv);
+                if (r == 0) r = wc_AesCbcDecrypt(&dec, back, cipherA, 32);
+                ok = (r == 0) && (memcmp(back, plain, 32) == 0);
+                wc_AesFree(&dec);
+            }
+            check("CBC round trip under a slot key", ok);
+        }
+
+        /* The slot index must actually select the key. */
+        {
+            Aes enc;
+
+            memset(cipherB, 0, sizeof(cipherB));
+            ok = 0;
+            if (wc_ElsPkc_AesUseSlot(&enc, &refB, NULL,
+                                     WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_AesSetIV(&enc, iv);
+                if (r == 0) r = wc_AesCbcEncrypt(&enc, cipherB, plain, 32);
+                ok = (r == 0);
+                wc_AesFree(&enc);
+            }
+            check("CBC encrypts under a second slot key", ok);
+            check("a different slot gives different ciphertext",
+                  ok && memcmp(cipherA, cipherB, 32) != 0);
+        }
+
+        /* ECB on one block must equal CBC's first block when the IV is zero,
+         * because CBC encrypts P XOR IV. Two command paths, one key. */
+        {
+            Aes ecb;
+
+            memset(ecbOut, 0, sizeof(ecbOut));
+            ok = 0;
+            if (wc_ElsPkc_AesUseSlot(&ecb, &refA, NULL,
+                                     WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_AesEcbEncrypt(&ecb, ecbOut, plain, 16);
+                ok = (r == 0);
+                wc_AesFree(&ecb);
+            }
+            check("ECB encrypts under a slot key", ok);
+            check("ECB agrees with CBC under a zero IV",
+                  ok && memcmp(ecbOut, cipherA, 16) == 0);
+        }
+
+        /* CTR is symmetric, so encrypting the ciphertext returns the
+         * plaintext. Guarded because WOLFSSL_AES_COUNTER is off in the
+         * module's default Zephyr settings. */
+#ifdef WOLFSSL_AES_COUNTER
+        {
+            Aes ctrA, ctrB;
+            byte ctrOut[32];
+
+            memset(ctrOut, 0, sizeof(ctrOut));
+            memset(back, 0, sizeof(back));
+            ok = 0;
+            if (wc_ElsPkc_AesUseSlot(&ctrA, &refA, NULL,
+                                     WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_AesSetIV(&ctrA, iv);
+                if (r == 0) r = wc_AesCtrEncrypt(&ctrA, ctrOut, plain, 32);
+                if (r == 0 && wc_ElsPkc_AesUseSlot(&ctrB, &refA, NULL,
+                                          WOLFSSL_ELS_PKC_DEVID) == 0) {
+                    r = wc_AesSetIV(&ctrB, iv);
+                    if (r == 0) {
+                        r = wc_AesCtrEncrypt(&ctrB, back, ctrOut, 32);
+                    }
+                    wc_AesFree(&ctrB);
+                }
+                ok = (r == 0) && (memcmp(back, plain, 32) == 0);
+                wc_AesFree(&ctrA);
+            }
+            check("CTR round trip under a slot key", ok);
+        }
+#endif
+
+#ifdef HAVE_AESGCM
+        /* GCM drives the same Aes through a four-stage sequence, so it needs
+         * the internal-key option threaded through every stage, not just the
+         * first - a miss on any one of them shows up as a wrong tag. */
+        {
+            Aes gcm;
+            byte nonce[12], tag[16], ct[32], pt[32];
+            static const byte aad[5] = { 'w', 'o', 'l', 'f', '!' };
+
+            for (k = 0; k < sizeof(nonce); k++) nonce[k] = (byte)(k + 0x30u);
+            memset(tag, 0, sizeof(tag));
+            memset(ct, 0, sizeof(ct));
+            memset(pt, 0, sizeof(pt));
+            before = wc_ElsPkc_GcmOffloadCount;
+
+            ok = 0;
+            if (wc_ElsPkc_AesUseSlot(&gcm, &refA, NULL,
+                                     WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_AesGcmEncrypt(&gcm, ct, plain, 32, nonce, sizeof(nonce),
+                                     tag, sizeof(tag), aad, sizeof(aad));
+                ok = (r == 0);
+                wc_AesFree(&gcm);
+            }
+            check("GCM encrypts under a slot key", ok);
+            check("...on the hardware", wc_ElsPkc_GcmOffloadCount > before);
+
+            ok = 0;
+            if (wc_ElsPkc_AesUseSlot(&gcm, &refA, NULL,
+                                     WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_AesGcmDecrypt(&gcm, pt, ct, 32, nonce, sizeof(nonce),
+                                     tag, sizeof(tag), aad, sizeof(aad));
+                ok = (r == 0) && (memcmp(pt, plain, 32) == 0);
+                wc_AesFree(&gcm);
+            }
+            check("GCM round trip under a slot key", ok);
+
+            /* the tag must still be checked, not merely produced */
+            tag[0] ^= 0xFFu;
+            ok = 0;
+            if (wc_ElsPkc_AesUseSlot(&gcm, &refA, NULL,
+                                     WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_AesGcmDecrypt(&gcm, pt, ct, 32, nonce, sizeof(nonce),
+                                     tag, sizeof(tag), aad, sizeof(aad));
+                ok = (r == AES_GCM_AUTH_E);
+                wc_AesFree(&gcm);
+            }
+            check("GCM under a slot key still rejects a bad tag", ok);
+        }
+#endif
+
+        /* A slot that holds a key of the wrong kind must be refused in
+         * software. The KWK derived above carries ukwk and not uaes, so the
+         * engine would refuse it too - but as an undifferentiated hardware
+         * error, after the command had already been issued. */
+        {
+            wc_ElsPkc_KeyRef kwkAsAes;
+            byte kwkAsAesBlob[WC_ELSPKC_KEYREF_SZ];
+            byte kwkDeriv[12];
+            Aes bad;
+
+            memcpy(kwkDeriv, "wolfkwk-0002", 12);
+            memset(&kwkAsAes, 0, sizeof(kwkAsAes));
+            kwkAsAes.keyClass = WC_ELSPKC_KEY_KWK;
+            kwkAsAes.slot     = 17;
+            refSz = sizeof(kwkAsAesBlob);
+            (void)wc_ElsPkc_MakeKeyRef(&kwkAsAes, kwkAsAesBlob, &refSz);
+            (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, kwkAsAesBlob,
+                                     WC_ELSPKC_KEYREF_SZ, NULL);
+
+            r = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID,
+                                   kwkAsAesBlob, WC_ELSPKC_KEYREF_SZ,
+                                   WC_KEYSTORE_KEY_WRAP,
+                                   dukRef, WC_ELSPKC_KEYREF_SZ,
+                                   0, kwkDeriv, sizeof(kwkDeriv), 0, NULL);
+            check("wrapping key derived for the negative case", r == 0);
+
+            /* binding is refused at the class check, before any slot lookup */
+            kwkAsAes.keyClass = WC_ELSPKC_KEY_KWK;
+            check("AesUseSlot takes a KWK reference",
+                  wc_ElsPkc_AesUseSlot(&bad, &kwkAsAes, NULL,
+                                       WOLFSSL_ELS_PKC_DEVID) == 0);
+
+            before = wc_ElsPkc_AesOffloadCount;
+            r = wc_AesSetIV(&bad, iv);
+            if (r == 0) r = wc_AesCbcEncrypt(&bad, cipherB, plain, 32);
+            check("a wrapping key cannot drive a cipher", r != 0);
+            check("...and the cipher never ran",
+                  wc_ElsPkc_AesOffloadCount == before);
+            wc_AesFree(&bad);
+
+            (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, kwkAsAesBlob,
+                                     WC_ELSPKC_KEYREF_SZ, NULL);
+        }
+
+        /* An empty slot is refused the same way: ElsCheckSlot reads the
+         * property word and finds nothing active. */
+        {
+            Aes gone;
+
+            (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, refBBlob,
+                                     WC_ELSPKC_KEYREF_SZ, NULL);
+            before = wc_ElsPkc_AesOffloadCount;
+            ok = 0;
+            if (wc_ElsPkc_AesUseSlot(&gone, &refB, NULL,
+                                     WOLFSSL_ELS_PKC_DEVID) == 0) {
+                r = wc_AesSetIV(&gone, iv);
+                if (r == 0) r = wc_AesCbcEncrypt(&gone, cipherB, plain, 32);
+                ok = (r != 0);
+                wc_AesFree(&gone);
+            }
+            check("an emptied slot cannot drive a cipher", ok);
+            check("...and the cipher never ran",
+                  wc_ElsPkc_AesOffloadCount == before);
+        }
+
+        /* leave the store as we found it */
+        (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, refABlob,
+                                 WC_ELSPKC_KEYREF_SZ, NULL);
+        (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, refBBlob,
+                                 WC_ELSPKC_KEYREF_SZ, NULL);
+    }
+
     /* ---- regressions from the port-source review ------------------------
      * The DRBG takes whole words only, so a one-byte request used to fail
      * outright rather than fall back - and a single byte is an ordinary ask. */
