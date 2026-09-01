@@ -11598,6 +11598,13 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     if (GetSequence(in, &idx, &length, inSz) < 0)
         return ASN_PARSE_E;
 
+    /* Everything below belongs to this KEMRecipientInfo, so parse against its
+     * own length rather than the whole input: a truncated structure must not
+     * be able to read fields out of whatever follows it in the set. */
+    if ((word32)length > inSz - idx)
+        return ASN_PARSE_E;
+    inSz = idx + (word32)length;
+
     if (GetMyVersion(in, &idx, &version, inSz) < 0)
         return ASN_PARSE_E;
     if (version != 0) {
@@ -11606,7 +11613,9 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     }
 
     /* rid, either an IssuerAndSerialNumber SEQUENCE or a [0] key identifier.
-     * Only one recipient is supported, so step over it. */
+     * The reader holds only a private key, so there is nothing to match it
+     * against here; a wrong guess shows up as a key unwrap failure and the
+     * caller moves on to the next recipient. */
     if (idx >= inSz)
         return ASN_PARSE_E;
     if (in[idx] == (ASN_CONSTRUCTED | ASN_SEQUENCE)) {

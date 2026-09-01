@@ -1941,7 +1941,15 @@ int wc_PKCS7_SetOriDecryptCb(wc_PKCS7* pkcs7, CallbackOriDecrypt cb);
     OtherRecipientInfo whose oriType is id-ori-kem, so no OtherRecipientInfo
     callback is needed for either direction.
 
-    The recipient certificate must assert the keyEncipherment key usage.
+    When the recipient certificate carries a keyUsage extension,
+    keyEncipherment must be the only usage set, as RFC 9935 Section 5
+    requires; anything else is refused with KEYUSAGE_E. A certificate with no
+    keyUsage extension is unconstrained by X.509 and is accepted, so deciding
+    whether that is acceptable is left to the caller's policy.
+
+    A message may mix KEMRecipientInfo with the other recipient types in any
+    order. The decoder walks past the recipients that are not the reader's,
+    bounded by the length of the RecipientInfo set, and tries each in turn.
 
     \return size of the encoded RecipientInfo on success
     \return negative on error
@@ -1964,9 +1972,10 @@ int wc_PKCS7_SetOriDecryptCb(wc_PKCS7* pkcs7, CallbackOriDecrypt cb);
     \param ukmSz Size of ukm, bytes, or 0
     \param options Options flags, CMS_SKID or CMS_ISSUER_AND_SERIAL_NUMBER
 
+    The call below is the CNSA 2.0 S/MIME combination.
+
     _Example_
     \code
-    /* the CNSA 2.0 S/MIME combination */
     int ret = wc_PKCS7_AddRecipient_KEMRI(&pkcs7, cert, certSz,
                                           HKDF_SHA512_OID, AES256_WRAP_PAD,
                                           NULL, 0, 0);

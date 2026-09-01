@@ -5816,10 +5816,14 @@ static const byte hkdfSha384Oid[] =
 /* id-alg-hkdf-with-sha512: 1.2.840.113549.1.9.16.3.30 */
 static const byte hkdfSha512Oid[] =
     {42, 134, 72, 134, 247, 13, 1, 9, 16, 3, 30};
+#ifdef WOLFSSL_KMAC128
 /* id-kmac128: 2.16.840.1.101.3.4.2.19 */
 static const byte kmac128Oid[] = {96, 134, 72, 1, 101, 3, 4, 2, 19};
+#endif
+#ifdef WOLFSSL_KMAC256
 /* id-kmac256: 2.16.840.1.101.3.4.2.20 */
 static const byte kmac256Oid[] = {96, 134, 72, 1, 101, 3, 4, 2, 20};
+#endif
 #endif /* HAVE_PKCS7 && WOLFSSL_HAVE_MLKEM */
 
 /* PKCS5 */
@@ -7269,14 +7273,18 @@ const byte* OidFromId(word32 id, word32 type, word32* oidSz)
                     oid = hkdfSha512Oid;
                     *oidSz = sizeof(hkdfSha512Oid);
                     break;
+            #ifdef WOLFSSL_KMAC128
                 case KMAC128_OID:
                     oid = kmac128Oid;
                     *oidSz = sizeof(kmac128Oid);
                     break;
+            #endif
+            #ifdef WOLFSSL_KMAC256
                 case KMAC256_OID:
                     oid = kmac256Oid;
                     *oidSz = sizeof(kmac256Oid);
                     break;
+            #endif
             #endif /* HAVE_PKCS7 && WOLFSSL_HAVE_MLKEM */
                 default:
                     break;
