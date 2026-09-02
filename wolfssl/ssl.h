@@ -3356,6 +3356,25 @@ enum { /* ssl Constants */
         wc_psk_client_tls13_callback cb);
     WOLFSSL_API void wolfSSL_set_psk_client_tls13_callback(WOLFSSL* ssl,
         wc_psk_client_tls13_callback cb);
+
+    #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
+    /* On entry each *Sz holds the buffer capacity; on exit the actual length.
+     * identity, context and key are opaque byte buffers (RFC 9258); identity is
+     * capped at MAX_PSK_ID_LEN and context at MAX_PSK_CTX_LEN.
+     * hashAlgo is the hash function associated with the external PSK: it is
+     * pre-initialized to WC_SHA256 (the RFC 9258 default) and only needs to be
+     * changed if the EPSK is associated with a different hash.
+     * The callback must be deterministic: it is invoked more than once per
+     * connection and must return the same values each time. */
+    typedef int (*wc_psk_client_importer_callback)(WOLFSSL* ssl,
+        unsigned char* identity, word32* identitySz,
+        unsigned char* context, word32* contextSz,
+        unsigned char* key, word32* keySz, int* hashAlgo);
+    WOLFSSL_API void wolfSSL_CTX_set_psk_client_importer_callback(WOLFSSL_CTX* ctx,
+        wc_psk_client_importer_callback cb);
+    WOLFSSL_API void wolfSSL_set_psk_client_importer_callback(WOLFSSL* ssl,
+        wc_psk_client_importer_callback cb);
+    #endif
 #endif
 
     WOLFSSL_API const char* wolfSSL_get_psk_identity_hint(const WOLFSSL* ssl);
@@ -3377,6 +3396,24 @@ enum { /* ssl Constants */
         wc_psk_server_tls13_callback cb);
     WOLFSSL_API void wolfSSL_set_psk_server_tls13_callback(WOLFSSL* ssl,
         wc_psk_server_tls13_callback cb);
+
+    #ifdef WOLFSSL_EXTERNAL_PSK_IMPORTER
+    /* identity and context are opaque (ptr,len) pairs as received on the wire;
+     * on entry *keySz holds the key buffer capacity, on exit the actual key
+     * length (RFC 9258). hashAlgo is the hash associated with the external PSK,
+     * pre-initialized to WC_SHA256; change it only for an EPSK associated with
+     * a different hash. The callback must be deterministic: it may be invoked
+     * more than once per connection and must return the same values each
+     * time. */
+    typedef int (*wc_psk_server_importer_callback)(WOLFSSL* ssl,
+        const unsigned char* identity, word32 identitySz,
+        const unsigned char* context, word32 contextSz,
+        unsigned char* key, word32* keySz, int* hashAlgo);
+    WOLFSSL_API void wolfSSL_CTX_set_psk_server_importer_callback(WOLFSSL_CTX* ctx,
+        wc_psk_server_importer_callback cb);
+    WOLFSSL_API void wolfSSL_set_psk_server_importer_callback(WOLFSSL* ssl,
+        wc_psk_server_importer_callback cb);
+    #endif
 #endif
 #if defined(WOLFSSL_TLS13) && defined(WOLFSSL_CERT_WITH_EXTERN_PSK)
     WOLFSSL_API int wolfSSL_CTX_set_cert_with_extern_psk(WOLFSSL_CTX* ctx,

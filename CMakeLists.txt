@@ -710,6 +710,24 @@ if(WOLFSSL_CERT_WITH_EXTERN_PSK)
     endif()
 endif()
 
+# External PSK Importer (RFC 9258)
+add_option("WOLFSSL_EXTERNAL_PSK_IMPORTER"
+    "Enable importing external PSKs for TLS 1.3 per RFC 9258 (default: disabled)"
+    "no" "yes;no")
+
+if(WOLFSSL_EXTERNAL_PSK_IMPORTER)
+    if(NOT WOLFSSL_TLS13)
+        message(WARNING "TLS 1.3 is disabled - disabling psk-importer")
+        override_cache(WOLFSSL_EXTERNAL_PSK_IMPORTER "no")
+    elseif(NOT WOLFSSL_PSK)
+        message(WARNING "PSK is disabled - disabling psk-importer")
+        override_cache(WOLFSSL_EXTERNAL_PSK_IMPORTER "no")
+    else()
+        list(APPEND WOLFSSL_DEFINITIONS
+            "-DWOLFSSL_EXTERNAL_PSK_IMPORTER")
+    endif()
+endif()
+
 # Hello Retry Request Cookie
 add_option("WOLFSSL_HRR_COOKIE"
     "Enable the server to send Cookie Extension in HRR with state. A client always echoes back a cookie it is sent (default: disabled)"

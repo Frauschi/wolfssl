@@ -6005,6 +6005,27 @@ then
     fi
 fi
 
+# External PSK Importer (RFC 9258)
+AC_ARG_ENABLE([psk-importer],
+    [AS_HELP_STRING([--enable-psk-importer],[Enable importing external PSKs for TLS 1.3 per RFC 9258 (default: disabled)])],
+    [ ENABLED_PSK_IMPORTER=$enableval ],
+    [ ENABLED_PSK_IMPORTER=no ]
+    )
+if test "$ENABLED_PSK_IMPORTER" = "yes"
+then
+    if test "$ENABLED_TLS13" = "no"
+    then
+        AC_MSG_NOTICE([TLS 1.3 is disabled - disabling psk-importer])
+        ENABLED_PSK_IMPORTER="no"
+    elif test "$ENABLED_PSK" = "no"
+    then
+        AC_MSG_NOTICE([PSK is disabled - disabling psk-importer])
+        ENABLED_PSK_IMPORTER="no"
+    else
+        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_EXTERNAL_PSK_IMPORTER"
+    fi
+fi
+
 # ERROR STRINGS
 AC_ARG_ENABLE([errorstrings],
     [AS_HELP_STRING([--enable-errorstrings],[Enable error strings table (default: enabled)])],

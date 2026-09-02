@@ -1132,6 +1132,10 @@ static const char* server_usage_msg[][71] = {
     !defined(NO_PSK)
         "--psk-with-certs  Use TLS 1.3 PSK with certificates\n",        /* 65 */
 #endif
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
+    !defined(NO_PSK)
+        "--psk-importer  Import an external PSK per RFC 9258\n",
+#endif
 #ifdef WOLFSSL_DUAL_ALG_CERTS
         "--altPrivKey <file> Generate alternative signature with this key.\n", /* 66 */
 #endif
@@ -1358,6 +1362,10 @@ static const char* server_usage_msg[][71] = {
     !defined(NO_PSK)
         "--psk-with-certs  Use TLS 1.3 PSK with certificates\n",        /* 65 */
 #endif
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
+    !defined(NO_PSK)
+        "--psk-importer  Import an external PSK per RFC 9258\n",
+#endif
 #ifdef WOLFSSL_DUAL_ALG_CERTS
         "--altPrivKey <file> Generate alternative signature with this key.\n", /* 66 */
 #endif
@@ -1537,6 +1545,10 @@ static void Usage(void)
     !defined(NO_PSK)
     printf("%s", msg[++msgId]);     /* --psk-with-certs */
 #endif
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
+    !defined(NO_PSK)
+    printf("%s", msg[++msgId]);     /* --psk-importer */
+#endif
 #ifdef WOLFSSL_DUAL_ALG_CERTS
     printf("%s", msg[++msgId]);     /* --altPrivKey */
 #endif
@@ -1674,6 +1686,10 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
     !defined(NO_PSK)
         { "psk-with-certs", 0, 271 },
 #endif
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
+    !defined(NO_PSK)
+        { "psk-importer", 0, 272 },
+#endif
         { 0, 0, 0 }
     };
 #endif
@@ -1691,6 +1707,7 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
     int    usePsk = 0;
     int    usePskPlus = 0;
     int    usePskWithCerts = 0;
+    int    usePskImporter = 0;
     int    useAnon = 0;
     int    doDTLS = 0;
     int    dtlsUDP = 0;
@@ -1936,6 +1953,7 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
     (void)usePqc;
     (void)altPrivKey;
     (void)usePskWithCerts;
+    (void)usePskImporter;
 
 #ifdef WOLFSSL_TIRTOS
     fdOpenSession(Task_self());
@@ -2633,6 +2651,15 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
             break;
 #endif
 
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER) && \
+    !defined(NO_PSK)
+        case 272:
+            /* Import an external PSK per RFC 9258. */
+            usePskImporter = 1;
+            usePsk = 1;
+            break;
+#endif
+
         case -1:
             default:
                 Usage();
@@ -3064,6 +3091,15 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
 #ifndef NO_PSK
         const char *defaultCipherList = cipherList;
 
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_EXTERNAL_PSK_IMPORTER)
+        if (usePskImporter) {
+            /* RFC 9258 external PSK importer (TLS 1.3 only). */
+            wolfSSL_CTX_set_psk_server_importer_callback(ctx,
+                my_psk_server_importer_cb);
+        }
+        else
+#endif
+        {
         wolfSSL_CTX_set_psk_server_callback(ctx, my_psk_server_cb);
     #ifdef WOLFSSL_TLS13
         wolfSSL_CTX_set_psk_server_tls13_callback(ctx, my_psk_server_tls13_cb);
@@ -3075,7 +3111,8 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
             }
         }
     #endif
-    #endif
+    #endif /* WOLFSSL_TLS13 */
+        } /* end of non-importer PSK setup */
         if (sendPskIdentityHint == 1)
             wolfSSL_CTX_use_psk_identity_hint(ctx, "cyassl server");
 
