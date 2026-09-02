@@ -526,3 +526,6 @@ compile_commands.json
 
 # Python cache
 __pycache__/
+
+# Local review notes (skoll known-issues list); not a project artifact
+.skoll-known.md
