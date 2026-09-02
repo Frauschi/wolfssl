@@ -527,3 +527,6 @@ compile_commands.json
 # Python cache
 __pycache__/
 wolfcrypt/benchmark/fips_cast_bench
+
+# Local review notes (skoll known-issues list); not a project artifact
+.skoll-known.md
