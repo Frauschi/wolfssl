@@ -9,8 +9,8 @@ callback bypassed.
 
 The ELS is reached only through NXP's CLNS library, which drives a register
 interface no emulator implements, so there is no software platform this can
-run on. `IDE/m33mu-rw612-port` covers the parts of the port that never touch
-the hardware; this covers the offload itself.
+run on. This covers the offload itself; the parts of the port that never
+touch the hardware are checked separately, without a board.
 
 ## Running it
 
