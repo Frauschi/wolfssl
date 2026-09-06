@@ -1,3 +1,9 @@
+# wolfSSL Release (unreleased)
+
+## Post-Quantum Cryptography (PQC)
+
+* Reduced the ML-DSA small memory heap footprint: signing now keeps w1 only in its encoded form and key generation encodes t a polynomial at a time, and the new `WOLFSSL_MLDSA_SIGN_SMALLEST_MEM` generates matrix A a column at a time so that only one polynomial of y is held and w0 replaces w in place, roughly halving the signing peak. by @Frauschi
+
 # wolfSSL Release 5.9.4 (Sep 25, 2026)
 
 Release 5.9.4 has been developed according to wolfSSL's development and QA
