@@ -191,6 +191,16 @@
 
 * Added Argon2 (RFC 9106) password hashing with all three variants - Argon2d, Argon2i and Argon2id - via `--enable-argon2`. Only version 0x13 is implemented. Provides the one-shot `wc_Argon2()`/`wc_Argon2_ex()` and a reusable context API (`wc_Argon2Init`/`wc_Argon2SetParams`/`wc_Argon2DeriveTag`/`wc_Argon2Free`, plus `wc_Argon2New`/`wc_Argon2Delete` unless `WC_NO_CONSTRUCTORS`) that allocates the memory block array once for applications deriving many tags. `--enable-argon2-threads` fills the segments of a slice in parallel, which does not change the derived tag: the one-shot functions use a thread per lane, and the context API takes a count from `wc_Argon2SetThreads()`. by @SparkiDev
 
+## Post-Quantum Cryptography (PQC)
+
+* `WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM` no longer forces `WOLFSSL_MLDSA_VERIFY_NO_MALLOC`, so streaming vector z can use allocated buffers. by @Frauschi
+* Fixed the ML-DSA key structure member clash that stopped `WC_MLDSA_CACHE_PUB_VECTORS` building alongside `WOLFSSL_MLDSA_VERIFY_NO_MALLOC`, renaming the verify scratch member `t1` to `vt1`. by @Frauschi
+* Reduced the ML-DSA small memory heap footprint: signing keeps w1 only in encoded form, key generation encodes t a polynomial at a time, and the new `WOLFSSL_MLDSA_SIGN_SMALLEST_MEM` holds one polynomial of y, roughly halving the signing peak. by @Frauschi
+* Sped up ML-DSA small memory signing by walking matrix A a column at a time so each polynomial of y is transformed once rather than once per row. `WOLFSSL_MLDSA_SMALL_MEM_POLY64` no longer applies to signing. by @Frauschi
+* Fixed heapless ML-DSA verification: `WOLFSSL_NO_MALLOC` now selects the small memory verify along with `WOLFSSL_MLDSA_VERIFY_NO_MALLOC`, and reaches builds using the canonical option names, so verification no longer fails with `MEMORY_E`. by @Frauschi
+* Fixed `--enable-mldsa=<level>` naming only a parameter set, which left key generation, signing and verification all disabled. by @Frauschi
+* `wc_CheckPrivateKey()` now reports `NOT_COMPILED_IN` for an ML-DSA certificate and key when the key pair check is compiled out with `WOLFSSL_MLDSA_NO_CHECK_KEY`, rather than failing to build. Such a build cannot confirm the pair matches, so loading the two together fails. by @Frauschi
+
 ## Fixes
 
 * **Fix (sniffer could not decrypt Encrypt-Then-MAC or X25519 sessions)**: the
@@ -526,11 +536,6 @@ PR stands for Pull Request, and PR <NUMBER> references a GitHub pull request num
 * Migrate internal ML-KEM consumers to canonical wc_MlKemKey API by @Frauschi (PR 10571)
 * Add PQ documentation for LMS, ML-DSA, ML-KEM, XMSS by @kaleb-himes (PR 10514)
 * Various leak / alloc and zeroization fixes for SLH-DSA by @Frauschi (PR 10698)
-
-* `WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM` no longer forces `WOLFSSL_MLDSA_VERIFY_NO_MALLOC`, so streaming vector z can be used with allocated buffers instead of buffers pinned against the key. by @Frauschi
-* Fixed the ML-DSA key structure member clash that stopped `WC_MLDSA_CACHE_PUB_VECTORS` building alongside `WOLFSSL_MLDSA_VERIFY_NO_MALLOC`, and stopped the matrix A cache regression test running against the small memory signing implementations, which stream matrix A rather than caching it. by @Frauschi
-* Reduced the ML-DSA small memory heap footprint: signing now keeps w1 only in its encoded form and key generation encodes t a polynomial at a time, and the new `WOLFSSL_MLDSA_SIGN_SMALLEST_MEM` generates matrix A a column at a time so that only one polynomial of y is held and w0 replaces w in place, roughly halving the signing peak. by @Frauschi
-* Sped up ML-DSA small memory signing by walking matrix A a column at a time so each polynomial of vector y is transformed once rather than once per row of A. Signatures are unchanged, memory is unchanged, and signing is 12 to 29 percent quicker with the C code and 6 to 12 percent quicker with AVX-512, making `WOLFSSL_MLDSA_SIGN_SMALL_MEM` faster than `WOLFSSL_MLDSA_SIGN_SMALLEST_MEM` on every target. `WOLFSSL_MLDSA_SMALL_MEM_POLY64` no longer applies to signing, which would need a 64-bit accumulator per row of w, so it now affects only `WOLFSSL_MLDSA_MAKE_KEY_SMALL_MEM` and `WOLFSSL_MLDSA_VERIFY_SMALL_MEM` and returns the 2KB it was allocating when signing. by @Frauschi
 
 ## TLS/DTLS
 
