@@ -527,6 +527,8 @@ PR stands for Pull Request, and PR <NUMBER> references a GitHub pull request num
 * Add PQ documentation for LMS, ML-DSA, ML-KEM, XMSS by @kaleb-himes (PR 10514)
 * Various leak / alloc and zeroization fixes for SLH-DSA by @Frauschi (PR 10698)
 
+* Reduced the ML-DSA small memory heap footprint: signing now keeps w1 only in its encoded form and key generation encodes t a polynomial at a time, and the new `WOLFSSL_MLDSA_SIGN_SMALLEST_MEM` generates matrix A a column at a time so that only one polynomial of y is held and w0 replaces w in place, roughly halving the signing peak. by @Frauschi
+
 ## TLS/DTLS
 
 * Multiple TLS 1.3 Encrypted Client Hello (ECH) compliance fixes per RFC 9849, covering rejection handling, ECHConfig parsing, and inner ClientHello validation. by @sebastian-carpenter (PR 10141)
