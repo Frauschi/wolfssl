@@ -325,6 +325,14 @@
 
 /* === Derived canonical gates ========================================== */
 
+/* Derive secondary canonical gates from the primary NO_* gates. Lives in
+ * this file (rather than in wc_mldsa.h alongside the struct definition)
+ * so the reverse arm at the bottom of this file sees the derived set
+ * fully populated without needing wc_mldsa.h to finish parsing first.
+ * wc_mldsa.h includes this file at its top, so by the time control
+ * returns from that include the gates are already set and wc_mldsa.h's
+ * struct definition / conditional declarations read them directly. */
+#if defined(WOLFSSL_HAVE_MLDSA)
 /* Canonical option implications. These derive one canonical option from
  * another and must apply whether or not the legacy name gates are enabled. */
 #ifdef WOLFSSL_MLDSA_SIGN_SMALLEST_MEM
@@ -356,14 +364,6 @@
     #endif
 #endif
 
-/* Derive secondary canonical gates from the primary NO_* gates. Lives in
- * this file (rather than in wc_mldsa.h alongside the struct definition)
- * so the reverse arm at the bottom of this file sees the derived set
- * fully populated without needing wc_mldsa.h to finish parsing first.
- * wc_mldsa.h includes this file at its top, so by the time control
- * returns from that include the gates are already set and wc_mldsa.h's
- * struct definition / conditional declarations read them directly. */
-#if defined(WOLFSSL_HAVE_MLDSA)
 #if defined(WOLFSSL_MLDSA_NO_MAKE_KEY) && \
         defined(WOLFSSL_MLDSA_NO_SIGN) && \
         !defined(WOLFSSL_MLDSA_NO_VERIFY) && \
