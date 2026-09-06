@@ -97,8 +97,10 @@
  * WOLFSSL_MLDSA_SMALL_MEM_POLY64                         Default: OFF
  *   Compiles the small memory implementations to use a 64-bit polynomial.
  *   Uses 2KB of memory but is slightly quicker (2.75-7%).
- *   Has no effect on signing, which accumulates a column at a time and would
- *   need a 64-bit accumulator for every row of w.
+ *   Only WOLFSSL_MLDSA_MAKE_KEY_SMALL_MEM and WOLFSSL_MLDSA_VERIFY_SMALL_MEM
+ *   are affected. Signing accumulates a column at a time and would need a
+ *   64-bit accumulator for every row of w, so it does not use one, and this
+ *   does nothing at all without one of those two options.
  *
  * WOLFSSL_MLDSA_ALIGNMENT                                Default: 8
  *   Use to indicate whether loading and storing of words needs to be aligned.
