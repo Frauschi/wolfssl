@@ -219,7 +219,7 @@ static void wb_get_params(void)
  * Drive independence pairs: both F (in range), left T (a<=nhi),
  * right T with left F (a>=hi). Plus the vector-level (ret==1)&&(i<l).
  * ------------------------------------------------------------------ */
-#if !defined(WOLFSSL_MLDSA_NO_SIGN) || !defined(WOLFSSL_MLDSA_NO_VERIFY)
+#ifndef WOLFSSL_MLDSA_NO_VERIFY
 static void wb_check_low(void)
 {
     sword32 a[2 * MLDSA_N];
@@ -251,13 +251,8 @@ static void wb_check_low(void)
         WB_NOTE("mldsa_check_low(>=hi) expected 0");
     }
 
-#if (!defined(WOLFSSL_MLDSA_NO_VERIFY) && \
-     !defined(WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM)) || \
-    (!defined(WOLFSSL_MLDSA_NO_SIGN) && \
-     (!defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM) || \
-      (!defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM) && \
-       (defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) || \
-        defined(WOLFSSL_MLDSA_SIGN_CHECK_W0)))))
+#if !defined(WOLFSSL_MLDSA_NO_VERIFY) && \
+    !defined(WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM)
     /* Vector level: two polynomials, both in range -> (ret==1)&&(i<l) walks
      * both, returns 1; then a first-poly-out-of-range -> early ret 0. */
     for (j = 0; j < 2 * MLDSA_N; j++) {
@@ -1428,7 +1423,7 @@ int main(void)
     return 0;
 #else
     wb_get_params();
-#if !defined(WOLFSSL_MLDSA_NO_SIGN) || !defined(WOLFSSL_MLDSA_NO_VERIFY)
+#ifndef WOLFSSL_MLDSA_NO_VERIFY
     wb_check_low();
 #endif
 #ifndef WOLFSSL_MLDSA_NO_SIGN
