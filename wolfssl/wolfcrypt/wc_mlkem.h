@@ -204,13 +204,15 @@
 #endif
 #endif /* WC_ML_KEM_MAX_K */
 
-/* Maximum number of bytes one polynomial of a vector is compressed into when
- * encoding a cipher text. ML-KEM-1024 uses 11 bits per coefficient, the other
- * parameter sets use 10. */
+/* Size of the scratch block one polynomial of a cipher text is compressed into
+ * during decapsulation's comparison, used for both a polynomial of u and c_2.
+ * ML-KEM-1024 uses 11 bits per coefficient, the others 10, plus slack for the
+ * 11 bit assembly compressor's 8 byte final store. Encapsulation has no such
+ * slack, so every compressor a small memory build reaches must be a C one. */
 #if defined(WOLFSSL_KYBER1024) || defined(WOLFSSL_WC_ML_KEM_1024)
-#define MLKEM_MAX_COMP_POLY_SZ  MLKEM_POLY_COMPRESSED_SZ(11)
+#define MLKEM_MAX_COMP_POLY_SZ  (MLKEM_POLY_COMPRESSED_SZ(11) + 8)
 #else
-#define MLKEM_MAX_COMP_POLY_SZ  MLKEM_POLY_COMPRESSED_SZ(10)
+#define MLKEM_MAX_COMP_POLY_SZ  (MLKEM_POLY_COMPRESSED_SZ(10) + 8)
 #endif
 
 #define KYBER_N             MLKEM_N
