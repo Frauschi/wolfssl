@@ -270,7 +270,8 @@
 * Reduced the ML-DSA small memory heap footprint: signing keeps w1 only in encoded form, key generation encodes t a polynomial at a time, and the new `WOLFSSL_MLDSA_SIGN_SMALLEST_MEM` holds one polynomial of y, roughly halving the signing peak. by @Frauschi
 * Sped up ML-DSA small memory signing by walking matrix A a column at a time so each polynomial of y is transformed once rather than once per row. `WOLFSSL_MLDSA_SMALL_MEM_POLY64` no longer applies to signing. by @Frauschi
 * Fixed `--enable-mldsa=<level>` naming only a parameter set, which left key generation, signing and verification all disabled. by @Frauschi
-* `wc_CheckPrivateKey()` now reports `NOT_COMPILED_IN` for an ML-DSA certificate and key when the key pair check is compiled out with `WOLFSSL_MLDSA_NO_CHECK_KEY`, rather than failing to build. Such a build cannot confirm the pair matches, so loading the two together fails. by @Frauschi
+* `wc_CheckPrivateKey()` now reports `NOT_COMPILED_IN` for an ML-DSA certificate and key when the key pair check is compiled out with `WOLFSSL_MLDSA_NO_CHECK_KEY`, rather than failing to build. Such a build cannot confirm the pair matches, so `wolfSSL_CTX_check_private_key()`, `wolfSSL_check_private_key()` and `wolfSSL_X509_check_private_key()` report a mismatch for it; loading the certificate and key is unaffected. by @Frauschi
+* Fixed ML-DSA key generation with `WOLFSSL_MLDSA_MAKE_KEY_SMALL_MEM` keeping the matrix and vector caches (`WC_MLDSA_CACHE_*`) of the key it replaced. A key generated into an object that already held another key was signed and verified against the old key's cached values, so its signatures failed to verify. by @Frauschi
 
 ## Fixes
 

@@ -66542,6 +66542,9 @@ static wc_test_ret_t mldsa_sign_kat_test(int param, const byte* expDigest)
     wc_Shake shake;
     int keyInit = 0;
     int shakeInit = 0;
+#ifndef WOLFSSL_MLDSA_NO_VERIFY
+    int res = 0;
+#endif
 
     key = (wc_MlDsaKey*)XMALLOC(sizeof(wc_MlDsaKey), HEAP_HINT,
         DYNAMIC_TYPE_TMP_BUFFER);
@@ -66558,12 +66561,31 @@ static wc_test_ret_t mldsa_sign_kat_test(int param, const byte* expDigest)
     if (ret != 0)
         ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
 
-    /* Deterministic key and deterministic signature. */
-    ret = wc_MlDsaKey_MakeKeyFromSeed(key, mldsa_kat_key_seed);
+    ret = wc_MlDsaKey_GetSigLen(key, &sigSz);
     if (ret != 0)
         ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
 
-    ret = wc_MlDsaKey_GetSigLen(key, &sigSz);
+    /* Fill every cache from another key first: generating the KAT key into
+     * the same object must not reuse any of them. */
+    ret = wc_MlDsaKey_MakeKeyFromSeed(key, mldsa_kat_sig_seed);
+    if (ret != 0)
+        ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
+    sigLen = (word32)sigSz;
+    ret = wc_MlDsaKey_SignCtxWithSeed(key, NULL, 0, sig, &sigLen,
+        mldsa_kat_msg, (word32)sizeof(mldsa_kat_msg), mldsa_kat_sig_seed);
+    if (ret != 0)
+        ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
+#ifndef WOLFSSL_MLDSA_NO_VERIFY
+    ret = wc_MlDsaKey_VerifyCtx(key, sig, sigLen, NULL, 0, mldsa_kat_msg,
+        (word32)sizeof(mldsa_kat_msg), &res);
+    if (ret != 0)
+        ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
+    if (res != 1)
+        ERROR_OUT(WC_TEST_RET_ENC_I(res), out);
+#endif
+
+    /* Deterministic key and deterministic signature. */
+    ret = wc_MlDsaKey_MakeKeyFromSeed(key, mldsa_kat_key_seed);
     if (ret != 0)
         ERROR_OUT(WC_TEST_RET_ENC_EC(ret), out);
     sigLen = (word32)sigSz;
@@ -66597,7 +66619,8 @@ out:
     return ret;
 }
 
-#endif /* !NO_SIGN && !NO_MAKE_KEY && !FIPS204_DRAFT */
+#endif /* !NO_SIGN && !NO_MAKE_KEY && !FIPS204_DRAFT && !CHECK_Y &&
+        * !CHECK_W0 */
 
 #if defined(WC_MLDSA_CACHE_MATRIX_A) && \
     !defined(WC_MLDSA_FIXED_ARRAY) && \
