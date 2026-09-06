@@ -83,6 +83,11 @@
 #ifndef WOLF_CRYPT_DILITHIUM_H
 #define WOLF_CRYPT_DILITHIUM_H
 
+/* Read the build configuration before deriving any option: an application
+ * that reaches this header before settings.h would otherwise translate an
+ * empty option set and get a different wc_MlDsaKey layout than the library. */
+#include <wolfssl/wolfcrypt/types.h>
+
 /* === Sub-config build-gate translations =============================== */
 
 /* The two sub-gates that <wolfssl/certs_test.h> (auto-generated, no
@@ -328,37 +333,6 @@
  * returns from that include the gates are already set and wc_mldsa.h's
  * struct definition / conditional declarations read them directly. */
 #if defined(WOLFSSL_HAVE_MLDSA)
-/* Canonical option implications. These derive one canonical option from
- * another and must apply whether or not the legacy name gates are enabled. */
-#ifdef WOLFSSL_MLDSA_SIGN_SMALLEST_MEM
-    /* Smallest signing RAM: on top of the small-mem path, generate matrix A a
-     * column at a time so only one polynomial of y is held, decompose w into
-     * w0 in place and keep w1 encoded. Vector y is regenerated for z. */
-    #ifndef WOLFSSL_MLDSA_SIGN_SMALL_MEM
-        #define WOLFSSL_MLDSA_SIGN_SMALL_MEM
-    #endif
-#endif
-#ifdef WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC
-    #ifndef WOLFSSL_MLDSA_SIGN_SMALL_MEM
-        #define WOLFSSL_MLDSA_SIGN_SMALL_MEM
-    #endif
-#endif
-#ifdef WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC_A
-    #ifndef WOLFSSL_MLDSA_SIGN_SMALL_MEM
-        #define WOLFSSL_MLDSA_SIGN_SMALL_MEM
-    #endif
-#endif
-#ifdef WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM
-    /* Smallest verify RAM: on top of the small-mem path, stream the
-     * signature's z vector one polynomial at a time instead of holding the
-     * whole l-vector (~6 KB for ML-DSA-87) at the cost of a per-row z
-     * decode+NTT. Combine with WOLFSSL_MLDSA_VERIFY_NO_MALLOC to pin the
-     * buffers against the key; on its own the buffers are still allocated. */
-    #ifndef WOLFSSL_MLDSA_VERIFY_SMALL_MEM
-        #define WOLFSSL_MLDSA_VERIFY_SMALL_MEM
-    #endif
-#endif
-
 #if defined(WOLFSSL_MLDSA_NO_MAKE_KEY) && \
         defined(WOLFSSL_MLDSA_NO_SIGN) && \
         !defined(WOLFSSL_MLDSA_NO_VERIFY) && \
