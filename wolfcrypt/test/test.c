@@ -61197,7 +61197,8 @@ out:
     return ret;
 }
 
-#endif /* !NO_SIGN && !NO_MAKE_KEY && !FIPS204_DRAFT */
+#endif /* !NO_SIGN && !NO_MAKE_KEY && !FIPS204_DRAFT && !CHECK_Y &&
+        * !CHECK_W0 */
 
 #if defined(WC_MLDSA_CACHE_MATRIX_A) && \
     !defined(WC_MLDSA_FIXED_ARRAY) && \

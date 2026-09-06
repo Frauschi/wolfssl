@@ -7088,10 +7088,7 @@ static void mldsa_vec_ntt(sword32* r, byte l)
 #if (!defined(WOLFSSL_MLDSA_NO_VERIFY) && \
      (!defined(WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM) || \
       defined(WC_MLDSA_CACHE_PUB_VECTORS))) || \
-    (!defined(WOLFSSL_MLDSA_NO_SIGN) && \
-     (!defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM) || \
-      defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC) || \
-      defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC_A))) || \
+    defined(MLDSA_SIGN_VEC_HELPERS) || \
     (defined(WOLFSSL_MLDSA_SMALL) && \
      (!defined(WOLFSSL_MLDSA_NO_MAKE_KEY) || \
       defined(WOLFSSL_MLDSA_CHECK_KEY)))
@@ -8077,7 +8074,8 @@ static void mldsa_invntt_full(sword32* r)
     }
 }
 
-#if !defined(WOLFSSL_MLDSA_NO_MAKE_KEY) || \
+#if (!defined(WOLFSSL_MLDSA_NO_MAKE_KEY) && \
+     !defined(WOLFSSL_MLDSA_MAKE_KEY_SMALL_MEM)) || \
      defined(WOLFSSL_MLDSA_CHECK_KEY) || \
     (!defined(WOLFSSL_MLDSA_NO_VERIFY) && \
      !defined(WOLFSSL_MLDSA_VERIFY_SMALL_MEM)) || \
@@ -8109,7 +8107,8 @@ static void mldsa_vec_invntt_full(sword32* r, byte l)
 }
 #endif
 
-#if !defined(WOLFSSL_MLDSA_NO_MAKE_KEY) || \
+#if (!defined(WOLFSSL_MLDSA_NO_MAKE_KEY) && \
+     !defined(WOLFSSL_MLDSA_MAKE_KEY_SMALL_MEM)) || \
      defined(WOLFSSL_MLDSA_CHECK_KEY) || \
     (!defined(WOLFSSL_MLDSA_NO_VERIFY) && \
      !defined(WOLFSSL_MLDSA_VERIFY_SMALL_MEM)) || \
@@ -8576,8 +8575,10 @@ static sword32 mldsa_poly_checksum(const sword32* a)
     word32 chk = 0;
 
     for (i = 0; i < MLDSA_N; i++) {
-        /* Rotate so that the position of a changed coefficient matters. */
-        chk = ((chk << 1) | (chk >> 31)) ^ (word32)a[i];
+        /* Rotate so the position of a changed coefficient matters, and mix in
+         * the index: rotation alone repeats every 32 of the 256 coefficients,
+         * so a fault applying the same delta 32 apart would cancel. */
+        chk = ((chk << 1) | (chk >> 31)) ^ ((word32)a[i] + i);
     }
 
     return (sword32)chk;
@@ -8585,7 +8586,8 @@ static sword32 mldsa_poly_checksum(const sword32* a)
 #endif
 
 #if (defined(WOLFSSL_MLDSA_SMALL) && \
-     (!defined(WOLFSSL_MLDSA_NO_MAKE_KEY) || \
+     ((!defined(WOLFSSL_MLDSA_NO_MAKE_KEY) && \
+       !defined(WOLFSSL_MLDSA_MAKE_KEY_SMALL_MEM)) || \
       (!defined(WOLFSSL_MLDSA_NO_VERIFY) && \
        !defined(WOLFSSL_MLDSA_VERIFY_SMALL_MEM)) || \
       defined(WOLFSSL_MLDSA_CHECK_KEY))) || \
@@ -10581,7 +10583,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
             }
 
             wt = w;
-            for (r = 0; (ret == 0) && valid && (r < params->k); r++) {
+            for (r = 0; (ret == 0) && (r < params->k); r++) {
                 /* Step 13: w = NTT-1(A o NTT(y)) */
                 mldsa_poly_red(wt);
                 mldsa_invntt_full(wt);
@@ -10610,7 +10612,10 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                 }
             #endif
             #ifdef WOLFSSL_MLDSA_SIGN_CHECK_W0
-                valid = mldsa_check_low_ct(wt,
+                /* Accumulate as the y check above does: w0 is derived from the
+                 * secret mask too, so an early exit would leak which row
+                 * rejected. */
+                valid &= mldsa_check_low_ct(wt,
                     params->gamma2 - params->beta);
             #endif
                 wt += MLDSA_N;
@@ -11567,13 +11572,22 @@ static int mldsa_verify_with_mu(wc_MlDsaKey* key, const byte* mu,
             unsigned int e;
             const sword32* zt = z;
 
-            /* Step 1: Decode and NTT vector t1. */
-            mldsa_decode_t1(t1p, w);
+#ifdef WC_MLDSA_CACHE_PUB_VECTORS
+            if (key->pubVecSet) {
+                /* Cached vector is already decoded and transformed. */
+                XMEMCPY(w, key->t1 + (size_t)r * MLDSA_N,
+                    sizeof(sword32) * MLDSA_N);
+            }
+            else
+#endif
+            {
+                /* Step 1: Decode and NTT vector t1. */
+                mldsa_decode_t1(t1p, w);
+                mldsa_ntt_full(w);
+            }
             /* Next polynomial. */
             t1p += MLDSA_U * MLDSA_N / 8;
 
-            /* Step 10: - NTT(c) o NTT(t1)) */
-            mldsa_ntt_full(w);
     #ifndef WOLFSSL_MLDSA_SMALL_MEM_POLY64
         #ifdef WOLFSSL_MLDSA_SMALL
             for (e = 0; e < MLDSA_N; e++) {
