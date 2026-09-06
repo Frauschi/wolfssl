@@ -353,6 +353,9 @@ static const byte const_byte_array[] = "A+Gd\0\0\0";
 #include <wolfssl/wolfcrypt/aes.h>
 #include <wolfssl/wolfcrypt/wc_encrypt.h>
 #include <wolfssl/wolfcrypt/cmac.h>
+#ifdef WOLFSSL_ELS_PKC_KEYBLOB
+    #include <wolfssl/wolfcrypt/port/nxp/els_pkc_keyblob.h>
+#endif
 #ifdef WOLF_CRYPTO_CB_KEYSTORE
     #include <wolfssl/wolfcrypt/wc_keystore.h>
 #endif
@@ -891,6 +894,9 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t  aesofb_test(void);
 WOLFSSL_TEST_SUBROUTINE wc_test_ret_t  cmac_test(void);
 #ifdef WOLFSSL_SHE
 WOLFSSL_TEST_SUBROUTINE wc_test_ret_t  she_test(void);
+#endif
+#ifdef WOLFSSL_ELS_PKC_KEYBLOB
+WOLFSSL_TEST_SUBROUTINE wc_test_ret_t  els_pkc_keyblob_test(void);
 #endif
 #ifdef WOLF_CRYPTO_CB_KEYSTORE
 WOLFSSL_TEST_SUBROUTINE wc_test_ret_t  keystore_cb_test(void);
@@ -3380,6 +3386,13 @@ options: [-s max_relative_stack_bytes] [-m max_relative_heap_memory_bytes]\n\
         TEST_FAIL("SHE      test failed!\n", ret);
     else
         TEST_PASS("SHE      test passed!\n");
+#endif
+
+#if defined(WOLFSSL_ELS_PKC_KEYBLOB) && !defined(NO_AES)
+    if ( (ret = els_pkc_keyblob_test()) != 0)
+        TEST_FAIL("ELS blob test failed!\n", ret);
+    else
+        TEST_PASS("ELS blob test passed!\n");
 #endif
 
 #ifdef WOLF_CRYPTO_CB_KEYSTORE
@@ -69200,6 +69213,107 @@ exit_SHE_Test:
 
 #endif /* WOLFSSL_SHE && !NO_AES */
 
+#if defined(WOLFSSL_ELS_PKC_KEYBLOB) && !defined(NO_AES)
+
+/* The KAT is the byte-exact output of NXP's own ELS RFC3394 wrap helper for
+ * these inputs. It is what pins wolfCrypt's container to what the hardware
+ * actually accepts: if this drifts, a provisioning tool built on wolfCrypt
+ * would silently emit blobs the ELS key store rejects. */
+WOLFSSL_TEST_SUBROUTINE wc_test_ret_t els_pkc_keyblob_test(void)
+{
+    WOLFSSL_SMALL_STACK_STATIC const byte kek[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
+    };
+    WOLFSSL_SMALL_STACK_STATIC const byte expected[48] = {
+        0x96,0x88,0x7D,0x25,0xB3,0xBB,0x44,0xF2,0xA5,0xB6,0x16,0xFE,
+        0xC4,0x45,0xE4,0x3C,0x1C,0xD5,0xBC,0xBD,0x17,0x6B,0xB6,0x59,
+        0x8A,0xB1,0x35,0x9B,0xB9,0x3B,0x4E,0x7E,0x08,0x71,0x05,0x4D,
+        0x95,0x38,0x74,0xA2,0xA8,0x01,0x43,0xB7,0xEB,0x80,0x4E,0x58
+    };
+    byte   key[32];
+    byte   blob[WC_ELSPKC_BLOB_SIZE(32)];
+    byte   back[32];
+    word32 props = 0;
+    word32 keySz = 0;
+    int    i;
+    int    ret;
+
+    for (i = 0; i < 32; i++)
+        key[i] = (byte)(0xA0 + i);
+
+    ret = wc_ElsPkc_BuildWrappedBlob(kek, (word32)sizeof(kek), 0x00100021U,
+                                     key, 32, blob, (word32)sizeof(blob));
+    if (ret != (int)WC_ELSPKC_BLOB_SIZE(32))
+        return WC_TEST_RET_ENC_I(ret);
+    if (XMEMCMP(blob, expected, sizeof(expected)) != 0)
+        return WC_TEST_RET_ENC_NC;
+
+    ret = wc_ElsPkc_ParseWrappedBlob(kek, (word32)sizeof(kek), blob,
+                                     WC_ELSPKC_BLOB_SIZE(32), &props,
+                                     back, (word32)sizeof(back), &keySz);
+    if (ret != 32)
+        return WC_TEST_RET_ENC_I(ret);
+    if (props != 0x00100021U || keySz != 32)
+        return WC_TEST_RET_ENC_NC;
+    if (XMEMCMP(back, key, 32) != 0)
+        return WC_TEST_RET_ENC_NC;
+
+    /* size query: key == NULL reports the size without writing */
+    keySz = 0;
+    ret = wc_ElsPkc_ParseWrappedBlob(kek, (word32)sizeof(kek), blob,
+                                     WC_ELSPKC_BLOB_SIZE(32), NULL,
+                                     NULL, 0, &keySz);
+    if (ret != 32 || keySz != 32)
+        return WC_TEST_RET_ENC_I(ret);
+
+    ret = wc_ElsPkc_BuildWrappedBlob(kek, (word32)sizeof(kek), 0x00100020U,
+                                     key, 16, blob, (word32)sizeof(blob));
+    if (ret != (int)WC_ELSPKC_BLOB_SIZE(16))
+        return WC_TEST_RET_ENC_I(ret);
+    ret = wc_ElsPkc_ParseWrappedBlob(kek, (word32)sizeof(kek), blob,
+                                     WC_ELSPKC_BLOB_SIZE(16), &props,
+                                     back, (word32)sizeof(back), &keySz);
+    if (ret != 16 || keySz != 16 || XMEMCMP(back, key, 16) != 0)
+        return WC_TEST_RET_ENC_I(ret);
+
+    /* a flipped bit must fail the AES-KW integrity check */
+    blob[10] ^= 0x01;
+    ret = wc_ElsPkc_ParseWrappedBlob(kek, (word32)sizeof(kek), blob,
+                                     WC_ELSPKC_BLOB_SIZE(16), &props,
+                                     back, (word32)sizeof(back), &keySz);
+    if (ret >= 0)
+        return WC_TEST_RET_ENC_NC;
+    blob[10] ^= 0x01;
+
+    /* too small an output buffer is refused, not truncated */
+    ret = wc_ElsPkc_BuildWrappedBlob(kek, (word32)sizeof(kek), 0x00100021U,
+                                     key, 32, blob,
+                                     (word32)WC_ELSPKC_BLOB_SIZE(32) - 1);
+    if (ret != WC_NO_ERR_TRACE(BUFFER_E))
+        return WC_TEST_RET_ENC_I(ret);
+
+    /* too small a key buffer is refused rather than overflowing */
+    ret = wc_ElsPkc_BuildWrappedBlob(kek, (word32)sizeof(kek), 0x00100021U,
+                                     key, 32, blob, (word32)sizeof(blob));
+    if (ret != (int)WC_ELSPKC_BLOB_SIZE(32))
+        return WC_TEST_RET_ENC_I(ret);
+    ret = wc_ElsPkc_ParseWrappedBlob(kek, (word32)sizeof(kek), blob,
+                                     WC_ELSPKC_BLOB_SIZE(32), &props,
+                                     back, 16, &keySz);
+    if (ret != WC_NO_ERR_TRACE(BUFFER_E))
+        return WC_TEST_RET_ENC_I(ret);
+
+    /* ELS has no representation for a 192-bit key */
+    ret = wc_ElsPkc_BuildWrappedBlob(kek, (word32)sizeof(kek), 0x00100021U,
+                                     key, 24, blob, (word32)sizeof(blob));
+    if (ret != WC_NO_ERR_TRACE(BAD_FUNC_ARG))
+        return WC_TEST_RET_ENC_I(ret);
+
+    return 0;
+}
+
+#endif /* WOLFSSL_ELS_PKC_KEYBLOB && !NO_AES */
 
 #ifdef WOLF_CRYPTO_CB_KEYSTORE
 
