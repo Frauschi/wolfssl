@@ -66475,6 +66475,7 @@ out:
 
 #if defined(WC_MLDSA_CACHE_MATRIX_A) && \
     !defined(WC_MLDSA_FIXED_ARRAY) && \
+    !defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM) && \
     !defined(WOLFSSL_MLDSA_NO_MAKE_KEY) && \
     !defined(WOLFSSL_MLDSA_NO_SIGN) && \
     !defined(WOLFSSL_MLDSA_NO_VERIFY)
@@ -66490,6 +66491,10 @@ out:
  * key after make_key, then signing. The post-condition asserts that key->a
  * was populated (proving the allocation made it into the key, not the local)
  * and that signing produces a verifiable signature.
+ *
+ * The small memory signing implementations stream matrix A rather than
+ * caching it, so they never populate key->a and the post-condition does not
+ * apply to them.
  */
 static wc_test_ret_t mldsa_sign_cache_alloc_test(int param, WC_RNG* rng)
 {
@@ -66570,8 +66575,8 @@ out:
     return ret;
 }
 #endif /* WC_MLDSA_CACHE_MATRIX_A && !WC_MLDSA_FIXED_ARRAY &&
-        * !WOLFSSL_MLDSA_NO_MAKE_KEY && !WOLFSSL_MLDSA_NO_SIGN &&
-        * !WOLFSSL_MLDSA_NO_VERIFY */
+        * !WOLFSSL_MLDSA_SIGN_SMALL_MEM && !WOLFSSL_MLDSA_NO_MAKE_KEY &&
+        * !WOLFSSL_MLDSA_NO_SIGN && !WOLFSSL_MLDSA_NO_VERIFY */
 
 
 #if (defined(WOLFSSL_MLDSA_PRIVATE_KEY) && \
@@ -67562,6 +67567,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t mldsa_test(void)
 
 #if defined(WC_MLDSA_CACHE_MATRIX_A) && \
     !defined(WC_MLDSA_FIXED_ARRAY) && \
+    !defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM) && \
     !defined(WOLFSSL_MLDSA_NO_MAKE_KEY) && \
     !defined(WOLFSSL_MLDSA_NO_SIGN) && \
     !defined(WOLFSSL_MLDSA_NO_VERIFY)

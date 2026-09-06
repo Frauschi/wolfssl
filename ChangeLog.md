@@ -2,6 +2,7 @@
 
 ## Post-Quantum Cryptography (PQC)
 
+* Fixed the ML-DSA key structure member clash that stopped `WC_MLDSA_CACHE_PUB_VECTORS` building alongside `WOLFSSL_MLDSA_VERIFY_NO_MALLOC`, and stopped the matrix A cache regression test running against the small memory signing implementations, which stream matrix A rather than caching it. by @Frauschi
 * Reduced the ML-DSA small memory heap footprint: signing now keeps w1 only in its encoded form and key generation encodes t a polynomial at a time, and the new `WOLFSSL_MLDSA_SIGN_SMALLEST_MEM` generates matrix A a column at a time so that only one polynomial of y is held and w0 replaces w in place, roughly halving the signing peak. by @Frauschi
 
 # wolfSSL Release 5.9.4 (Sep 25, 2026)
