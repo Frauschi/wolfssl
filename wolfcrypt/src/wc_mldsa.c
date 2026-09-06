@@ -335,6 +335,8 @@ void print_data(const char* name, const byte* d, int len)
 #define MLDSA_MAX_V_BLOCKS          5
 /* Maximum number of bytes to generate into v to make y. */
 #define MLDSA_MAX_V                 (MLDSA_MAX_V_BLOCKS * 8 * 17)
+/* The smallest memory signer expands the mask into a polynomial buffer. */
+wc_static_assert(sizeof(sword32) * MLDSA_N >= MLDSA_MAX_V);
 
 
 /* 2 blocks, each block 136 bytes = 272 bytes.
@@ -5195,6 +5197,37 @@ static int wc_mldsa_gen_y_avx512(sword32* y, byte* seed, word16 kappa,
  * @return  0 on success.
  * @return  Negative on hash error.
  */
+/* Expand the private random seed into one polynomial of vector y.
+ *
+ * @param [in, out] shake256     SHAKE-256 object.
+ * @param [in, out] seed         Buffer containing seed to expand.
+ *                               Has space for two bytes to be appended.
+ * @param [in]      n            Value to append to seed.
+ * @param [in]      gamma1_bits  Number of bits per value.
+ * @param [out]     y            Polynomial.
+ * @param [out]     v            Scratch of MLDSA_MAX_V bytes. Holds the
+ *                               secret mask, so the caller must zeroize it.
+ * @return  0 on success.
+ * @return  Negative on hash error.
+ */
+static int mldsa_expand_mask_poly(wc_Shake* shake256, byte* seed, word16 n,
+    byte gamma1_bits, sword32* y, byte* v)
+{
+    int ret;
+
+    /* Step 4: Append to seed and squeeze out data. */
+    seed[MLDSA_PRIV_RAND_SEED_SZ + 0] = (byte)n;
+    seed[MLDSA_PRIV_RAND_SEED_SZ + 1] = (byte)(n >> 8);
+    ret = mldsa_squeeze256(shake256, seed, MLDSA_Y_SEED_SZ, v,
+        MLDSA_MAX_V_BLOCKS);
+    if (ret == 0) {
+        /* Decode v into polynomial. */
+        mldsa_decode_gamma1(v, gamma1_bits, y);
+    }
+
+    return ret;
+}
+
 static int mldsa_vec_expand_mask_c(wc_Shake* shake256, byte* seed,
     word16 kappa, byte gamma1_bits, sword32* y, byte l)
 {
@@ -5208,19 +5241,10 @@ static int mldsa_vec_expand_mask_c(wc_Shake* shake256, byte* seed,
     /* Step 2: For each polynomial of vector. */
     for (r = 0; (ret == 0) && (r < l); r++) {
         /* Step 3: Calculate value to append to seed. */
-        word16 n = (word16)(kappa + r);
-
-        /* Step 4: Append to seed and squeeze out data. */
-        seed[MLDSA_PRIV_RAND_SEED_SZ + 0] = (byte)n;
-        seed[MLDSA_PRIV_RAND_SEED_SZ + 1] = (byte)(n >> 8);
-        ret = mldsa_squeeze256(shake256, seed, MLDSA_Y_SEED_SZ, v,
-            MLDSA_MAX_V_BLOCKS);
-        if (ret == 0) {
-            /* Decode v into polynomial. */
-            mldsa_decode_gamma1(v, gamma1_bits, y);
-            /* Next polynomial. */
-            y += MLDSA_N;
-        }
+        ret = mldsa_expand_mask_poly(shake256, seed, (word16)(kappa + r),
+            gamma1_bits, y, v);
+        /* Next polynomial. */
+        y += MLDSA_N;
     }
 
     /* v holds the secret mask y. */
@@ -10513,8 +10537,10 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                 }
             #endif
                 /* Step 12: Compute polynomial of y from seed and kappa. */
-                ret = mldsa_vec_expand_mask(&key->shake, priv_rand_seed,
-                    (word16)(kappa + s), params->gamma1_bits, y, 1, key->heap);
+                /* z is not live yet, so it doubles as the expansion scratch
+                 * rather than allocating one per polynomial. */
+                ret = mldsa_expand_mask_poly(&key->shake, priv_rand_seed,
+                    (word16)(kappa + s), params->gamma1_bits, y, (byte*)z);
                 if (ret != 0) {
                     break;
                 }
@@ -10649,9 +10675,10 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                  * rejecting polynomial of a discarded attempt is observable. */
                 for (s = 0; (ret == 0) && valid && (s < params->l); s++) {
                     /* Vector y is not kept, so regenerate this polynomial. */
-                    ret = mldsa_vec_expand_mask(&key->shake, priv_rand_seed,
-                        (word16)(kappa + s), params->gamma1_bits, y, 1,
-                        key->heap);
+                    /* z is overwritten by the multiply below, so it doubles
+                     * as the expansion scratch. */
+                    ret = mldsa_expand_mask_poly(&key->shake, priv_rand_seed,
+                        (word16)(kappa + s), params->gamma1_bits, y, (byte*)z);
                     if (ret != 0) {
                         break;
                     }
@@ -11571,12 +11598,15 @@ static int mldsa_verify_with_mu(wc_MlDsaKey* key, const byte* mu,
             unsigned int s;
             unsigned int e;
             const sword32* zt = z;
+            /* Source of this polynomial of t1 for the multiply below. The
+             * result goes to w either way, so a cached polynomial is read in
+             * place rather than copied. */
+            const sword32* t1v = w;
 
 #ifdef WC_MLDSA_CACHE_PUB_VECTORS
             if (key->pubVecSet) {
                 /* Cached vector is already decoded and transformed. */
-                XMEMCPY(w, key->t1 + (size_t)r * MLDSA_N,
-                    sizeof(sword32) * MLDSA_N);
+                t1v = key->t1 + (size_t)r * MLDSA_N;
             }
             else
 #endif
@@ -11591,35 +11621,35 @@ static int mldsa_verify_with_mu(wc_MlDsaKey* key, const byte* mu,
     #ifndef WOLFSSL_MLDSA_SMALL_MEM_POLY64
         #ifdef WOLFSSL_MLDSA_SMALL
             for (e = 0; e < MLDSA_N; e++) {
-                w[e] = -mldsa_mont_red((sword64)c[e] * w[e]);
+                w[e] = -mldsa_mont_red((sword64)c[e] * t1v[e]);
             }
         #else
             for (e = 0; e < MLDSA_N; e += 8) {
-                w[e+0] = -mldsa_mont_red((sword64)c[e+0] * w[e+0]);
-                w[e+1] = -mldsa_mont_red((sword64)c[e+1] * w[e+1]);
-                w[e+2] = -mldsa_mont_red((sword64)c[e+2] * w[e+2]);
-                w[e+3] = -mldsa_mont_red((sword64)c[e+3] * w[e+3]);
-                w[e+4] = -mldsa_mont_red((sword64)c[e+4] * w[e+4]);
-                w[e+5] = -mldsa_mont_red((sword64)c[e+5] * w[e+5]);
-                w[e+6] = -mldsa_mont_red((sword64)c[e+6] * w[e+6]);
-                w[e+7] = -mldsa_mont_red((sword64)c[e+7] * w[e+7]);
+                w[e+0] = -mldsa_mont_red((sword64)c[e+0] * t1v[e+0]);
+                w[e+1] = -mldsa_mont_red((sword64)c[e+1] * t1v[e+1]);
+                w[e+2] = -mldsa_mont_red((sword64)c[e+2] * t1v[e+2]);
+                w[e+3] = -mldsa_mont_red((sword64)c[e+3] * t1v[e+3]);
+                w[e+4] = -mldsa_mont_red((sword64)c[e+4] * t1v[e+4]);
+                w[e+5] = -mldsa_mont_red((sword64)c[e+5] * t1v[e+5]);
+                w[e+6] = -mldsa_mont_red((sword64)c[e+6] * t1v[e+6]);
+                w[e+7] = -mldsa_mont_red((sword64)c[e+7] * t1v[e+7]);
             }
         #endif
     #else
         #ifdef WOLFSSL_MLDSA_SMALL
             for (e = 0; e < MLDSA_N; e++) {
-                t64[e] = -(sword64)c[e] * w[e];
+                t64[e] = -(sword64)c[e] * t1v[e];
             }
         #else
             for (e = 0; e < MLDSA_N; e += 8) {
-                t64[e+0] = -(sword64)c[e+0] * w[e+0];
-                t64[e+1] = -(sword64)c[e+1] * w[e+1];
-                t64[e+2] = -(sword64)c[e+2] * w[e+2];
-                t64[e+3] = -(sword64)c[e+3] * w[e+3];
-                t64[e+4] = -(sword64)c[e+4] * w[e+4];
-                t64[e+5] = -(sword64)c[e+5] * w[e+5];
-                t64[e+6] = -(sword64)c[e+6] * w[e+6];
-                t64[e+7] = -(sword64)c[e+7] * w[e+7];
+                t64[e+0] = -(sword64)c[e+0] * t1v[e+0];
+                t64[e+1] = -(sword64)c[e+1] * t1v[e+1];
+                t64[e+2] = -(sword64)c[e+2] * t1v[e+2];
+                t64[e+3] = -(sword64)c[e+3] * t1v[e+3];
+                t64[e+4] = -(sword64)c[e+4] * t1v[e+4];
+                t64[e+5] = -(sword64)c[e+5] * t1v[e+5];
+                t64[e+6] = -(sword64)c[e+6] * t1v[e+6];
+                t64[e+7] = -(sword64)c[e+7] * t1v[e+7];
             }
         #endif
     #endif
