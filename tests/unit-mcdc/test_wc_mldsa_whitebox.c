@@ -354,7 +354,8 @@ static void wb_check_low_ct(void)
 }
 #endif
 
-#ifdef WOLFSSL_MLDSA_SIGN_SMALLEST_MEM
+#if !defined(WOLFSSL_MLDSA_NO_SIGN) && \
+    defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM)
 /* ------------------------------------------------------------------ *
  * mldsa_poly_checksum: the smallest memory signer binds the polynomial of y
  * it regenerates for z to the one it used for w, raising BAD_COND_E when they
@@ -1570,7 +1571,8 @@ int main(void)
 #ifndef WOLFSSL_MLDSA_NO_SIGN
     wb_check_low_ct();
 #endif
-#ifdef WOLFSSL_MLDSA_SIGN_SMALLEST_MEM
+#if !defined(WOLFSSL_MLDSA_NO_SIGN) && \
+    defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM)
     wb_poly_checksum();
 #endif
 #ifndef WOLFSSL_MLDSA_NO_SIGN
