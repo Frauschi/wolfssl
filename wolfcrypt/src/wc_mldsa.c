@@ -11394,7 +11394,7 @@ static int mldsa_verify_with_mu(wc_MlDsaKey* key, const byte* mu,
         z = key->z;
         c = key->c;
         w = key->w;
-        t1 = key->t1;
+        t1 = key->vt1;
         w1e = key->w1e;
         a = t1;
     #ifdef WOLFSSL_MLDSA_SMALL_MEM_POLY64
