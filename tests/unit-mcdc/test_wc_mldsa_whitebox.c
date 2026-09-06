@@ -251,6 +251,12 @@ static void wb_check_low(void)
         WB_NOTE("mldsa_check_low(>=hi) expected 0");
     }
 
+#if (!defined(WOLFSSL_MLDSA_NO_VERIFY) && \
+     !defined(WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM)) || \
+    (!defined(WOLFSSL_MLDSA_NO_SIGN) && \
+     (!defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM) || \
+      defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) || \
+      defined(WOLFSSL_MLDSA_SIGN_CHECK_W0)))
     /* Vector level: two polynomials, both in range -> (ret==1)&&(i<l) walks
      * both, returns 1; then a first-poly-out-of-range -> early ret 0. */
     for (j = 0; j < 2 * MLDSA_N; j++) {
@@ -265,6 +271,7 @@ static void wb_check_low(void)
     if (ret != 0) {
         WB_NOTE("mldsa_vec_check_low_c(out) expected 0");
     }
+#endif
     WB_OK("mldsa_check_low / vec_check_low_c operand pairs exercised");
 }
 #endif
