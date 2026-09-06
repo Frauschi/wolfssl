@@ -64,10 +64,17 @@
  * Peripheral serialization
  * ------------------------------------------------------------------------ */
 
-/* instrumentation: how many times the hardware path actually ran. Guarded to
- * match the declaration in the header - a definition without a visible
- * declaration loses its WOLFSSL_API linkage decoration. */
-#ifndef NO_SHA256
+/* Offload counters, so a test can assert the hardware actually ran rather than
+ * only that its result agrees with software. Off by default; incremented
+ * without atomics and some outside the lock, so best-effort. */
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+    #define ELS_COUNT(c) do { (c)++; } while (0)
+#else
+    #define ELS_COUNT(c) WC_DO_NOTHING
+#endif
+
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+#if !defined(NO_SHA256) || defined(WOLFSSL_SHA384) || defined(WOLFSSL_SHA512)
 unsigned long wc_ElsPkc_HashOffloadCount = 0;
 #endif
 /* which completion path ran: interrupt-driven vs polled fallback */
@@ -435,99 +442,159 @@ static int ElsCheckSlot(const wc_ElsPkc_KeyRef* ref, byte expectClass)
 #if defined(WOLFSSL_SHA384) || defined(WOLFSSL_SHA512)
     #define ELS_HASH_SHA512
     #define ELS_HASH_MAX_BLOCK MCUXCLELS_HASH_BLOCK_SIZE_SHA_512
-    #define ELS_HASH_MAX_STATE MCUXCLELS_HASH_STATE_SIZE_SHA_512
 #else
     #define ELS_HASH_MAX_BLOCK ELS_SHA256_BLOCK
-    #define ELS_HASH_MAX_STATE ELS_SHA256_STATE
 #endif
 
-/* A fixed pool rather than the heap: these parts are routinely built with
- * WOLFSSL_NO_MALLOC, and an empty pool degrades to software. */
-#ifndef WOLFSSL_ELS_PKC_HASH_CTX_COUNT
-    #define WOLFSSL_ELS_PKC_HASH_CTX_COUNT 4
+/* The offload keeps its state in the caller's hash object, in the very fields
+ * the software implementation would have used: wolfCrypt sizes digest[] and
+ * buffer[] exactly as ELS sizes its intermediate state and its block. Nothing
+ * is allocated, a struct copy duplicates a hash correctly, and there is no
+ * context to reclaim - which is why this port needs neither the copy nor the
+ * free crypto-callback hook.
+ *
+ * The invariant that makes it safe: the port takes an object over at its first
+ * update, before any byte has been absorbed, and never hands one back. A
+ * declined hash is therefore always one whose software state is untouched. */
+
+/* Equalities, not bounds: a mismatch would overrun the caller's object. */
+#ifndef NO_SHA256
+wc_static_assert(WC_SHA256_DIGEST_SIZE == ELS_SHA256_STATE);
+wc_static_assert(WC_SHA256_BLOCK_SIZE == ELS_SHA256_BLOCK);
+#endif
+#ifdef ELS_HASH_SHA512
+wc_static_assert(WC_SHA512_DIGEST_SIZE == MCUXCLELS_HASH_STATE_SIZE_SHA_512);
+wc_static_assert(WC_SHA512_BLOCK_SIZE == MCUXCLELS_HASH_BLOCK_SIZE_SHA_512);
 #endif
 
-/* Parked in devCtx when the pool was empty at the first update, so later calls
- * keep going to software instead of starting a digest missing earlier data. */
-#define ELS_HASH_DECLINED ((void*)(wc_ptr_t)1)
+/* The fields above exist only in the software arm of the #ifdef chain in
+ * sha256.h and sha512.h; another SHA-2 port replaces them with its own. */
+#if defined(FREESCALE_LTC_SHA) || defined(STM32_HASH_SHA2) || \
+    defined(WOLFSSL_SILABS_SE_ACCEL) || defined(WOLFSSL_IMXRT_DCP) || \
+    defined(PSOC6_HASH_SHA2) || \
+    (defined(WOLFSSL_SE050) && defined(WOLFSSL_SE050_HASH)) || \
+    (defined(WOLFSSL_HAVE_PSA) && !defined(WOLFSSL_PSA_NO_HASH))
+    #error "WOLFSSL_ELS_PKC hash offload conflicts with another SHA-2 port"
+#endif
 
-typedef struct ElsHashCtx {
-    /* Set when a block failed to reach the engine. total then counts bytes the
-     * hardware never absorbed, so a later Final would pad a length it cannot
-     * honour. */
-    byte   failed;
-    ALIGN32 byte state[ELS_HASH_MAX_STATE]; /* intermediate digest */
-    byte   buf[ELS_HASH_MAX_BLOCK];         /* residual partial block */
-    word32 buffered;
-    word64 total;                         /* message length, for the padding */
-    byte   started;                       /* has the engine seen a block yet */
-    byte   inUse;
-    byte   mode;                          /* MCUXCLELS_HASH_MODE_* in force */
-    void*  owner;                         /* the hash object this belongs to */
-} ElsHashCtx;
+/* Parked in devCtx as a tagged scalar rather than a pointer, so that a struct
+ * copy carries it and a free has nothing to release. */
+#define ELS_HASH_OWNED   ((wc_ptr_t)0x1)
+#define ELS_HASH_STARTED ((wc_ptr_t)0x2)  /* the engine has absorbed a block */
+#define ELS_HASH_FAILED  ((wc_ptr_t)0x4)  /* a block never reached it */
 
-static ElsHashCtx elsHashPool[WOLFSSL_ELS_PKC_HASH_CTX_COUNT];
+/* FIPS 180-4 initial hash values, in the same host-order word form wolfCrypt
+ * keeps digest[] in. ElsHashFinal() restores them so the object is left as a
+ * software Final would leave it - see there. */
+#ifndef NO_SHA256
+static const word32 elsSha256Iv[8] = {
+    0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
+    0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U
+};
+#endif
+#ifdef WOLFSSL_SHA384
+static const word64 elsSha384Iv[8] = {
+    W64LIT(0xcbbb9d5dc1059ed8), W64LIT(0x629a292a367cd507),
+    W64LIT(0x9159015a3070dd17), W64LIT(0x152fecd8f70e5939),
+    W64LIT(0x67332667ffc00b31), W64LIT(0x8eb44a8768581511),
+    W64LIT(0xdb0c2e0d64f98fa7), W64LIT(0x47b5481dbefa4fa4)
+};
+#endif
+#ifdef WOLFSSL_SHA512
+static const word64 elsSha512Iv[8] = {
+    W64LIT(0x6a09e667f3bcc908), W64LIT(0xbb67ae8584caa73b),
+    W64LIT(0x3c6ef372fe94f82b), W64LIT(0xa54ff53a5f1d36f1),
+    W64LIT(0x510e527fade682d1), W64LIT(0x9b05688c2b3e6c1f),
+    W64LIT(0x1f83d9abfb41bd6b), W64LIT(0x5be0cd19137e2179)
+};
+#endif
 
-/* Engine block size for a hash mode. */
-static word32 ElsHashBlockSz(byte mode)
+/* The caller's object, bound at the dispatch site so the offload below does
+ * not care which of the three hashes it is driving. */
+typedef struct ElsHashObj {
+    void**  devCtx;
+    byte*   state;     /* the object's digest[] */
+    byte*   buf;       /* the object's buffer[] */
+    word32* buffered;  /* the object's buffLen  */
+    void*   lo;        /* the object's loLen    */
+    void*   hi;        /* the object's hiLen    */
+    const void* iv;    /* the software initial state, restored at Final */
+    word32  stateSz;
+    word32  blockSz;
+    word32  lenSz;     /* width of the length field the padding ends with */
+    byte    mode;      /* MCUXCLELS_HASH_MODE_* */
+    byte    wide;      /* loLen/hiLen are word64, not word32 */
+} ElsHashObj;
+
+static word64 ElsHashTotal(const ElsHashObj* o)
 {
-    (void)mode;
+    if (o->wide) {
+        return *(const word64*)o->lo;
+    }
+
+    return ((word64)*(const word32*)o->hi << 32) |
+           (word64)*(const word32*)o->lo;
+}
+
+static void ElsHashTotalSet(const ElsHashObj* o, word64 total)
+{
+    if (o->wide) {
+        *(word64*)o->lo = total;
+    }
+    else {
+        *(word32*)o->lo = (word32)total;
+        *(word32*)o->hi = (word32)(total >> 32);
+    }
+}
+
+#ifndef NO_SHA256
+static void ElsHashBindSha256(ElsHashObj* o, wc_Sha256* sha)
+{
+    o->devCtx   = &sha->devCtx;
+    o->state    = (byte*)sha->digest;
+    o->buf      = (byte*)sha->buffer;
+    o->buffered = &sha->buffLen;
+    o->lo       = &sha->loLen;
+    o->hi       = &sha->hiLen;
+    o->iv       = elsSha256Iv;
+    o->stateSz  = (word32)ELS_SHA256_STATE;
+    o->blockSz  = (word32)ELS_SHA256_BLOCK;
+    o->lenSz    = WC_SHA256_BLOCK_SIZE - WC_SHA256_PAD_SIZE;
+    o->mode     = MCUXCLELS_HASH_MODE_SHA_256;
+    o->wide     = 0;
+}
+#endif
 
 #ifdef ELS_HASH_SHA512
-    if (mode == MCUXCLELS_HASH_MODE_SHA_384 ||
-        mode == MCUXCLELS_HASH_MODE_SHA_512) {
-        return (word32)MCUXCLELS_HASH_BLOCK_SIZE_SHA_512;
-    }
+static void ElsHashBindSha512(ElsHashObj* o, wc_Sha512* sha, byte mode)
+{
+    o->devCtx   = &sha->devCtx;
+    o->state    = (byte*)sha->digest;
+    o->buf      = (byte*)sha->buffer;
+    o->buffered = &sha->buffLen;
+    o->lo       = &sha->loLen;
+    o->hi       = &sha->hiLen;
+#ifdef WOLFSSL_SHA384
+    o->iv       = (mode == MCUXCLELS_HASH_MODE_SHA_384) ? (const void*)elsSha384Iv
+                                                        : (const void*)elsSha512Iv;
+#else
+    o->iv       = elsSha512Iv;
 #endif
-
-    return (word32)ELS_SHA256_BLOCK;
+    o->stateSz  = (word32)MCUXCLELS_HASH_STATE_SIZE_SHA_512;
+    o->blockSz  = (word32)MCUXCLELS_HASH_BLOCK_SIZE_SHA_512;
+    o->lenSz    = WC_SHA512_BLOCK_SIZE - WC_SHA512_PAD_SIZE;
+    o->mode     = mode;
+    o->wide     = 1;
 }
-
-/* Width of the length field the padding ends with. */
-static word32 ElsHashLenSz(byte mode)
-{
-    (void)mode;
-
-#ifdef ELS_HASH_SHA512
-    if (mode == MCUXCLELS_HASH_MODE_SHA_384 ||
-        mode == MCUXCLELS_HASH_MODE_SHA_512) {
-        return 16u;
-    }
 #endif
-
-    return 8u;
-}
-
-/* Claim a pool entry for this hash. Caller must hold the lock. */
-static ElsHashCtx* ElsHashClaim(void* owner, byte mode)
-{
-    int i;
-
-    for (i = 0; i < WOLFSSL_ELS_PKC_HASH_CTX_COUNT; i++) {
-        if (!elsHashPool[i].inUse) {
-            XMEMSET(&elsHashPool[i], 0, sizeof(elsHashPool[i]));
-            elsHashPool[i].inUse = 1;
-            elsHashPool[i].owner = owner;
-            elsHashPool[i].mode  = mode;
-            return &elsHashPool[i];
-        }
-    }
-
-    return NULL;
-}
-
-static void ElsHashRelease(ElsHashCtx* ctx)
-{
-    if (ctx != NULL) {
-        ForceZero(ctx, sizeof(*ctx));
-    }
-}
 
 /* Feed whole blocks to the engine, carrying the running state in and out.
  * Caller must hold the lock. len must be a multiple of the block size. */
-static int ElsHashBlocks(ElsHashCtx* ctx, const byte* in, word32 len)
+static int ElsHashBlocks(const ElsHashObj* o, const byte* in, word32 len)
 {
     mcuxClEls_HashOption_t opt;
+    wc_ptr_t st = (wc_ptr_t)*o->devCtx;
+    int ret;
 
     if (len == 0) {
         return 0;
@@ -546,75 +613,70 @@ static int ElsHashBlocks(ElsHashCtx* ctx, const byte* in, word32 len)
     }
 
     MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t,
-        mcuxClEls_Hash_Async(opt, in, len, ctx->state));
+        mcuxClEls_Hash_Async(opt, in, len, o->state));
     if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Hash_Async) != t) ||
         (MCUXCLELS_STATUS_OK_WAIT != r)) {
         return WC_NO_ERR_TRACE(WC_HW_E);
     }
     MCUX_CSSL_FP_FUNCTION_CALL_END();
 
-    ctx->started = 1;
+    *o->devCtx = (void*)(st | ELS_HASH_STARTED);
 
-    return ElsWait();
+    ret = ElsWait();
+    if (ret == 0) {
+        ELS_COUNT(wc_ElsPkc_HashOffloadCount);
+    }
+
+    return ret;
 }
 
-/* Absorb bytes into the context hanging off *devCtx, claiming one on the first
- * call. Every wolfCrypt hash object the port serves keeps its state here, so
- * the caller passes the address of its devCtx rather than the object. */
-static int ElsHashUpdate(void** devCtx, byte mode, const byte* in, word32 inSz)
+/* Absorb into the caller's object, taking it over on the first call. */
+static int ElsHashUpdate(ElsHashObj* o, const byte* in, word32 inSz)
 {
-    ElsHashCtx* ctx;
-    word32 blockSz, take, whole;
+    word32 take, whole;
     int ret;
-
-    if (*devCtx == ELS_HASH_DECLINED) {
-        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
-    }
 
     ret = ElsLock();
     if (ret != 0) {
         return ret;
     }
 
-    ctx = (ElsHashCtx*)*devCtx;
-    if (ctx == NULL) {
-        ctx = ElsHashClaim(devCtx, mode);
-        if (ctx == NULL) {
-            /* pool empty - hand this hash to software, permanently */
-            *devCtx = ELS_HASH_DECLINED;
-            ElsUnlock();
-            return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
-        }
-        *devCtx = ctx;
+    if (*o->devCtx == NULL) {
+        *o->devCtx   = (void*)ELS_HASH_OWNED;
+        *o->buffered = 0;
+        ElsHashTotalSet(o, 0);
+    }
+    else if ((wc_ptr_t)*o->devCtx & ELS_HASH_FAILED) {
+        ElsUnlock();
+        return WC_NO_ERR_TRACE(WC_HW_E);
     }
 
-    blockSz = ElsHashBlockSz(ctx->mode);
-    ctx->total += inSz;
+    ElsHashTotalSet(o, ElsHashTotal(o) + inSz);
 
     /* top up the residual block first */
-    if (ctx->buffered > 0) {
-        take = blockSz - ctx->buffered;
+    if (*o->buffered > 0) {
+        take = o->blockSz - *o->buffered;
         if (take > inSz) {
             take = inSz;
         }
-        XMEMCPY(ctx->buf + ctx->buffered, in, take);
-        ctx->buffered += take;
+        XMEMCPY(o->buf + *o->buffered, in, take);
+        *o->buffered += take;
         in += take;
         inSz -= take;
 
-        if (ctx->buffered == blockSz) {
-            ret = ElsHashBlocks(ctx, ctx->buf, blockSz);
+        if (*o->buffered == o->blockSz) {
+            ret = ElsHashBlocks(o, o->buf, o->blockSz);
             if (ret != 0) {
                 goto out;
             }
-            ctx->buffered = 0;
+            *o->buffered = 0;
         }
     }
 
     /* whole blocks straight from the caller's buffer */
-    whole = (inSz / blockSz) * blockSz;
+    whole = (inSz / o->blockSz) * o->blockSz;
     if (whole > 0) {
-        ret = ElsHashBlocks(ctx, in, whole);
+        ret = ElsHashBlocks(o, in, whole);
         if (ret != 0) {
             goto out;
         }
@@ -2930,6 +2992,16 @@ int wc_ElsPkc_ReserveSlot(byte keyClass, wc_ElsPkc_KeyRef* ref)
             run = 0;
             continue;
         }
+        /* Free is not the same as usable. The store has retention and
+         * hardware-out slots, and slots the ROM keeps for its own keys, and
+         * the engine will grant a key there without the usage bit that was
+         * asked for rather than refusing outright. Only general purpose slots
+         * take an ordinary key. */
+        if ((prop.word.value &
+             MCUXCLELS_KEYPROPERTY_VALUE_GENERAL_PURPOSE_SLOT) == 0) {
+            run = 0;
+            continue;
+        }
         if (++run == need) {
             XMEMSET(ref, 0, sizeof(*ref));
             ref->keyClass = keyClass;
@@ -3895,9 +3967,6 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
                         /* update of zero bytes with no buffer */
                         ret = 0;
                     }
-                    if (ret == 0) {
-                        wc_ElsPkc_HashOffloadCount++;
-                    }
                     break;
     #endif
     #ifdef WOLFSSL_SHA384
@@ -3918,9 +3987,6 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
                     else {
                         ret = 0;
                     }
-                    if (ret == 0) {
-                        wc_ElsPkc_HashOffloadCount++;
-                    }
                     break;
     #endif
     #ifdef WOLFSSL_SHA512
@@ -3940,9 +4006,6 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
                     }
                     else {
                         ret = 0;
-                    }
-                    if (ret == 0) {
-                        wc_ElsPkc_HashOffloadCount++;
                     }
                     break;
     #endif
