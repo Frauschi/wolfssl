@@ -104,6 +104,7 @@ noinst_HEADERS+= \
                          wolfssl/wolfcrypt/port/nxp/dcp_port.h \
                          wolfssl/wolfcrypt/port/nxp/casper_port.h \
                          wolfssl/wolfcrypt/port/nxp/hashcrypt_port.h \
+                         wolfssl/wolfcrypt/port/nxp/els_pkc_port.h \
                          wolfssl/wolfcrypt/port/xilinx/xil-sha3.h \
                          wolfssl/wolfcrypt/port/xilinx/xil-versal-glue.h \
                          wolfssl/wolfcrypt/port/xilinx/xil-versal-trng.h \
@@ -252,6 +253,12 @@ endif
 if BUILD_SE050
 nobase_include_HEADERS+= wolfssl/wolfcrypt/port/nxp/se050_port.h
 endif
+
+# Installed unconditionally, unlike the source, which BUILD_ELS_PKC gates: this
+# header declares the port's whole public API - the slot reference, the
+# use-slot helpers and the init entry points - and an application needs it to
+# bind a key to the device. It is inert without WOLFSSL_ELS_PKC.
+nobase_include_HEADERS+= wolfssl/wolfcrypt/port/nxp/els_pkc_port.h
 
 if BUILD_TROPIC01
 nobase_include_HEADERS+= wolfssl/wolfcrypt/port/tropicsquare/tropic01.h

@@ -117,6 +117,7 @@ if(CONFIG_WOLFSSL)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/tfm.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/wc_dsp.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/wc_encrypt.c)
+    zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/wc_keystore.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/wc_mlkem.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/wc_mlkem_poly.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/wc_lms.c)
@@ -135,6 +136,20 @@ if(CONFIG_WOLFSSL)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/psa/psa_pkcbs.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/st/stm32.c)
     zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/realtek/rtl8735b.c)
+    zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/nxp/els_pkc_port.c)
+
+    # Vendor headers for the EdgeLock port, taken from the module's own target
+    # so no directory is named here, and scoped to this library so nothing can
+    # be injected ahead of them elsewhere. Keyed on the module rather than on a
+    # wolfSSL feature, so a user settings file works too.
+    # NOT TF-M: els_pkc defaults MCUX_ELS_PKC on for TF-M builds but creates
+    # McuxElsPkc only when TF-M is off, and naming a nonexistent target is a
+    # generate-time error. wolfSSL's own Kconfig already excludes TF-M.
+    if(CONFIG_MCUX_ELS_PKC AND NOT CONFIG_BUILD_WITH_TFM)
+      zephyr_library_include_directories(
+        $<TARGET_PROPERTY:McuxElsPkc,INTERFACE_INCLUDE_DIRECTORIES>
+      )
+    endif()
 
     if(CONFIG_WOLFCRYPT_ARMASM)
       # tested with board: "qemu_kvm_arm64"
