@@ -1,0 +1,21 @@
+sample:
+  description: EdgeLock (ELS + PKC) crypto callback port checks
+  name: wolfCrypt EdgeLock port
+common:
+  harness: console
+  harness_config:
+    type: one_line
+    regex:
+      - "=== ALL PASS \\(0 failures\\) ==="
+tests:
+  # Hardware only. The ELS is not emulated by any QEMU target, and the point
+  # of the suite is that the offload ran, so there is nothing to gain from a
+  # software-only platform.
+  sample.crypto.wolfssl_els_pkc:
+    timeout: 300
+    platform_allow: frdm_rw612
+    integration_platforms:
+      - frdm_rw612
+    tags:
+      - wolfssl
+      - crypto
