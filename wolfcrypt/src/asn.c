@@ -9919,6 +9919,7 @@ int wc_CheckPrivateKey(const byte* privKey, word32 privKeySz,
                 /* Without the key check the pair cannot be confirmed to
                  * match, so do not claim that it does. */
                 ret = NOT_COMPILED_IN;
+                WOLFSSL_ERROR_VERBOSE(ret);
             #endif
             }
         }

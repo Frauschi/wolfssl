@@ -5750,7 +5750,72 @@ static void mldsa_vec_decompose(const sword32* r, byte k, sword32 gamma2,
  * Range check operation
  ******************************************************************************/
 
-#if !defined(WOLFSSL_MLDSA_NO_SIGN) || !defined(WOLFSSL_MLDSA_NO_VERIFY)
+#ifndef WOLFSSL_MLDSA_NO_SIGN
+/* Check that the values of the polynomial are in range, in constant time.
+ *
+ * Signing range checks run on values derived from the private key, so the
+ * index of the first failing coefficient must not be observable. Every
+ * coefficient is examined and no branch depends on a value.
+ *
+ * @param [in] a   Polynomial.
+ * @param [in] hi  Largest value in range.
+ * @return  1 when all values are in range, 0 when any is not.
+ */
+static int mldsa_check_low_ct(const sword32* a, sword32 hi)
+{
+    unsigned int j;
+    /* Calculate lowest range value. */
+    sword32 nhi = -hi;
+    word32 good = 1;
+
+    /* For each value of polynomial. */
+    for (j = 0; j < MLDSA_N; j++) {
+        /* Sign bit of the difference is set when the comparison holds. */
+        word32 lt = (word32)((word64)((sword64)a[j] - (sword64)hi) >> 63);
+        word32 gt = (word32)((word64)((sword64)nhi - (sword64)a[j]) >> 63);
+
+        /* Range is -(hi-1)..(hi-1). */
+        good &= lt & gt;
+    }
+
+    return (int)good;
+}
+
+/* The smallest memory signer holds one polynomial at a time and uses the
+ * scalar form for these checks. */
+#if (defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) || \
+     defined(WOLFSSL_MLDSA_SIGN_CHECK_W0)) && \
+    !defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM)
+/* Check that the values of the vector are in range, in constant time.
+ *
+ * @param [in] a   Vector of polynomials.
+ * @param [in] l   Dimension of vector.
+ * @param [in] hi  Largest value in range.
+ * @return  1 when all values are in range, 0 when any is not.
+ */
+static int mldsa_vec_check_low_ct(const sword32* a, byte l, sword32 hi)
+{
+    unsigned int i;
+    int good = 1;
+
+    /* For each polynomial of vector. */
+    for (i = 0; i < l; i++) {
+        good &= mldsa_check_low_ct(a, hi);
+        /* Next polynomial. */
+        a += MLDSA_N;
+    }
+
+    return good;
+}
+#endif /* (CHECK_Y || CHECK_W0) && !SIGN_SMALLEST_MEM */
+#endif /* !WOLFSSL_MLDSA_NO_SIGN */
+
+#if !defined(WOLFSSL_MLDSA_NO_VERIFY) || \
+    (!defined(WOLFSSL_MLDSA_NO_SIGN) && \
+     (!defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM) || \
+      (!defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM) && \
+       (defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) || \
+        defined(WOLFSSL_MLDSA_SIGN_CHECK_W0)))))
 /* Check that the values of the polynomial are in range.
  *
  * Many places in FIPS 204. One example from Algorithm 2:
@@ -5783,8 +5848,9 @@ static int mldsa_check_low(const sword32* a, sword32 hi)
      !defined(WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM)) || \
     (!defined(WOLFSSL_MLDSA_NO_SIGN) && \
      (!defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM) || \
-      defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) || \
-      defined(WOLFSSL_MLDSA_SIGN_CHECK_W0)))
+      (!defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM) && \
+       (defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) || \
+        defined(WOLFSSL_MLDSA_SIGN_CHECK_W0)))))
 /* Check that the values of the vector are in range.
  *
  * Many places in FIPS 204. One example from Algorithm 2:
@@ -9627,7 +9693,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
             mldsa_vec_expand_mask(&key->shake, priv_rand_seed, kappa,
                 params->gamma1_bits, y, params->l, key->heap);
         #ifdef WOLFSSL_MLDSA_SIGN_CHECK_Y
-            valid = mldsa_vec_check_low(y, params->l,
+            valid = mldsa_vec_check_low_ct(y, params->l,
                 ((sword32)1 << params->gamma1_bits) - params->beta);
             if (valid)
         #endif
@@ -9652,7 +9718,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                 mldsa_vec_make_pos(w, params->k);
                 mldsa_vec_decompose(w, params->k, params->gamma2, w0, w1);
         #ifdef WOLFSSL_MLDSA_SIGN_CHECK_W0
-                valid = mldsa_vec_check_low(w0, params->k,
+                valid = mldsa_vec_check_low_ct(w0, params->k,
                     params->gamma2 - params->beta);
             }
             if (valid) {
@@ -9688,7 +9754,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                         /* Step 22: w0 - cs2 */
                         mldsa_sub(w0 + i * MLDSA_N, cs2 + i * MLDSA_N);
                         /* Step 23: Check w0 - cs2 has low enough values. */
-                        valid = mldsa_vec_check_low(w0 + i * MLDSA_N, 1, hi);
+                        valid = mldsa_check_low_ct(w0 + i * MLDSA_N, hi);
                     }
                     hi = ((sword32)1 << params->gamma1_bits) - params->beta;
                     for (i = 0; valid && i < params->l; i++) {
@@ -9699,15 +9765,21 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                         mldsa_add(z + i * MLDSA_N, y + i * MLDSA_N);
                         mldsa_poly_red(z + i * MLDSA_N);
                         /* Step 23: Check z has low enough values. */
-                        valid = mldsa_vec_check_low(z + i * MLDSA_N, 1, hi);
+                        valid = mldsa_check_low_ct(z + i * MLDSA_N, hi);
                     }
-                    hi = params->gamma2;
-                    for (i = 0; valid && i < params->k; i++) {
-                        /* Step 25: ct0 = NTT-1(c o t0) */
-                        mldsa_mul_invntt(ct0 + i * MLDSA_N, c,
-                            t0 + i * MLDSA_N);
-                        /* Step 27: Check ct0 has low enough values. */
-                        valid = mldsa_vec_check_low(ct0 + i * MLDSA_N, 1, hi);
+                    if (valid) {
+                        hi = params->gamma2;
+                        /* Unlike z and w0-cs2, ct0 carries no uniform mask, so
+                         * the index of a failing polynomial depends on t0.
+                         * Check them all. */
+                        for (i = 0; i < params->k; i++) {
+                            /* Step 25: ct0 = NTT-1(c o t0) */
+                            mldsa_mul_invntt(ct0 + i * MLDSA_N, c,
+                                t0 + i * MLDSA_N);
+                            /* Step 27: Check ct0 has low enough values. */
+                            valid &= mldsa_check_low_ct(ct0 + i * MLDSA_N,
+                                hi);
+                        }
                     }
                     if (valid) {
                         /* Step 26: ct0 = ct0 + w0 */
@@ -9929,7 +10001,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
             mldsa_vec_expand_mask(&key->shake, priv_rand_seed, kappa,
                 params->gamma1_bits, y, params->l, key->heap);
         #ifdef WOLFSSL_MLDSA_SIGN_CHECK_Y
-            valid = mldsa_vec_check_low(y, params->l,
+            valid = mldsa_vec_check_low_ct(y, params->l,
                 ((sword32)1 << params->gamma1_bits) - params->beta);
         #endif
 
@@ -10095,7 +10167,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                 }
             #endif
             #ifdef WOLFSSL_MLDSA_SIGN_CHECK_W0
-                valid = mldsa_vec_check_low(w0t, 1,
+                valid = mldsa_check_low_ct(w0t,
                     params->gamma2 - params->beta);
             #endif
                 w0t += MLDSA_N;
@@ -10152,7 +10224,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                     mldsa_poly_red(z);
                     /* Step 23: Check z has low enough values. */
                     hi = ((sword32)1 << params->gamma1_bits) - params->beta;
-                    valid = mldsa_check_low(z, hi);
+                    valid = mldsa_check_low_ct(z, hi);
                     if (valid) {
                         /* Step 32: Encode z into signature.
                          * Commit (c) and h already encoded into signature. */
@@ -10218,7 +10290,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                     mldsa_poly_red(w0t);
                     /* Step 23: Check w0 - cs2 has low enough values. */
                     hi = params->gamma2 - params->beta;
-                    valid = mldsa_check_low(w0t, hi);
+                    valid = mldsa_check_low_ct(w0t, hi);
                     if (valid) {
                     #ifndef WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC
                         mldsa_decode_t0(t0pt, t0);
@@ -10232,7 +10304,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                     #endif
                         mldsa_invntt(ct0);
                         /* Step 27: Check ct0 has low enough values. */
-                        valid = mldsa_check_low(ct0, params->gamma2);
+                        valid = mldsa_check_low_ct(ct0, params->gamma2);
                     }
                     if (valid) {
                         /* Step 26: ct0 = ct0 + w0 */
@@ -10422,7 +10494,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                 yChk[s] = mldsa_poly_checksum(y);
             #endif
             #ifdef WOLFSSL_MLDSA_SIGN_CHECK_Y
-                valid = mldsa_check_low(y,
+                valid = mldsa_check_low_ct(y,
                     ((sword32)1 << params->gamma1_bits) - params->beta);
                 if (!valid) {
                     break;
@@ -10513,7 +10585,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                 }
             #endif
             #ifdef WOLFSSL_MLDSA_SIGN_CHECK_W0
-                valid = mldsa_check_low(wt,
+                valid = mldsa_check_low_ct(wt,
                     params->gamma2 - params->beta);
             #endif
                 wt += MLDSA_N;
@@ -10565,7 +10637,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                     mldsa_add(z, y);
                     mldsa_poly_red(z);
                     /* Step 23: Check z has low enough values. */
-                    valid = mldsa_check_low(z, hi);
+                    valid = mldsa_check_low_ct(z, hi);
                     if (valid) {
                         /* Step 32: Encode z into signature.
                          * Commit (c) and h already encoded into signature. */
@@ -10605,7 +10677,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                     mldsa_sub(wt, z);
                     mldsa_poly_red(wt);
                     /* Step 23: Check w0 - cs2 has low enough values. */
-                    valid = mldsa_check_low(wt,
+                    valid = mldsa_check_low_ct(wt,
                         params->gamma2 - params->beta);
                     if (valid) {
                         mldsa_decode_t0(t0pt, a);
@@ -10614,7 +10686,7 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                         mldsa_mul(z, c, a);
                         mldsa_invntt(z);
                         /* Step 27: Check ct0 has low enough values. */
-                        valid = mldsa_check_low(z, params->gamma2);
+                        valid = mldsa_check_low_ct(z, params->gamma2);
                     }
                     if (valid) {
                         /* Step 26: ct0 = ct0 + w0 */
@@ -10676,6 +10748,10 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
     ForceZero(priv_rand_seed, sizeof(priv_rand_seed));
 #ifdef WOLFSSL_CHECK_MEM_ZERO
     wc_MemZero_Check(priv_rand_seed, sizeof(priv_rand_seed));
+#endif
+#ifdef WC_MLDSA_FAULT_HARDEN
+    /* Checksums are derived from the secret mask y. */
+    ForceZero(yChk, sizeof(yChk));
 #endif
     if (w != NULL) {
         ForceZero(w, allocSz);

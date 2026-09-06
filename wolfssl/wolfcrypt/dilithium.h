@@ -150,16 +150,6 @@
         #define WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM
     #endif
 #endif
-#ifdef WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM
-    /* Smallest verify RAM: on top of the small-mem path, stream the
-     * signature's z vector one polynomial at a time instead of holding the
-     * whole l-vector (~6 KB for ML-DSA-87) at the cost of a per-row z
-     * decode+NTT. Combine with WOLFSSL_MLDSA_VERIFY_NO_MALLOC to pin the
-     * buffers against the key; on its own the buffers are still allocated. */
-    #ifndef WOLFSSL_MLDSA_VERIFY_SMALL_MEM
-        #define WOLFSSL_MLDSA_VERIFY_SMALL_MEM
-    #endif
-#endif
 #ifdef WOLFSSL_DILITHIUM_MAKE_KEY_SMALL_MEM
     #ifndef WOLFSSL_MLDSA_MAKE_KEY_SMALL_MEM
         #define WOLFSSL_MLDSA_MAKE_KEY_SMALL_MEM
@@ -180,28 +170,10 @@
         #define WOLFSSL_MLDSA_SIGN_SMALLEST_MEM
     #endif
 #endif
-#ifdef WOLFSSL_MLDSA_SIGN_SMALLEST_MEM
-    /* Smallest signing RAM: on top of the small-mem path, generate matrix A a
-     * column at a time so only one polynomial of y is held, decompose w into
-     * w0 in place and keep w1 encoded. Vector y is regenerated for z. */
-    #ifndef WOLFSSL_MLDSA_SIGN_SMALL_MEM
-        #define WOLFSSL_MLDSA_SIGN_SMALL_MEM
-    #endif
-#endif
-#ifdef WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC
-    #ifndef WOLFSSL_MLDSA_SIGN_SMALL_MEM
-        #define WOLFSSL_MLDSA_SIGN_SMALL_MEM
-    #endif
-#endif
 #ifdef WOLFSSL_DILITHIUM_SIGN_SMALL_MEM_PRECALC_A
     #ifndef WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC_A
         #define WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC_A \
             WOLFSSL_DILITHIUM_SIGN_SMALL_MEM_PRECALC_A
-    #endif
-#endif
-#ifdef WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC_A
-    #ifndef WOLFSSL_MLDSA_SIGN_SMALL_MEM
-        #define WOLFSSL_MLDSA_SIGN_SMALL_MEM
     #endif
 #endif
 #ifdef WOLFSSL_DILITHIUM_SIGN_CHECK_W0
@@ -353,6 +325,37 @@
 
 /* === Derived canonical gates ========================================== */
 
+/* Canonical option implications. These derive one canonical option from
+ * another and must apply whether or not the legacy name gates are enabled. */
+#ifdef WOLFSSL_MLDSA_SIGN_SMALLEST_MEM
+    /* Smallest signing RAM: on top of the small-mem path, generate matrix A a
+     * column at a time so only one polynomial of y is held, decompose w into
+     * w0 in place and keep w1 encoded. Vector y is regenerated for z. */
+    #ifndef WOLFSSL_MLDSA_SIGN_SMALL_MEM
+        #define WOLFSSL_MLDSA_SIGN_SMALL_MEM
+    #endif
+#endif
+#ifdef WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC
+    #ifndef WOLFSSL_MLDSA_SIGN_SMALL_MEM
+        #define WOLFSSL_MLDSA_SIGN_SMALL_MEM
+    #endif
+#endif
+#ifdef WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC_A
+    #ifndef WOLFSSL_MLDSA_SIGN_SMALL_MEM
+        #define WOLFSSL_MLDSA_SIGN_SMALL_MEM
+    #endif
+#endif
+#ifdef WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM
+    /* Smallest verify RAM: on top of the small-mem path, stream the
+     * signature's z vector one polynomial at a time instead of holding the
+     * whole l-vector (~6 KB for ML-DSA-87) at the cost of a per-row z
+     * decode+NTT. Combine with WOLFSSL_MLDSA_VERIFY_NO_MALLOC to pin the
+     * buffers against the key; on its own the buffers are still allocated. */
+    #ifndef WOLFSSL_MLDSA_VERIFY_SMALL_MEM
+        #define WOLFSSL_MLDSA_VERIFY_SMALL_MEM
+    #endif
+#endif
+
 /* Derive secondary canonical gates from the primary NO_* gates. Lives in
  * this file (rather than in wc_mldsa.h alongside the struct definition)
  * so the reverse arm at the bottom of this file sees the derived set
@@ -383,6 +386,9 @@
         !defined(WOLFSSL_MLDSA_NO_SIGN)
     #define WOLFSSL_MLDSA_PRIVATE_KEY
 #endif
+/* wc_CheckPrivateKey() needs this to pair an ML-DSA certificate with its
+ * private key, so WOLFSSL_MLDSA_NO_CHECK_KEY gives up loading such a pair
+ * through the TLS API. */
 #if defined(WOLFSSL_MLDSA_PUBLIC_KEY) && \
         defined(WOLFSSL_MLDSA_PRIVATE_KEY) && \
         !defined(WOLFSSL_MLDSA_NO_CHECK_KEY) && \
