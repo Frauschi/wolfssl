@@ -255,8 +255,9 @@ static void wb_check_low(void)
      !defined(WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM)) || \
     (!defined(WOLFSSL_MLDSA_NO_SIGN) && \
      (!defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM) || \
-      defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) || \
-      defined(WOLFSSL_MLDSA_SIGN_CHECK_W0)))
+      (!defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM) && \
+       (defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) || \
+        defined(WOLFSSL_MLDSA_SIGN_CHECK_W0)))))
     /* Vector level: two polynomials, both in range -> (ret==1)&&(i<l) walks
      * both, returns 1; then a first-poly-out-of-range -> early ret 0. */
     for (j = 0; j < 2 * MLDSA_N; j++) {

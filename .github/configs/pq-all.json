@@ -240,5 +240,13 @@
 {"name": "mldsa-44-precalc-a-intelasm", "minutes": 2,
  "comment": "ML-DSA-44 with one pre-calculated row of matrix A on the Intel assembly paths; the q88 decompose and w1 encode kernels take no dimension, so this pins that w is sized for a full vector",
  "configure": ["--enable-cryptonly", "--enable-mldsa", "--enable-intelasm",
-  "CPPFLAGS=-DWOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC_A=1"]}
+  "CPPFLAGS=-DWOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC_A=1"]},
+{"name": "mldsa-no-legacy-gates-smallest", "minutes": 2,
+ "comment": "Canonical option names only; pins that SIGN_SMALLEST_MEM still implies SIGN_SMALL_MEM when the legacy name gates are opted out",
+ "configure": ["--enable-cryptonly", "--enable-mldsa",
+  "CPPFLAGS=-DWOLFSSL_NO_DILITHIUM_LEGACY_GATES -DWOLFSSL_MLDSA_SIGN_SMALLEST_MEM"]},
+{"name": "mldsa-smallest-checks-no-verify", "minutes": 2,
+ "comment": "Smallest memory signing with the y and w0 checks and no verify, the pairing that pulls in the vector range check helper it does not use",
+ "configure": ["--enable-cryptonly", "--enable-mldsa",
+  "CPPFLAGS=-DWOLFSSL_MLDSA_SIGN_SMALLEST_MEM -DWOLFSSL_MLDSA_SIGN_CHECK_Y -DWOLFSSL_MLDSA_SIGN_CHECK_W0 -DWOLFSSL_MLDSA_VERIFY_SMALLEST_MEM"]}
 ]
