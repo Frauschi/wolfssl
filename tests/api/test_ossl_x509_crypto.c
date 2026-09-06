@@ -83,6 +83,7 @@ int test_wolfSSL_X509_check_private_key_mldsa(void)
     defined(HAVE_DILITHIUM) && !defined(WOLFSSL_DILITHIUM_NO_SIGN) && \
     !defined(WOLFSSL_DILITHIUM_NO_VERIFY) && \
     !defined(WOLFSSL_MLDSA_NO_ASN1) && \
+    defined(WOLFSSL_MLDSA_CHECK_KEY) && \
     (defined(OPENSSL_ALL) || defined(WOLFSSL_WPAS_SMALL)) && \
     (!defined(WOLFSSL_NO_ML_DSA_44) || !defined(WOLFSSL_NO_ML_DSA_65) || \
      !defined(WOLFSSL_NO_ML_DSA_87))
