@@ -208,7 +208,7 @@
     #error "PRECALC and PRECALC_A are equivalent to non small mem"
 #endif
 #if defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC_A) && \
-        (WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC_A < 1)
+        ((WOLFSSL_MLDSA_SIGN_SMALL_MEM_PRECALC_A + 0) < 1)
     #error "PRECALC_A must pre-calculate at least one row of matrix A"
 #endif
 #ifdef WOLFSSL_MLDSA_SIGN_SMALLEST_MEM
@@ -5783,9 +5783,10 @@ static int mldsa_check_low_ct(const sword32* a, sword32 hi)
 
 /* The smallest memory signer holds one polynomial at a time and uses the
  * scalar form for these checks. */
-#if (defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) || \
-     defined(WOLFSSL_MLDSA_SIGN_CHECK_W0)) && \
-    !defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM)
+#if (defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) && \
+     !defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM)) || \
+    (defined(WOLFSSL_MLDSA_SIGN_CHECK_W0) && \
+     !defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM))
 /* Check that the values of the vector are in range, in constant time.
  *
  * @param [in] a   Vector of polynomials.
@@ -5807,15 +5808,11 @@ static int mldsa_vec_check_low_ct(const sword32* a, byte l, sword32 hi)
 
     return good;
 }
-#endif /* (CHECK_Y || CHECK_W0) && !SIGN_SMALLEST_MEM */
+#endif /* (CHECK_Y && !SIGN_SMALLEST_MEM) || 
+        * (CHECK_W0 && !SIGN_SMALL_MEM) */
 #endif /* !WOLFSSL_MLDSA_NO_SIGN */
 
-#if !defined(WOLFSSL_MLDSA_NO_VERIFY) || \
-    (!defined(WOLFSSL_MLDSA_NO_SIGN) && \
-     (!defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM) || \
-      (!defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM) && \
-       (defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) || \
-        defined(WOLFSSL_MLDSA_SIGN_CHECK_W0)))))
+#ifndef WOLFSSL_MLDSA_NO_VERIFY
 /* Check that the values of the polynomial are in range.
  *
  * Many places in FIPS 204. One example from Algorithm 2:
@@ -5844,13 +5841,8 @@ static int mldsa_check_low(const sword32* a, sword32 hi)
     return ret;
 }
 
-#if (!defined(WOLFSSL_MLDSA_NO_VERIFY) && \
-     !defined(WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM)) || \
-    (!defined(WOLFSSL_MLDSA_NO_SIGN) && \
-     (!defined(WOLFSSL_MLDSA_SIGN_SMALL_MEM) || \
-      (!defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM) && \
-       (defined(WOLFSSL_MLDSA_SIGN_CHECK_Y) || \
-        defined(WOLFSSL_MLDSA_SIGN_CHECK_W0)))))
+#if !defined(WOLFSSL_MLDSA_NO_VERIFY) && \
+    !defined(WOLFSSL_MLDSA_VERIFY_SMALLEST_MEM)
 /* Check that the values of the vector are in range.
  *
  * Many places in FIPS 204. One example from Algorithm 2:
@@ -8567,12 +8559,13 @@ static void mldsa_poly_red(sword32* a)
     }
 }
 
-#if defined(WC_MLDSA_FAULT_HARDEN) && \
+#if !defined(WOLFSSL_MLDSA_NO_SIGN) && \
     defined(WOLFSSL_MLDSA_SIGN_SMALLEST_MEM)
 /* Checksum of a polynomial.
  *
  * Binds two computations of a value that is not kept between them, so a fault
- * injected into the second is detectable.
+ * or glitch in the second is detectable. FNV-1a is used so that a single
+ * altered coefficient changes the whole result.
  *
  * @param [in] a  Polynomial to checksum.
  * @return  Checksum of the polynomial.
@@ -8580,10 +8573,10 @@ static void mldsa_poly_red(sword32* a)
 static sword32 mldsa_poly_checksum(const sword32* a)
 {
     unsigned int i;
-    word32 chk = 0;
+    word32 chk = 2166136261U;
 
     for (i = 0; i < MLDSA_N; i++) {
-        chk = (chk * 3) ^ (word32)a[i];
+        chk = (chk ^ (word32)a[i]) * 16777619U;
     }
 
     return (sword32)chk;
@@ -9822,6 +9815,12 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
 #ifdef WOLFSSL_CHECK_MEM_ZERO
     wc_MemZero_Check(priv_rand_seed, sizeof(priv_rand_seed));
 #endif
+    /* Parts of the commit and z are written into the caller's buffer as they
+     * are produced. Do not leave them there on failure. The length is only
+     * set once the buffer was known to be big enough. */
+    if ((ret != 0) && (*sigLen == params->sigSz)) {
+        ForceZero(sig, params->sigSz);
+    }
     if (y != NULL) {
         word32 zeroSz = allocSz;
 #ifndef WC_MLDSA_CACHE_MATRIX_A
@@ -10035,9 +10034,21 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
              * of y is transformed once rather than once per row. */
             for (s = 0; (ret == 0) && valid && (s < params->l); s++) {
                 unsigned int e;
+            #ifdef WC_MLDSA_FAULT_HARDEN
+                const sword32* yc = y + (unsigned int)s * MLDSA_N;
+            #endif
 
             #ifdef WC_MLDSA_FAULT_HARDEN
                 if (y_check != y) {
+                    valid = 0;
+                    ret = BAD_COND_E;
+                    break;
+                }
+            #endif
+            #ifdef WC_MLDSA_FAULT_HARDEN
+                /* The polynomial of y this column reads must lie inside y. */
+                if ((yc < y) ||
+                        (yc > y + (unsigned int)(params->l - 1) * MLDSA_N)) {
                     valid = 0;
                     ret = BAD_COND_E;
                     break;
@@ -10047,13 +10058,6 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                 XMEMCPY(y_ntt_t, y + (unsigned int)s * MLDSA_N,
                     MLDSA_POLY_SIZE);
                 mldsa_ntt_full(y_ntt_t);
-            #ifdef WC_MLDSA_FAULT_HARDEN
-                if (s >= params->l) {
-                    valid = 0;
-                    ret = BAD_COND_E;
-                    break;
-                }
-            #endif
 
                 /* Put s into buffer to be hashed. */
                 aseed[MLDSA_PUB_SEED_SZ + 0] = s;
@@ -10369,6 +10373,12 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
 #ifdef WOLFSSL_CHECK_MEM_ZERO
     wc_MemZero_Check(priv_rand_seed, sizeof(priv_rand_seed));
 #endif
+    /* Parts of the commit and z are written into the caller's buffer as they
+     * are produced. Do not leave them there on failure. The length is only
+     * set once the buffer was known to be big enough. */
+    if ((ret != 0) && (*sigLen == params->sigSz)) {
+        ForceZero(sig, params->sigSz);
+    }
     if (y != NULL) {
         ForceZero(y, allocSz);
     }
@@ -10398,9 +10408,10 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
     unsigned int w1Stride = (unsigned int)params->w1EncSz / params->k;
     /* Bytes of encoded s1 or s2 per polynomial. */
     unsigned int sStride = (unsigned int)params->s2EncSz / params->k;
+    /* Checksum of each polynomial of y, to bind the two derivations. */
+    sword32 yChk[MLDSA_MAX_L_VECTOR_COUNT / MLDSA_N];
 #ifdef WC_MLDSA_FAULT_HARDEN
     sword32* w_check;
-    sword32 yChk[MLDSA_MAX_L_VECTOR_COUNT / MLDSA_N];
 #endif
 
     /* priv_rand_seed will hold the secret signing seed (rho'') derived below;
@@ -10489,10 +10500,8 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                 if (ret != 0) {
                     break;
                 }
-            #ifdef WC_MLDSA_FAULT_HARDEN
                 /* Bind this polynomial of y to the one regenerated for z. */
                 yChk[s] = mldsa_poly_checksum(y);
-            #endif
             #ifdef WOLFSSL_MLDSA_SIGN_CHECK_Y
                 valid = mldsa_check_low_ct(y,
                     ((sword32)1 << params->gamma1_bits) - params->beta);
@@ -10621,13 +10630,12 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
                     if (ret != 0) {
                         break;
                     }
-                #ifdef WC_MLDSA_FAULT_HARDEN
+                    /* y must match the derivation w was built from. */
                     if (yChk[s] != mldsa_poly_checksum(y)) {
                         valid = 0;
                         ret = BAD_COND_E;
                         break;
                     }
-                #endif
                     mldsa_vec_decode_eta_bits(sp, params->eta, a, 1);
                     mldsa_ntt_small(a);
                     /* Step 19: cs1 = NTT-1(c o s1) */
@@ -10749,10 +10757,14 @@ static int mldsa_sign_with_seed_mu(wc_MlDsaKey* key,
 #ifdef WOLFSSL_CHECK_MEM_ZERO
     wc_MemZero_Check(priv_rand_seed, sizeof(priv_rand_seed));
 #endif
-#ifdef WC_MLDSA_FAULT_HARDEN
+    /* Parts of the commit and z are written into the caller's buffer as they
+     * are produced. Do not leave them there on failure. The length is only
+     * set once the buffer was known to be big enough. */
+    if ((ret != 0) && (*sigLen == params->sigSz)) {
+        ForceZero(sig, params->sigSz);
+    }
     /* Checksums are derived from the secret mask y. */
     ForceZero(yChk, sizeof(yChk));
-#endif
     if (w != NULL) {
         ForceZero(w, allocSz);
     }
