@@ -191,6 +191,11 @@
 
 * Added Argon2 (RFC 9106) password hashing with all three variants - Argon2d, Argon2i and Argon2id - via `--enable-argon2`. Only version 0x13 is implemented. Provides the one-shot `wc_Argon2()`/`wc_Argon2_ex()` and a reusable context API (`wc_Argon2Init`/`wc_Argon2SetParams`/`wc_Argon2DeriveTag`/`wc_Argon2Free`, plus `wc_Argon2New`/`wc_Argon2Delete` unless `WC_NO_CONSTRUCTORS`) that allocates the memory block array once for applications deriving many tags. `--enable-argon2-threads` fills the segments of a slice in parallel, which does not change the derived tag: the one-shot functions use a thread per lane, and the context API takes a count from `wc_Argon2SetThreads()`. by @SparkiDev
 
+## Post-Quantum Cryptography (PQC)
+
+* Reduced the ML-KEM small memory heap footprint: key generation and encapsulation now generate matrix A a polynomial at a time and multiply each one in as it is generated, and decapsulation compares the re-encapsulated cipher text a block at a time. by @Frauschi
+* Allowed `WOLFSSL_MLKEM_CACHE_A` to be used with the ML-KEM small memory options, which previously refused to build together. by @Frauschi
+
 ## Fixes
 
 * **Fix (sniffer could not decrypt Encrypt-Then-MAC or X25519 sessions)**: the
@@ -526,9 +531,6 @@ PR stands for Pull Request, and PR <NUMBER> references a GitHub pull request num
 * Migrate internal ML-KEM consumers to canonical wc_MlKemKey API by @Frauschi (PR 10571)
 * Add PQ documentation for LMS, ML-DSA, ML-KEM, XMSS by @kaleb-himes (PR 10514)
 * Various leak / alloc and zeroization fixes for SLH-DSA by @Frauschi (PR 10698)
-
-* Reduced the ML-KEM small memory heap footprint: `WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM` and `WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM` now generate matrix A a polynomial at a time and multiply each one in as it is generated, encapsulation encodes each polynomial of u into the cipher text as soon as it is calculated, and decapsulation compares the re-encapsulated cipher text a block at a time instead of holding a second copy of it. Key generation drops to one polynomial for every parameter set and decapsulation peaks 38 to 56 percent lower with no change in operation count. by @Frauschi
-* Allowed `WOLFSSL_MLKEM_CACHE_A` to be used with the ML-KEM small memory options, which previously refused to build together. Key generation keeps each polynomial of matrix A as it streams it and encapsulation transposes the kept matrix instead of regenerating it, cutting decapsulation by 38 percent and encapsulation with a locally generated key by 50 percent for the k*k*512 bytes the cached matrix occupies. by @Frauschi
 
 ## TLS/DTLS
 
