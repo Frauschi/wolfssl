@@ -410,6 +410,33 @@ config WOLFSSL_OPENSSL_EXTRA_X509_SMALL
     helpers (wolfSSL_X509_free, wolfSSL_get_verify_result, ...) without
     the rest of OPENSSL_EXTRA.
 
+config WOLFCRYPT_SP_ASM
+	bool "wolfCrypt single-precision math assembly"
+	depends on WOLFSSL_BUILTIN && !WOLFSSL_HAS_SETTINGS_FILE
+	help
+	  Use the hand-written assembly in the single-precision math backend
+	  for RSA, DH and ECC. The variant follows the architecture profile:
+	  ARMv6-M and ARMv8-M baseline get the Thumb one, ARMv7-M and ARMv8-M
+	  mainline the Cortex-M one, Cortex-R and 32-bit Cortex-A the ARM32
+	  one, AArch64 the ARM64 one. Anything else builds the C backend and
+	  this does nothing.
+
+	  The Cortex-M assembly prefers UMAAL, which belongs to the DSP
+	  extension; a part built without it takes the slower UMAAL-free
+	  variant of the same routines.
+
+	  Independent of WOLFCRYPT_ARMASM, which covers the symmetric
+	  algorithms and is ARMv7/ARMv8 only.
+
+config WOLFCRYPT_SP_SMALL
+	bool "Smaller single-precision math"
+	depends on WOLFSSL_BUILTIN && !WOLFSSL_HAS_SETTINGS_FILE
+	default y
+	help
+	  Build the space-optimised variant of the single-precision math
+	  backend. Turning it off trades a markedly larger image for faster
+	  RSA, DH and ECC, and is worth pairing with WOLFCRYPT_SP_ASM.
+
 config WOLFCRYPT_ARMASM
 	bool "wolfCrypt ARM Assembly support"
 	depends on WOLFSSL_BUILTIN

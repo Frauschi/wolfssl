@@ -667,17 +667,25 @@ extern "C" {
         #define WOLFSSL_HAVE_SP_DH
     #endif
 
-    #define WOLFSSL_SP_SMALL      /* use smaller version of code */
+    #ifdef CONFIG_WOLFCRYPT_SP_SMALL
+        #define WOLFSSL_SP_SMALL  /* use smaller version of code */
+    #endif
     //#define WOLFSSL_SP_NO_MALLOC /* disable heap in wolf/SP math */
     //#define SP_DIV_WORD_USE_DIV /* no div64 */
 
-    #if 0
-        /* optional speedup with inline assembly */
-        //#define WOLFSSL_SP_ARM_CORTEX_M_ASM /* Cortex-M3+ */
-        //#define WOLFSSL_SP_ARM_THUMB_ASM    /* Cortex-M0+ thumb */
-        //#define WOLFSSL_SP_ARM32_ASM        /* Cortex-R */
-        //#define WOLFSSL_SP_ARM64_ASM        /* Cortex-A */
-        //#define WOLFSSL_SP_USE_UDIV
+    /* Assembly speedup, keyed on the CPU Zephyr reports. Anything not named
+     * here keeps the C backend. */
+    #ifdef CONFIG_WOLFCRYPT_SP_ASM
+        #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
+            #define WOLFSSL_SP_ARM_THUMB_ASM
+        #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
+            #define WOLFSSL_SP_ARM_CORTEX_M_ASM
+        #elif defined(CONFIG_ARM64)
+            #define WOLFSSL_SP_ARM64_ASM
+        #elif defined(CONFIG_CPU_AARCH32_CORTEX_R) || \
+              defined(CONFIG_CPU_AARCH32_CORTEX_A)
+            #define WOLFSSL_SP_ARM32_ASM
+        #endif
     #endif
 #endif
 
@@ -690,6 +698,14 @@ extern "C" {
     #define WOLFSSL_NO_HASH_RAW
     #define WOLFSSL_ARMASM_INLINE /* use inline .c versions */
     #define WOLFSSL_ARMASM_NO_NEON
+
+    /* Without these the Thumb2 sources compile but every caller still takes
+     * the ARMv8 path, so the option selects files and nothing else. Cortex-M
+     * has no AES or SHA extension, and the Thumb2 code is the whole of it. */
+    #ifdef CONFIG_WOLFCRYPT_ARMASM_THUMB2
+        #define WOLFSSL_ARMASM_THUMB2
+        #define WOLFSSL_ARMASM_NO_HW_CRYPTO
+    #endif
 
     /* Default is ARMv8 */
 

@@ -164,11 +164,11 @@ if(CONFIG_WOLFSSL)
         zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/arm/armv8-32-sha512-asm_c.c)
         zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/arm/armv8-32-sha3-asm_c.c)
         zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/wolfcrypt/src/port/arm/armv8-32-sha256-asm_c.c)
+
+        # Note: The cmake/gcc-m-cpu.cmake make need updated to add "+crypto -mstrict-align"
+        # Not for Thumb2, which targets Cortex-M and takes the board's own flags.
+        set(TOOLCHAIN_C_FLAGS "-mcpu=cortex-a53+crypto -mstrict-align")
       endif()
-
-
-      # Note: The cmake/gcc-m-cpu.cmake make need updated to add "+crypto -mstrict-align"
-      set(TOOLCHAIN_C_FLAGS "-mcpu=cortex-a53+crypto -mstrict-align")
     endif()
 
     if(CONFIG_WOLFCRYPT_INTELASM)
