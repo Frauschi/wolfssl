@@ -349,10 +349,14 @@ ECC Curve Sizes:
     #define HAVE_ECC_CHECK_PUBKEY_ORDER
 #endif
 
-#if defined(WOLFSSL_SP_MATH_ALL) && SP_INT_BITS < MAX_ECC_BITS_NEEDED
+/* MAX_ECC_BITS is MAX_ECC_BITS_NEEDED unless the user raised it, and ecc.h
+ * rejects a smaller one, so this is the ceiling the caller actually asked for.
+ * Raising it sizes the working values for a curve that is not compiled in,
+ * which is what an arbitrary curve passed to wc_ecc_set_custom_curve needs. */
+#if defined(WOLFSSL_SP_MATH_ALL) && SP_INT_BITS < MAX_ECC_BITS
 #define MAX_ECC_BITS_USE    SP_INT_BITS
 #else
-#define MAX_ECC_BITS_USE    MAX_ECC_BITS_NEEDED
+#define MAX_ECC_BITS_USE    MAX_ECC_BITS
 #endif
 
 #if !defined(WOLFSSL_CUSTOM_CURVES) && (ECC_MIN_KEY_SZ > 160) && \

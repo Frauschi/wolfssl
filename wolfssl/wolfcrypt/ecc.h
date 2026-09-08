@@ -128,10 +128,20 @@
     #define MAX_ECC_BITS_NEEDED    112
 #endif
 
-#ifndef MAX_ECC_BITS
-    #define MAX_ECC_BITS MAX_ECC_BITS_NEEDED
+/* A custom-curve build takes the ECC_KEY_MAX_BITS variant that adds a bit for
+ * an order larger than the prime, so the ceiling has to carry that bit too -
+ * without it the largest curve compiled in does not fit the ceiling its own
+ * size derives. */
+#ifdef WOLFSSL_CUSTOM_CURVES
+    #define MAX_ECC_BITS_EXTRA 1
 #else
-    #if MAX_ECC_BITS_NEEDED > MAX_ECC_BITS
+    #define MAX_ECC_BITS_EXTRA 0
+#endif
+
+#ifndef MAX_ECC_BITS
+    #define MAX_ECC_BITS (MAX_ECC_BITS_NEEDED + MAX_ECC_BITS_EXTRA)
+#else
+    #if (MAX_ECC_BITS_NEEDED + MAX_ECC_BITS_EXTRA) > MAX_ECC_BITS
         #error configured MAX_ECC_BITS is less than required by enabled curves.
     #endif
 #endif
