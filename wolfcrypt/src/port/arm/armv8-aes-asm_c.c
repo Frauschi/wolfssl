@@ -38,6 +38,7 @@
 
 #if !defined(NO_AES) && defined(WOLFSSL_ARMASM)
 #ifndef WOLFSSL_ARMASM_NO_HW_CRYPTO
+__asm__(".arch_extension crypto");
 void AES_set_key_AARCH64(const byte* userKey, int keylen, byte* key, int dir)
 {
     __asm__ __volatile__ (
