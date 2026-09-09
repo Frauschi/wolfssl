@@ -455,6 +455,27 @@
     #include <wolfssl/wolfcrypt/port/xilinx/versal_gen2_asu/asu_settings.h>
 #endif
 
+/* EdgeLock (ELS + PKC) port: map WC_USE_DEVID before the unmodified test and
+ * benchmark read it. els_pkc_port.h cannot, as it pulls in vendor headers that
+ * sit on the wolfCrypt library's include path alone. */
+#ifdef WOLFSSL_ELS_PKC
+    #ifndef WOLFSSL_ELS_PKC_DEVID
+        #define WOLFSSL_ELS_PKC_DEVID 0x454C /* 'EL' - an id, not an address */
+    #endif
+    #if !defined(WC_USE_DEVID) && !defined(WC_NO_DEFAULT_DEVID)
+        #define WC_USE_DEVID WOLFSSL_ELS_PKC_DEVID
+    #endif
+    /* The offload leaves the engine's running state in digest[], which is a
+     * block behind and in the wrong byte order for the raw accessors, and
+     * those read the object without calling the callback at all. Only when a
+     * hash arm is actually compiled - the same condition the port uses. */
+    #if !defined(NO_SHA256) || defined(WOLFSSL_SHA384) || \
+        defined(WOLFSSL_SHA512)
+        #undef  WOLFSSL_NO_HASH_RAW
+        #define WOLFSSL_NO_HASH_RAW
+    #endif
+#endif
+
 /* Forward propagation of the legacy parent gate to the canonical name
  * (HAVE_DILITHIUM -> WOLFSSL_HAVE_MLDSA). Always active: required so that
  * a user_settings.h or build flag using only the legacy spelling still
