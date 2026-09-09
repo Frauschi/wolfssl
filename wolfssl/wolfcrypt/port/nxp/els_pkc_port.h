@@ -32,8 +32,17 @@
     #error "WOLFSSL_ELS_PKC requires WOLF_CRYPTO_CB"
 #endif
 
+/* The slot reference travels as a key's id blob, which wc_ecc_init_id() and
+ * wc_AesInit_Id() set. NO_WOLF_PRIVATE_KEY_ID removes both. */
+#ifndef WOLF_PRIVATE_KEY_ID
+    #error "WOLFSSL_ELS_PKC key slot references require WOLF_PRIVATE_KEY_ID"
+#endif
+
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/wolfcrypt/cryptocb.h>
+#ifndef NO_AES
+    #include <wolfssl/wolfcrypt/aes.h>
+#endif
 
 #ifdef __cplusplus
     extern "C" {
@@ -45,6 +54,81 @@
 
 #ifndef WOLFSSL_ELS_PKC_IRQ_PRIO
     #define WOLFSSL_ELS_PKC_IRQ_PRIO 2
+#endif
+
+/* ---------------------------------------------------------------------------
+ * Slot references
+ *
+ * A reference to an ELS key slot travels as the key's id blob, since a
+ * callback sees only key->id[], its length and the devId. wolfPSA stores the
+ * same 16 bytes followed by the public point. Never redefine a field; bump ver
+ * and append.
+ *
+ *   off  size  field
+ *   0    2     magic 'E','L'
+ *   2    1     ver
+ *   3    1     keyClass
+ *   4    1     slot
+ *   5    1     flags
+ *   6    2     reserved, zero
+ *   8    8     bind - first 8 bytes of SHA-256 over the X9.62 public point,
+ *              zero for symmetric keys
+ * ------------------------------------------------------------------------ */
+
+/* Highest slot index a reference may name, mirroring the vendor header's
+ * MCUXCLELS_KEY_SLOTS so a caller need not include the NXP SDK. */
+#define WC_ELSPKC_MAX_SLOT       19
+
+#define WC_ELSPKC_KEYREF_SZ      16
+#define WC_ELSPKC_KEYREF_MAGIC_0 0x45  /* 'E' */
+#define WC_ELSPKC_KEYREF_MAGIC_1 0x4C  /* 'L' */
+#define WC_ELSPKC_KEYREF_VER     1
+#define WC_ELSPKC_BIND_SZ        8
+
+/* Each class maps 1:1 onto one ELS permission bit and one ELS entry point.
+ * RSA and the Ed curves have no key property bit, so they cannot be vaulted;
+ * they run on the PKC tier with ordinary key material and no reference. */
+enum wc_ElsPkc_KeyClass {
+    WC_ELSPKC_KEY_NONE     = 0,
+    WC_ELSPKC_KEY_ECC_SIGN = 1,   /* ELS uecsg */
+    WC_ELSPKC_KEY_ECC_DH   = 2,   /* ELS uecdh */
+    WC_ELSPKC_KEY_AES      = 3,   /* ELS uaes  */
+    WC_ELSPKC_KEY_HMAC     = 4,   /* ELS uhmac */
+    WC_ELSPKC_KEY_CMAC     = 5,   /* ELS ucmac */
+    WC_ELSPKC_KEY_KWK      = 6,   /* ELS ukwk / ukuok */
+    WC_ELSPKC_KEY_CKDF     = 7,   /* ELS uckdf */
+    WC_ELSPKC_KEY_HKDF     = 8    /* ELS uhkdf */
+};
+
+/* bit0 is set when bind[] carries a real value; bits 1-2 are creation-time
+ * attributes, meaningful only on a key generation. */
+#define WC_ELSPKC_REF_FLAG_BIND       0x01
+#define WC_ELSPKC_REF_FLAG_EXPORTABLE 0x02  /* ELS wrpok */
+#define WC_ELSPKC_REF_FLAG_PERSISTENT 0x04  /* ELS frtn  */
+
+typedef struct wc_ElsPkc_KeyRef {
+    byte keyClass;
+    byte slot;
+    byte flags;
+    byte bind[WC_ELSPKC_BIND_SZ];
+} wc_ElsPkc_KeyRef;
+
+/* Serialise into out, which must hold WC_ELSPKC_KEYREF_SZ bytes. outSz is
+ * in/out; out == NULL is a size query returning LENGTH_ONLY_E. Parse returns
+ * BAD_STATE_E for a bad magic, version, class or slot, and accepts a longer
+ * blob, reading only the prefix. Parsing touches no hardware. */
+WOLFSSL_API int wc_ElsPkc_MakeKeyRef(const wc_ElsPkc_KeyRef* ref, byte* out,
+                                     word32* outSz);
+WOLFSSL_API int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz,
+                                      wc_ElsPkc_KeyRef* ref);
+
+#ifndef NO_AES
+/* Same, for an Aes that names a slot. aes->keylen stays 0, because
+ * wc_AesInit_Id() runs no key schedule and the engine takes the size from the
+ * slot's own property word. WC_ELSPKC_KEY_KWK is accepted so a wrapping key
+ * can be named the same way, but only WC_ELSPKC_KEY_AES drives a cipher. */
+WOLFSSL_API int wc_ElsPkc_AesUseSlot(Aes* aes, const wc_ElsPkc_KeyRef* ref,
+                                     void* heap, int devId);
 #endif
 
 /* Bring the EdgeLock subsystem up and register the crypto callback.

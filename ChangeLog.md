@@ -191,7 +191,7 @@
 
 * Added Argon2 (RFC 9106) password hashing with all three variants - Argon2d, Argon2i and Argon2id - via `--enable-argon2`. Only version 0x13 is implemented. Provides the one-shot `wc_Argon2()`/`wc_Argon2_ex()` and a reusable context API (`wc_Argon2Init`/`wc_Argon2SetParams`/`wc_Argon2DeriveTag`/`wc_Argon2Free`, plus `wc_Argon2New`/`wc_Argon2Delete` unless `WC_NO_CONSTRUCTORS`) that allocates the memory block array once for applications deriving many tags. `--enable-argon2-threads` fills the segments of a slice in parallel, which does not change the derived tag: the one-shot functions use a thread per lane, and the context API takes a count from `wc_Argon2SetThreads()`. by @SparkiDev
 
-* Added an NXP EdgeLock (ELS) crypto callback port for the RW612 and related parts, in `wolfcrypt/src/port/nxp/els_pkc_port.c` behind `WOLFSSL_ELS_PKC`. The ELS peripheral serves SHA-256/384/512. Under Zephyr, turn it on with `CONFIG_WOLFSSL_ELS_PKC=y`. NXP's CLNS library is linked by the application and is neither built nor vendored here.
+* Added an NXP EdgeLock (ELS) crypto callback port for the RW612 and related parts, in `wolfcrypt/src/port/nxp/els_pkc_port.c` behind `WOLFSSL_ELS_PKC`. The ELS peripheral serves SHA-256/384/512 and AES (ECB/CBC/CTR). Under Zephyr, turn it on with `CONFIG_WOLFSSL_ELS_PKC=y`. NXP's CLNS library is linked by the application and is neither built nor vendored here.
 
 ## Fixes
 
