@@ -151,6 +151,11 @@ WOLFSSL_API int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz,
 WOLFSSL_API int wc_ElsPkc_ReserveSlot(byte keyClass, word32 keySz,
                                       wc_ElsPkc_KeyRef* ref);
 
+/* Derive NXP_DIE_KEK_SK, the key encryption key the boot ROM uses to unwrap
+ * RFC 3394 blobs, into a free pair of slots; ref receives a KWK reference
+ * naming it. Delete it with wc_KeyStore_Delete() when done. The EdgeLock 2GO
+ * import keys are covered in wolfcrypt/src/port/nxp/README.md. */
+WOLFSSL_API int wc_ElsPkc_DeriveDieKek(wc_ElsPkc_KeyRef* ref);
 #endif
 
 #ifdef HAVE_ECC
