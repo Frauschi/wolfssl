@@ -38,8 +38,18 @@
     #error "WOLFSSL_ELS_PKC key slot references require WOLF_PRIVATE_KEY_ID"
 #endif
 
+/* The ECDSA arms exchange DER with ecc.c through StoreECC_DSA_Sig_Bin() and
+ * DecodeECC_DSA_Sig_Bin(); NO_ASN removes both and switches ecc.c to raw
+ * R||S, so the offload would be wrong even if it linked. */
+#if defined(HAVE_ECC) && defined(NO_ASN)
+    #error "WOLFSSL_ELS_PKC ECC support requires ASN.1"
+#endif
+
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/wolfcrypt/cryptocb.h>
+#ifdef HAVE_ECC
+    #include <wolfssl/wolfcrypt/ecc.h>
+#endif
 #ifndef NO_AES
     #include <wolfssl/wolfcrypt/aes.h>
 #endif
@@ -124,6 +134,14 @@ WOLFSSL_API int wc_ElsPkc_MakeKeyRef(const wc_ElsPkc_KeyRef* ref, byte* out,
                                      word32* outSz);
 WOLFSSL_API int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz,
                                       wc_ElsPkc_KeyRef* ref);
+
+#ifdef HAVE_ECC
+/* Initialise an ecc_key that names an ELS slot instead of holding a private
+ * key, and bind it to the port's devId and to P-256. For a key generation the
+ * reference is a request: the key does not exist until wc_ecc_make_key(). */
+WOLFSSL_API int wc_ElsPkc_EccUseSlot(ecc_key* key, const wc_ElsPkc_KeyRef* ref,
+                                     void* heap, int devId);
+#endif
 
 #ifndef NO_AES
 /* Same, for an Aes that names a slot. aes->keylen stays 0, because
