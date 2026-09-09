@@ -43,6 +43,9 @@
 #ifndef NO_AES
     #include <wolfssl/wolfcrypt/aes.h>
 #endif
+#if defined(WOLFSSL_CMAC) && !defined(NO_AES)
+    #include <wolfssl/wolfcrypt/cmac.h>
+#endif
 
 #ifdef __cplusplus
     extern "C" {
@@ -129,6 +132,13 @@ WOLFSSL_API int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz,
  * can be named the same way, but only WC_ELSPKC_KEY_AES drives a cipher. */
 WOLFSSL_API int wc_ElsPkc_AesUseSlot(Aes* aes, const wc_ElsPkc_KeyRef* ref,
                                      void* heap, int devId);
+#endif
+
+#if defined(WOLFSSL_CMAC) && !defined(NO_AES)
+/* Same, for a Cmac. The slot must carry ucmac, which is a separate permission
+ * from uaes, so a slot holding both needs one reference per class. */
+WOLFSSL_API int wc_ElsPkc_CmacUseSlot(Cmac* cmac, const wc_ElsPkc_KeyRef* ref,
+                                      void* heap, int devId);
 #endif
 
 /* Bring the EdgeLock subsystem up and register the crypto callback.
