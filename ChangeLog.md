@@ -26,6 +26,10 @@
 
 * Added `WOLFSSL_HAVE_SHA256_HASH_BLOCK`, fixing LMS calling `wc_Sha256HashBlock()` on hardware SHA-256 ports that do not build it. by @Frauschi
 
+## Hardware and Embedded Ports
+
+* Added an NXP EdgeLock (ELS) crypto callback port for the RW612 and related parts, in `wolfcrypt/src/port/nxp/els_pkc_port.c` behind `WOLFSSL_ELS_PKC`. The ELS peripheral serves SHA-256. Under Zephyr, turn it on with `CONFIG_WOLFSSL_ELS_PKC=y`. NXP's CLNS library is linked by the application and is neither built nor vendored here.
+
 # wolfSSL Release 5.9.4 (Sep 25, 2026)
 
 Release 5.9.4 has been developed according to wolfSSL's development and QA
