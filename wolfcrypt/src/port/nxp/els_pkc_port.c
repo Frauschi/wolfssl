@@ -57,6 +57,20 @@
     #include <wolfcrypt/src/misc.c>
 #endif
 
+/* The AES modes ELS drives with its block-cipher command. GCM and CMAC are
+ * separate commands, so they are not in here. */
+#if !defined(NO_AES) && (defined(HAVE_AES_CBC) || defined(WOLFSSL_AES_COUNTER) || \
+                         defined(HAVE_AES_ECB) || defined(WOLFSSL_AES_DIRECT))
+    #define ELS_HAVE_AES_BLOCK_CIPHER
+#endif
+
+/* Everything that can name a key slot. Each validates a reference against the
+ * hardware before issuing a command, because a permission violation resets the
+ * SoC, so they share the helpers in the next section. */
+#ifdef ELS_HAVE_AES_BLOCK_CIPHER
+    #define ELS_HAVE_SLOT_KEYS
+#endif
+
 /* ---------------------------------------------------------------------------
  * Peripheral serialization
  * ------------------------------------------------------------------------ */
@@ -268,6 +282,143 @@ static int ElsEnable(void)
 
     return 0;
 }
+
+/* ---------------------------------------------------------------------------
+ * Slot references and permission validation
+ * ------------------------------------------------------------------------ */
+
+/* Public bound, so a caller can range-check a slot without the NXP headers. */
+#if (WC_ELSPKC_MAX_SLOT + 1) != MCUXCLELS_KEY_SLOTS
+    #error WC_ELSPKC_MAX_SLOT is out of step with MCUXCLELS_KEY_SLOTS
+#endif
+
+int wc_ElsPkc_MakeKeyRef(const wc_ElsPkc_KeyRef* ref, byte* out, word32* outSz)
+{
+    if (ref == NULL || outSz == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (out == NULL) {
+        *outSz = WC_ELSPKC_KEYREF_SZ;
+        return WC_NO_ERR_TRACE(LENGTH_ONLY_E);
+    }
+    if (*outSz < WC_ELSPKC_KEYREF_SZ) {
+        return WC_NO_ERR_TRACE(BUFFER_E);
+    }
+    if (ref->keyClass == WC_ELSPKC_KEY_NONE ||
+        ref->keyClass > WC_ELSPKC_KEY_HKDF ||
+        ref->slot > WC_ELSPKC_MAX_SLOT) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+
+    XMEMSET(out, 0, WC_ELSPKC_KEYREF_SZ);
+    out[0] = WC_ELSPKC_KEYREF_MAGIC_0;
+    out[1] = WC_ELSPKC_KEYREF_MAGIC_1;
+    out[2] = WC_ELSPKC_KEYREF_VER;
+    out[3] = ref->keyClass;
+    out[4] = ref->slot;
+    out[5] = ref->flags;
+    /* out[6..7] stay zero - reserved */
+    if (ref->flags & WC_ELSPKC_REF_FLAG_BIND) {
+        XMEMCPY(out + 8, ref->bind, WC_ELSPKC_BIND_SZ);
+    }
+
+    *outSz = WC_ELSPKC_KEYREF_SZ;
+
+    return 0;
+}
+
+int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz, wc_ElsPkc_KeyRef* ref)
+{
+    if (in == NULL || ref == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    /* wolfPSA stores the reference followed by the public point, so a longer
+     * blob is expected - only the prefix belongs to us. */
+    if (inSz < WC_ELSPKC_KEYREF_SZ) {
+        return WC_NO_ERR_TRACE(BUFFER_E);
+    }
+    if (in[0] != WC_ELSPKC_KEYREF_MAGIC_0 ||
+        in[1] != WC_ELSPKC_KEYREF_MAGIC_1) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+    if (in[2] != WC_ELSPKC_KEYREF_VER) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+    if (in[3] == WC_ELSPKC_KEY_NONE || in[3] > WC_ELSPKC_KEY_HKDF) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+    if (in[4] > WC_ELSPKC_MAX_SLOT) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+
+    XMEMSET(ref, 0, sizeof(*ref));
+    ref->keyClass = in[3];
+    ref->slot     = in[4];
+    ref->flags    = in[5];
+    if (ref->flags & WC_ELSPKC_REF_FLAG_BIND) {
+        XMEMCPY(ref->bind, in + 8, WC_ELSPKC_BIND_SZ);
+    }
+
+    return 0;
+}
+
+/* Slot validation, reached from every path that can name a slot. */
+#ifdef ELS_HAVE_SLOT_KEYS
+
+/* The ELS permission bit each class stands for. */
+static word32 ElsClassUsageBit(byte keyClass)
+{
+    switch (keyClass) {
+        case WC_ELSPKC_KEY_ECC_SIGN: return MCUXCLELS_KEYPROPERTY_VALUE_ECSGN;
+        case WC_ELSPKC_KEY_ECC_DH:   return MCUXCLELS_KEYPROPERTY_VALUE_ECDH;
+        case WC_ELSPKC_KEY_AES:      return MCUXCLELS_KEYPROPERTY_VALUE_AES;
+        case WC_ELSPKC_KEY_HMAC:     return MCUXCLELS_KEYPROPERTY_VALUE_HMAC;
+        case WC_ELSPKC_KEY_CMAC:     return MCUXCLELS_KEYPROPERTY_VALUE_CMAC;
+        case WC_ELSPKC_KEY_KWK:      return MCUXCLELS_KEYPROPERTY_VALUE_KWK;
+        case WC_ELSPKC_KEY_CKDF:     return MCUXCLELS_KEYPROPERTY_VALUE_CKDF;
+        case WC_ELSPKC_KEY_HKDF:     return MCUXCLELS_KEYPROPERTY_VALUE_HKDF;
+        default:                     return 0;
+    }
+}
+
+/* Confirm the slot is occupied and carries the permission the class needs.
+ * The bit must be present, never exclusive - one slot legitimately carries
+ * several usage bits. ELS answers a permission violation by signalling the
+ * tamper controller, which resets the SoC. Caller must hold the lock. */
+static int ElsCheckSlot(const wc_ElsPkc_KeyRef* ref, byte expectClass)
+{
+    mcuxClEls_KeyProp_t prop;
+    word32 need;
+
+    if (ref->keyClass != expectClass) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+    need = ElsClassUsageBit(ref->keyClass);
+    if (need == 0) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t,
+        mcuxClEls_GetKeyProperties((mcuxClEls_KeyIndex_t)ref->slot, &prop));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_GetKeyProperties) != t) ||
+        (MCUXCLELS_STATUS_OK != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    /* An empty slot reads as all-zero properties, which fails the usage test
+     * below anyway - but check it explicitly so the error says what is wrong. */
+    if ((prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_ACTIVE) == 0) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+    if ((prop.word.value & need) == 0) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+
+    return 0;
+}
+
+#endif /* ELS_HAVE_SLOT_KEYS */
 
 /* ---------------------------------------------------------------------------
  * SHA-256 / SHA-384 / SHA-512
@@ -627,6 +778,185 @@ static int ElsHashFinal(ElsHashObj* o, byte* digest, word32 digestSz)
 #endif /* !NO_SHA256 || WOLFSSL_SHA384 || WOLFSSL_SHA512 */
 
 /* ---------------------------------------------------------------------------
+ * AES-ECB / CBC / CTR
+ * ------------------------------------------------------------------------ */
+
+/* ELS knows only 128- and 256-bit keys and only whole blocks. AES-192 and any
+ * trailing partial block are declined so software handles them. */
+
+#ifndef NO_AES
+
+int wc_ElsPkc_AesUseSlot(Aes* aes, const wc_ElsPkc_KeyRef* ref,
+                         void* heap, int devId)
+{
+    byte   blob[WC_ELSPKC_KEYREF_SZ];
+    word32 blobSz = sizeof(blob);
+    int    ret;
+
+    if (aes == NULL || ref == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    /* Only the classes an Aes could drive. A CMAC key gets its own reference
+     * on the Cmac object, which has its own id[]. */
+    if (ref->keyClass != WC_ELSPKC_KEY_AES &&
+        ref->keyClass != WC_ELSPKC_KEY_KWK) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+
+    ret = wc_ElsPkc_MakeKeyRef(ref, blob, &blobSz);
+    if (ret == 0) {
+        /* keyInstalled stays clear: the key is in the slot, not in a software
+         * schedule, so an unwired operation fails instead of running on
+         * zeros. */
+        ret = wc_AesInit_Id(aes, blob, (int)blobSz, heap, devId);
+    }
+
+    ForceZero(blob, sizeof(blob));
+
+    return ret;
+}
+
+static int ElsAesKeyOk(const Aes* aes)
+{
+    return (aes->keylen == 16 || aes->keylen == 32);
+}
+
+/* Read the slot reference an Aes carries, if any. CRYPTOCB_UNAVAILABLE means
+ * no reference; a parse failure is a hard error, because an Aes bound to a
+ * slot has no key material for software to fall back to. */
+static int ElsAesRef(const Aes* aes, wc_ElsPkc_KeyRef* ref)
+{
+    if (aes == NULL || aes->idLen <= 0) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    return wc_ElsPkc_ParseKeyRef(aes->id, (word32)aes->idLen, ref);
+}
+
+/* Issue one cipher command. Caller holds the lock. keyIdx is read only when
+ * opt says the key is internal, in which case the memory pair is ignored -
+ * pass nothing rather than a stale devKey. */
+#ifdef ELS_HAVE_AES_BLOCK_CIPHER
+
+static int ElsCipherRun(mcuxClEls_CipherOption_t opt,
+                        mcuxClEls_KeyIndex_t keyIdx, Aes* aes,
+                        const byte* in, word32 sz, byte* out, int useIv)
+{
+    int extKey = (opt.bits.extkey == MCUXCLELS_CIPHER_EXTERNAL_KEY);
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Cipher_Async(
+        opt, keyIdx,
+        extKey ? (const uint8_t*)aes->devKey : NULL,
+        extKey ? (size_t)aes->keylen : 0u,
+        in, sz, useIv ? (uint8_t*)aes->reg : NULL, out));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Cipher_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+static int ElsAesCipher(Aes* aes, byte* out, const byte* in, word32 sz,
+                        int mode, int encrypt, int useIv)
+{
+    mcuxClEls_CipherOption_t opt;
+    wc_ElsPkc_KeyRef ref;
+    byte lastCipher[MCUXCLELS_CIPHER_BLOCK_SIZE_AES];
+    int slotted = 0;
+    int ret;
+
+    if (aes == NULL || out == NULL || in == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+
+    XMEMSET(&ref, 0, sizeof(ref));
+    ret = ElsAesRef(aes, &ref);
+    if (ret == 0) {
+        slotted = 1;
+    }
+    else if (ret != WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE)) {
+        return ret;
+    }
+
+    /* Whole blocks only. keylen matters only for a key held in memory: a slot
+     * key carries its size in its property word and aes->keylen is 0. */
+    if (sz == 0 || (sz % MCUXCLELS_CIPHER_BLOCK_SIZE_AES) != 0 ||
+        (!slotted && !ElsAesKeyOk(aes))) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+#ifdef WOLFSSL_AES_COUNTER
+    /* CTR keeps an unconsumed keystream remainder in aes->tmp and has already
+     * advanced aes->reg past it, and this callback runs before that remainder
+     * is used - so starting from aes->reg would desynchronise the stream. */
+    if (mode == MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CTR && aes->left != 0) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+#endif
+
+    opt.word.value = 0u;
+    opt.bits.cphmde = (uint32_t)mode;
+    opt.bits.dcrpt  = encrypt ? MCUXCLELS_CIPHER_ENCRYPT
+                              : MCUXCLELS_CIPHER_DECRYPT;
+    opt.bits.extkey = slotted ? MCUXCLELS_CIPHER_INTERNAL_KEY
+                              : MCUXCLELS_CIPHER_EXTERNAL_KEY;
+    if (useIv && mode == MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CTR) {
+        /* cphsoe makes ELS write the updated counter back. NOT set for CBC:
+         * the documentation says it is ignored there, but setting it made ELS
+         * take pIV as an internal state blob and disagree with software. */
+        opt.bits.cphsie = MCUXCLELS_CIPHER_STATE_IN_ENABLE;
+        opt.bits.cphsoe = MCUXCLELS_CIPHER_STATE_OUT_ENABLE;
+    }
+
+    /* CBC decrypt chains on the last ciphertext block, which is the input -
+     * save it now because an in-place call is about to overwrite it. */
+    if (mode == MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CBC && !encrypt) {
+        XMEMCPY(lastCipher, in + sz - MCUXCLELS_CIPHER_BLOCK_SIZE_AES,
+                MCUXCLELS_CIPHER_BLOCK_SIZE_AES);
+    }
+
+    ret = ElsLock();
+    if (ret == 0) {
+        /* Prove the slot holds an active AES key: the class check alone would
+         * pass a hand-built reference against, say, a wrapping key. */
+        if (slotted) {
+            ret = ElsCheckSlot(&ref, WC_ELSPKC_KEY_AES);
+        }
+        if (ret == 0) {
+            ret = ElsCipherRun(opt, (mcuxClEls_KeyIndex_t)ref.slot, aes,
+                               in, sz, out, useIv);
+        }
+        ElsUnlock();
+    }
+
+    if (ret == 0) {
+        /* Despite the documentation, this part does not write pIV back for
+         * CBC, so a chained call would restart from the original IV. The next
+         * IV is the last ciphertext block: the output when encrypting, the
+         * saved input when decrypting. */
+        if (mode == MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CBC) {
+            if (encrypt) {
+                XMEMCPY(aes->reg, out + sz - MCUXCLELS_CIPHER_BLOCK_SIZE_AES,
+                        MCUXCLELS_CIPHER_BLOCK_SIZE_AES);
+            }
+            else {
+                XMEMCPY(aes->reg, lastCipher,
+                        MCUXCLELS_CIPHER_BLOCK_SIZE_AES);
+            }
+        }
+    }
+
+    ForceZero(lastCipher, sizeof(lastCipher));
+
+    return ret;
+}
+
+#endif /* ELS_HAVE_AES_BLOCK_CIPHER */
+
+#endif /* !NO_AES */
+
+/* ---------------------------------------------------------------------------
  * Dispatch
  * ------------------------------------------------------------------------ */
 
@@ -646,6 +976,42 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
 
     switch (info->algo_type) {
 
+#ifndef NO_AES
+        case WC_ALGO_TYPE_CIPHER:
+            switch (info->cipher.type) {
+    #ifdef HAVE_AES_CBC
+                case WC_CIPHER_AES_CBC:
+                    ret = ElsAesCipher(info->cipher.aescbc.aes,
+                            info->cipher.aescbc.out, info->cipher.aescbc.in,
+                            info->cipher.aescbc.sz,
+                            MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CBC,
+                            info->cipher.enc, 1);
+                    break;
+    #endif
+    #ifdef WOLFSSL_AES_COUNTER
+                case WC_CIPHER_AES_CTR:
+                    /* CTR keystream is symmetric, so the hardware always runs
+                     * the "encrypt" direction regardless of the caller's. */
+                    ret = ElsAesCipher(info->cipher.aesctr.aes,
+                            info->cipher.aesctr.out, info->cipher.aesctr.in,
+                            info->cipher.aesctr.sz,
+                            MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_CTR, 1, 1);
+                    break;
+    #endif
+    #if defined(HAVE_AES_ECB) || defined(WOLFSSL_AES_DIRECT)
+                case WC_CIPHER_AES_ECB:
+                    ret = ElsAesCipher(info->cipher.aesecb.aes,
+                            info->cipher.aesecb.out, info->cipher.aesecb.in,
+                            info->cipher.aesecb.sz,
+                            MCUXCLELS_CIPHERPARAM_ALGORITHM_AES_ECB,
+                            info->cipher.enc, 0);
+                    break;
+    #endif
+                default:
+                    break;
+            }
+            break;
+#endif /* !NO_AES */
 
 #if !defined(NO_SHA256) || defined(WOLFSSL_SHA384) || defined(WOLFSSL_SHA512)
         case WC_ALGO_TYPE_HASH:
