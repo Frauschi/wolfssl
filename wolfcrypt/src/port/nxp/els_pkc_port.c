@@ -1982,6 +1982,160 @@ static int ElsPkcRsaFunction(const byte* in, word32 inLen, byte* out,
 #endif /* ELS_PKC_HAVE_SESSION */
 
 /* ---------------------------------------------------------------------------
+ * X25519
+ * ------------------------------------------------------------------------ */
+
+/* Only the shared secret is claimed; key generation stays in software. */
+
+#ifdef HAVE_CURVE25519
+
+#include <mcuxClKey.h>
+
+#define ELS_X25519_KEY_SZ MCUXCLECC_MONTDH_CURVE25519_SIZE_PRIVATEKEY
+
+/* Wrap a raw key buffer in a vendor key descriptor. Caller holds the lock. */
+static int ElsPkcKeyInit(mcuxClSession_Descriptor_t* sess,
+                         mcuxClKey_Handle_t h, mcuxClKey_Type_t type,
+                         byte* data)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClKey_init(
+        sess, h, type, data, ELS_X25519_KEY_SZ));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClKey_init) != t) ||
+        (MCUXCLKEY_STATUS_OK != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return 0;
+}
+
+/* The agreement itself, kept in its own scope so the flow-protection macro
+ * pair - which expands to a do/while - stays balanced. */
+static int ElsPkcMontDhRun(mcuxClSession_Descriptor_t* sess,
+                           mcuxClKey_Handle_t priv, mcuxClKey_Handle_t pub,
+                           byte* ss, uint32_t* len)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEcc_MontDH_KeyAgreement(
+        sess, priv, pub, ss, len));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEcc_MontDH_KeyAgreement) != t) ||
+        (MCUXCLECC_STATUS_OK != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return 0;
+}
+
+static int ElsPkcMontDh(mcuxClSession_Descriptor_t* sess,
+                        const byte* priv, const byte* pub, byte* out,
+                        word32* outLen)
+{
+    uint32_t privDesc[MCUXCLKEY_DESCRIPTOR_SIZE_IN_WORDS];
+    uint32_t pubDesc[MCUXCLKEY_DESCRIPTOR_SIZE_IN_WORDS];
+    ALIGN32 byte privBuf[ELS_X25519_KEY_SZ];
+    ALIGN32 byte pubBuf[ELS_X25519_KEY_SZ];
+    ALIGN32 byte ss[ELS_X25519_KEY_SZ];
+    uint32_t len = 0u;
+    int ret = 0;
+
+    XMEMCPY(privBuf, priv, ELS_X25519_KEY_SZ);
+    XMEMCPY(pubBuf, pub, ELS_X25519_KEY_SZ);
+
+    ret = ElsPkcKeyInit(sess, (mcuxClKey_Handle_t)privDesc,
+                        mcuxClKey_Type_Ecc_MontDH_Curve25519_PrivateKey,
+                        privBuf);
+    if (ret == 0) {
+        ret = ElsPkcKeyInit(sess, (mcuxClKey_Handle_t)pubDesc,
+                            mcuxClKey_Type_Ecc_MontDH_Curve25519_PublicKey,
+                            pubBuf);
+    }
+
+    if (ret == 0) {
+        ret = ElsPkcMontDhRun(sess, (mcuxClKey_Handle_t)privDesc,
+                              (mcuxClKey_Handle_t)pubDesc, ss, &len);
+    }
+
+    if (ret == 0) {
+        if (len != ELS_X25519_KEY_SZ || *outLen < len) {
+            ret = WC_NO_ERR_TRACE(BUFFER_E);
+        }
+        else {
+            XMEMCPY(out, ss, len);
+            *outLen = len;
+        }
+    }
+
+    ForceZero(privBuf, sizeof(privBuf));
+    ForceZero(ss, sizeof(ss));
+
+    return ret;
+}
+
+static int ElsPkcX25519(curve25519_key* privKey, curve25519_key* pubKey,
+                        byte* out, word32* outLen, int endian)
+{
+    mcuxClSession_Descriptor_t sess;
+    byte priv[ELS_X25519_KEY_SZ];
+    byte pub[ELS_X25519_KEY_SZ];
+    word32 privSz = sizeof(priv);
+    word32 pubSz  = sizeof(pub);
+    int ret;
+
+    if (privKey == NULL || pubKey == NULL || out == NULL || outLen == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    /* The engine works little-endian, which is X25519's own wire order. A
+     * big-endian request is wolfCrypt's legacy convention; decline it rather
+     * than byte-swapping a shared secret behind the caller's back. */
+    if (endian != EC25519_LITTLE_ENDIAN) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    ret = wc_curve25519_export_private_raw_ex(privKey, priv, &privSz,
+                                              EC25519_LITTLE_ENDIAN);
+    if (ret == 0) {
+        ret = wc_curve25519_export_public_ex(pubKey, pub, &pubSz,
+                                             EC25519_LITTLE_ENDIAN);
+    }
+    if (ret != 0 || privSz != ELS_X25519_KEY_SZ ||
+        pubSz != ELS_X25519_KEY_SZ) {
+        ForceZero(priv, sizeof(priv));
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    ret = ElsLock();
+    if (ret == 0) {
+        ret = ElsPkcSessionOpen(&sess, 0);
+        if (ret == 0) {
+            ret = ElsPkcMontDh(&sess, priv, pub, out, outLen);
+            ElsPkcSessionClose(&sess);
+#ifndef WOLFSSL_NO_ECDHX_SHARED_ZERO_CHECK
+            /* RFC 7748 contributory behaviour, which the software path
+             * enforces in wc_curve25519_shared_secret_ex(). The offload
+             * replaces that path, so it has to carry the check itself. */
+            if (ret == 0) {
+                word32 i;
+                byte   acc = 0;
+                for (i = 0; i < *outLen; i++) {
+                    acc |= out[i];
+                }
+                if (acc == 0) {
+                    ret = WC_NO_ERR_TRACE(ECC_OUT_OF_RANGE_E);
+                }
+            }
+#endif
+        }
+        ElsUnlock();
+    }
+
+    ForceZero(priv, sizeof(priv));
+
+    return ret;
+}
+
+#endif /* HAVE_CURVE25519 */
+
+/* ---------------------------------------------------------------------------
  * Random
  * ------------------------------------------------------------------------ */
 
@@ -2431,9 +2585,18 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
             break;
 #endif
 
-#if defined(HAVE_ECC) || !defined(NO_RSA)
+#if defined(HAVE_ECC) || !defined(NO_RSA) || defined(HAVE_CURVE25519)
         case WC_ALGO_TYPE_PK:
             switch (info->pk.type) {
+    #ifdef HAVE_CURVE25519
+                case WC_PK_TYPE_CURVE25519:
+                    ret = ElsPkcX25519(info->pk.curve25519.private_key,
+                            info->pk.curve25519.public_key,
+                            info->pk.curve25519.out,
+                            info->pk.curve25519.outlen,
+                            info->pk.curve25519.endian);
+                    break;
+    #endif
     #ifndef NO_RSA
                 case WC_PK_TYPE_RSA:
                     ret = ElsPkcRsaFunction(info->pk.rsa.in,
@@ -2489,7 +2652,7 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
                     break;
             }
             break;
-#endif /* HAVE_ECC || !NO_RSA */
+#endif /* HAVE_ECC || !NO_RSA || HAVE_CURVE25519 */
 
 #ifndef NO_AES
         case WC_ALGO_TYPE_CIPHER:

@@ -54,7 +54,7 @@ see [README_SE050.md](./README_SE050.md).
 RW612 and related parts, through the crypto callback interface. The ELS
 peripheral serves SHA-256, SHA-384, SHA-512, AES (ECB/CBC/CTR), AES-GCM,
 CMAC, the DRBG, and ECDSA on P-256 for a key that names a slot; the PKC
-coprocessor serves RSA.
+coprocessor serves RSA and X25519.
 
 Anything the hardware does not serve is declined with `CRYPTOCB_UNAVAILABLE`
 and completed in software, so an unsupported algorithm or key size costs
