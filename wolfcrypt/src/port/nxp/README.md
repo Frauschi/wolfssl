@@ -52,7 +52,7 @@ see [README_SE050.md](./README_SE050.md).
 
 `els_pkc_port.c` offloads wolfCrypt to the EdgeLock subsystem found on the
 RW612 and related parts, through the crypto callback interface. The ELS
-peripheral serves SHA-256, SHA-384, SHA-512 and AES (ECB/CBC/CTR).
+peripheral serves SHA-256, SHA-384, SHA-512, AES (ECB/CBC/CTR) and AES-GCM.
 
 Anything the hardware does not serve is declined with `CRYPTOCB_UNAVAILABLE`
 and completed in software, so an unsupported algorithm or key size costs
@@ -105,7 +105,8 @@ correctly, and the port needs neither the copy nor the free crypto-callback
 hook.
 
 **What the hardware declines**, so it runs in software instead: AES-192 (no
-ELS key size), and any trailing partial block.
+ELS key size), any trailing partial block, and an AES-GCM IV other than 12
+bytes.
 
 ### Vendor library
 
