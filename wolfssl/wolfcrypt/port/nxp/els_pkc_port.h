@@ -47,6 +47,9 @@
 
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/wolfcrypt/cryptocb.h>
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+    #include <wolfssl/wolfcrypt/wc_keystore.h>
+#endif
 #ifdef HAVE_ECC
     #include <wolfssl/wolfcrypt/ecc.h>
 #endif
@@ -134,6 +137,19 @@ WOLFSSL_API int wc_ElsPkc_MakeKeyRef(const wc_ElsPkc_KeyRef* ref, byte* out,
                                      word32* outSz);
 WOLFSSL_API int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz,
                                       wc_ElsPkc_KeyRef* ref);
+
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+/* Choose a free slot for a key that does not exist yet and fill in a reference
+ * naming it. keySz is the size in bytes the key will have, or 0 to leave it to
+ * the device: a 256-bit key occupies an adjacent pair, as both ECC classes
+ * always do, and reserving one slot for it would name a slot the subsequent
+ * derive or import then refuses. Returns MEMORY_E when the store has no room.
+ * Advisory: nothing is marked taken until a key is written, so reserve and
+ * generate together. */
+WOLFSSL_API int wc_ElsPkc_ReserveSlot(byte keyClass, word32 keySz,
+                                      wc_ElsPkc_KeyRef* ref);
+
+#endif
 
 #ifdef HAVE_ECC
 /* Initialise an ecc_key that names an ELS slot instead of holding a private

@@ -72,7 +72,7 @@
  * SoC, so they share the helpers in the next section. */
 #if defined(ELS_HAVE_AES_BLOCK_CIPHER) || \
     (!defined(NO_AES) && (defined(HAVE_AESGCM) || defined(WOLFSSL_CMAC))) || \
-    defined(HAVE_ECC)
+    defined(HAVE_ECC) || defined(WOLF_CRYPTO_CB_KEYSTORE)
     #define ELS_HAVE_SLOT_KEYS
 #endif
 
@@ -370,7 +370,7 @@ int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz, wc_ElsPkc_KeyRef* ref)
 /* Slot validation, reached from every path that can name a slot. */
 #ifdef ELS_HAVE_SLOT_KEYS
 
-#ifdef HAVE_ECC
+#if defined(HAVE_ECC) || defined(WOLF_CRYPTO_CB_KEYSTORE)
 /* Read a slot's properties. Caller holds the lock. */
 static int ElsKsProps(byte slot, mcuxClEls_KeyProp_t* prop)
 {
@@ -2894,6 +2894,613 @@ static int ElsPkcEccVerify(const byte* sigDer, word32 sigLen,
 #endif /* HAVE_ECC && (HAVE_ECC_SIGN || HAVE_ECC_VERIFY) */
 
 /* ---------------------------------------------------------------------------
+ * Key store
+ * ------------------------------------------------------------------------ */
+
+/* These calls name two slots rather than one, and a permission mistake resets
+ * the SoC, so both references are validated against the hardware first. */
+
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+
+/* The container is the key plus an 8-byte property/padding prefix, all inside
+ * an RFC 3394 wrap that adds its own 8-byte integrity block. */
+#define ELS_KS_BLOB_SZ(keySz) ((word32)(keySz) + 16u)
+
+/* ELS derives with a fixed-width label/context block. */
+#define ELS_KS_DERIV_SZ MCUXCLELS_CKDF_DERIVATIONDATA_SIZE
+
+/* A slot holds 128 bits; a 256-bit key spans the pair. */
+#define ELS_KS_KEY_128_SZ 16u
+#define ELS_KS_KEY_256_SZ 32u
+
+/* Map a stored key's ELS properties onto the facility's vocabulary. */
+static word32 ElsKsTypeFromProp(const mcuxClEls_KeyProp_t* prop)
+{
+    if (prop->word.value & MCUXCLELS_KEYPROPERTY_VALUE_ECSGN) {
+        return WC_KEYSTORE_KEY_ECC_SIGN;
+    }
+    if (prop->word.value & MCUXCLELS_KEYPROPERTY_VALUE_ECDH) {
+        return WC_KEYSTORE_KEY_ECC_DH;
+    }
+    if (prop->word.value & MCUXCLELS_KEYPROPERTY_VALUE_HMAC) {
+        return WC_KEYSTORE_KEY_HMAC;
+    }
+    if (prop->word.value & MCUXCLELS_KEYPROPERTY_VALUE_CMAC) {
+        return WC_KEYSTORE_KEY_CMAC;
+    }
+    if (prop->word.value & MCUXCLELS_KEYPROPERTY_VALUE_AES) {
+        return WC_KEYSTORE_KEY_AES;
+    }
+    /* Reported after the algorithm usages on purpose: a slot carrying both is
+     * more usefully described by what it computes than by what it wraps. */
+    if (prop->word.value & (MCUXCLELS_KEYPROPERTY_VALUE_KWK |
+                            MCUXCLELS_KEYPROPERTY_VALUE_KUOK)) {
+        return WC_KEYSTORE_KEY_WRAP;
+    }
+    if (prop->word.value & (MCUXCLELS_KEYPROPERTY_VALUE_CKDF |
+                            MCUXCLELS_KEYPROPERTY_VALUE_HKDF)) {
+        return WC_KEYSTORE_KEY_DERIVE;
+    }
+
+    return WC_KEYSTORE_KEY_NONE;
+}
+
+/* The facility's key type for a reference's class. */
+static word32 ElsKsTypeFromClass(byte keyClass)
+{
+    switch (keyClass) {
+        case WC_ELSPKC_KEY_ECC_SIGN: return WC_KEYSTORE_KEY_ECC_SIGN;
+        case WC_ELSPKC_KEY_ECC_DH:   return WC_KEYSTORE_KEY_ECC_DH;
+        case WC_ELSPKC_KEY_AES:      return WC_KEYSTORE_KEY_AES;
+        case WC_ELSPKC_KEY_HMAC:     return WC_KEYSTORE_KEY_HMAC;
+        case WC_ELSPKC_KEY_CMAC:     return WC_KEYSTORE_KEY_CMAC;
+        case WC_ELSPKC_KEY_KWK:      return WC_KEYSTORE_KEY_WRAP;
+        case WC_ELSPKC_KEY_CKDF:     /* fall through */
+        case WC_ELSPKC_KEY_HKDF:     return WC_KEYSTORE_KEY_DERIVE;
+        default:                     return WC_KEYSTORE_KEY_NONE;
+    }
+}
+
+/* Check the caller's stated keyType against what the target reference names.
+ * WC_KEYSTORE_KEY_NONE is unspecified, not a claim to disagree with. */
+static int ElsKsCheckType(word32 keyType, byte keyClass)
+{
+    if (keyType == WC_KEYSTORE_KEY_NONE) {
+        return 0;
+    }
+    if (keyType != ElsKsTypeFromClass(keyClass)) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+
+    return 0;
+}
+
+/* Key size in bits, from the two-bit size field. */
+static word32 ElsKsBitsFromProp(const mcuxClEls_KeyProp_t* prop)
+{
+    /* The 512-bit encoding only exists on parts with an internal public-key
+     * store; elsewhere the field holds 128 or 256 and nothing else. */
+    switch (prop->word.value & 0x3u) {
+        case MCUXCLELS_KEYPROPERTY_VALUE_KEY_SIZE_128:
+            return 128;
+        case MCUXCLELS_KEYPROPERTY_VALUE_KEY_SIZE_256:
+            return 256;
+#ifdef MCUXCL_FEATURE_ELS_PUK_INTERNAL
+        case MCUXCLELS_KEYPROPERTY_VALUE_KEY_SIZE_512:
+            return 512;
+#endif
+        default:
+            return 0;
+    }
+}
+
+/* Find room for a key that does not exist yet, since PSA's generate has no way
+ * for a caller to name a slot. The store is not empty on a fresh part, so the
+ * only safe test is the hardware's active bit, and a 256-bit key needs a
+ * consecutive pair. Advisory: reserve and generate together. */
+int wc_ElsPkc_ReserveSlot(byte keyClass, word32 keySz, wc_ElsPkc_KeyRef* ref)
+{
+    mcuxClEls_KeyProp_t prop;
+    int need;
+    int run = 0;
+    int slot;
+    int ret;
+
+    if (ref == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (ElsClassUsageBit(keyClass) == 0) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (keySz != 0 && keySz != ELS_KS_KEY_128_SZ &&
+        keySz != ELS_KS_KEY_256_SZ) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    /* The ECC classes are always a pair; every other class follows the size,
+     * which is why the caller has to state it. */
+    need = (keyClass == WC_ELSPKC_KEY_ECC_SIGN ||
+            keyClass == WC_ELSPKC_KEY_ECC_DH ||
+            keySz == ELS_KS_KEY_256_SZ) ? 2 : 1;
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    for (slot = 0; slot <= WC_ELSPKC_MAX_SLOT; slot++) {
+        ret = ElsKsProps((byte)slot, &prop);
+        if (ret != 0) {
+            break;
+        }
+        if (prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_ACTIVE) {
+            run = 0;
+            continue;
+        }
+        /* Free is not the same as usable: slots 0 and 1 are retention and
+         * slot 2 is hardware-out on this part. Only general purpose slots. */
+        if ((prop.word.value &
+             MCUXCLELS_KEYPROPERTY_VALUE_GENERAL_PURPOSE_SLOT) == 0) {
+            run = 0;
+            continue;
+        }
+        if (++run == need) {
+            XMEMSET(ref, 0, sizeof(*ref));
+            ref->keyClass = keyClass;
+            ref->slot     = (byte)(slot - (need - 1));
+            ElsUnlock();
+            return 0;
+        }
+    }
+
+    ElsUnlock();
+
+    return (ret == 0) ? WC_NO_ERR_TRACE(MEMORY_E) : ret;
+}
+
+/* Parse a reference and, when it must already exist, confirm the slot carries
+ * the permission its class claims. */
+static int ElsKsRef(const byte* ref, word32 refSz, byte expectClass,
+                    int mustExist, wc_ElsPkc_KeyRef* out)
+{
+    int ret = wc_ElsPkc_ParseKeyRef(ref, refSz, out);
+
+    if (ret != 0) {
+        return ret;
+    }
+    if (out->keyClass != expectClass) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+
+    return mustExist ? ElsCheckSlot(out, expectClass) : 0;
+}
+
+/* ukwk both wraps and unwraps, ukuok only unwraps, so an export needs more
+ * than an import does - the point of an unwrap-only key. */
+static int ElsKsWrapRef(const byte* ref, word32 refSz, int needWrap,
+                        wc_ElsPkc_KeyRef* out)
+{
+    mcuxClEls_KeyProp_t prop;
+    int ret = wc_ElsPkc_ParseKeyRef(ref, refSz, out);
+
+    if (ret != 0) {
+        return ret;
+    }
+    if (out->keyClass != WC_ELSPKC_KEY_KWK) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+    ret = ElsKsProps(out->slot, &prop);
+    if (ret != 0) {
+        return ret;
+    }
+    if ((prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_ACTIVE) == 0) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+    if (needWrap) {
+        if ((prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_KWK) == 0) {
+            return WC_NO_ERR_TRACE(BAD_STATE_E);
+        }
+    }
+    else if ((prop.word.value & (MCUXCLELS_KEYPROPERTY_VALUE_KWK |
+                                 MCUXCLELS_KEYPROPERTY_VALUE_KUOK)) == 0) {
+        return WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+
+    return 0;
+}
+
+/* A creation path must not destroy a key nobody asked to replace. Key
+ * generation already refuses an occupied target; import and derive use this to
+ * apply the same rule. Caller holds the lock. */
+static int ElsKsTargetFree(byte slot)
+{
+    mcuxClEls_KeyProp_t cur;
+    int ret;
+
+    ret = ElsKsProps(slot, &cur);
+    if (ret == 0 && (cur.word.value & MCUXCLELS_KEYPROPERTY_VALUE_ACTIVE)) {
+        ret = WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+
+    return ret;
+}
+
+static int ElsKsImportRun(const byte* blob, word32 blobSz, byte wrapSlot,
+                          byte targetSlot)
+{
+    mcuxClEls_KeyImportOption_t opt;
+
+    opt.word.value = 0u;
+    opt.bits.kfmt  = MCUXCLELS_KEYIMPORT_KFMT_RFC3394;
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_KeyImport_Async(
+        opt, blob, (size_t)blobSz, (mcuxClEls_KeyIndex_t)wrapSlot,
+        (mcuxClEls_KeyIndex_t)targetSlot));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_KeyImport_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+static int ElsKsExportRun(byte wrapSlot, byte keySlot, byte* out)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_KeyExport_Async(
+        (mcuxClEls_KeyIndex_t)wrapSlot, (mcuxClEls_KeyIndex_t)keySlot, out));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_KeyExport_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+static int ElsKsDeriveRun(byte srcSlot, byte targetSlot,
+                          mcuxClEls_KeyProp_t prop, const byte* deriv)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_Ckdf_Sp800108_Async(
+        (mcuxClEls_KeyIndex_t)srcSlot, (mcuxClEls_KeyIndex_t)targetSlot,
+        prop, deriv));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Ckdf_Sp800108_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+static int ElsKsDeleteRun(byte slot)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t,
+        mcuxClEls_KeyDelete_Async((mcuxClEls_KeyIndex_t)slot));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_KeyDelete_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+static int ElsKsImport(wc_CryptoInfo* info)
+{
+    wc_ElsPkc_KeyRef target, wrap;
+    int ret;
+
+    if (info->keystore.op.importWrapped.blob == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    /* Only this container shape. A bare RFC 3394 blob has no property word,
+     * so ELS would have nothing to set the imported key's permissions from. */
+    if (info->keystore.op.importWrapped.format != WC_KEYWRAP_FORMAT_VENDOR) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    if (info->keystore.op.importWrapped.blobSz != ELS_KS_BLOB_SZ(16) &&
+        info->keystore.op.importWrapped.blobSz != ELS_KS_BLOB_SZ(32)) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* The target need not exist yet - that is the point of an import - so its
+     * reference is parsed but not checked against the hardware. */
+    ret = wc_ElsPkc_ParseKeyRef(info->keystore.op.importWrapped.keyRef,
+                                info->keystore.op.importWrapped.keyRefSz,
+                                &target);
+    if (ret == 0) {
+        /* A cross-check, not a source: the container's property word decides.
+         * Catches the right blob aimed at the wrong slot, before the unwrap. */
+        ret = ElsKsCheckType(info->keystore.op.importWrapped.keyType,
+                             target.keyClass);
+    }
+    /* attrs is not consulted: the container's property word decides, and it is
+     * inside the wrap, so there is nothing to compare against yet. */
+    if (ret == 0) {
+        ret = ElsKsWrapRef(info->keystore.op.importWrapped.wrapKeyRef,
+                           info->keystore.op.importWrapped.wrapKeyRefSz,
+                           0, &wrap);
+    }
+    if (ret == 0) {
+        ret = ElsKsTargetFree(target.slot);
+    }
+    if (ret == 0 &&
+        info->keystore.op.importWrapped.blobSz ==
+            ELS_KS_BLOB_SZ(ELS_KS_KEY_256_SZ)) {
+        /* The container size is what says how many slots the key lands in,
+         * since the property word deciding that is still inside the wrap.
+         * A 256-bit key takes the pair, so the second slot has to be free
+         * too - and in range, since the reference names only the first. */
+        if (target.slot >= WC_ELSPKC_MAX_SLOT) {
+            ret = WC_NO_ERR_TRACE(BAD_STATE_E);
+        }
+        else {
+            ret = ElsKsTargetFree((byte)(target.slot + 1u));
+        }
+    }
+    if (ret == 0) {
+        ret = ElsKsImportRun(info->keystore.op.importWrapped.blob,
+                             info->keystore.op.importWrapped.blobSz,
+                             wrap.slot, target.slot);
+    }
+
+    ElsUnlock();
+
+    return ret;
+}
+
+static int ElsKsExport(wc_CryptoInfo* info)
+{
+    wc_ElsPkc_KeyRef key, wrap;
+    mcuxClEls_KeyProp_t prop;
+    word32 need = 0;
+    int ret;
+
+    if (info->keystore.op.exportWrapped.blobSz == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (info->keystore.op.exportWrapped.format != WC_KEYWRAP_FORMAT_VENDOR) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = wc_ElsPkc_ParseKeyRef(info->keystore.op.exportWrapped.keyRef,
+                                info->keystore.op.exportWrapped.keyRefSz,
+                                &key);
+    if (ret == 0) {
+        ret = ElsKsProps(key.slot, &prop);
+    }
+    if (ret == 0) {
+        word32 bits = ElsKsBitsFromProp(&prop);
+
+        if ((prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_ACTIVE) == 0) {
+            ret = WC_NO_ERR_TRACE(BAD_STATE_E);
+        }
+        /* wrpok is set at creation and cannot be added later, so a key that
+         * was not made exportable simply cannot leave. */
+        else if ((prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_WRPOK) == 0) {
+            ret = WC_NO_ERR_TRACE(BAD_STATE_E);
+        }
+        else if (bits != 128 && bits != 256) {
+            ret = WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+        }
+        else {
+            need = ELS_KS_BLOB_SZ(bits / 8u);
+
+            /* Size query: the caller asks how big the container will be.
+             * wc_KeyStore_ExportWrapped() defines this form as succeeding, so
+             * it returns 0 - LENGTH_ONLY_E is this port's own convention on
+             * wc_ElsPkc_MakeKeyRef() and does not belong at this boundary. */
+            if (info->keystore.op.exportWrapped.blob == NULL) {
+                *info->keystore.op.exportWrapped.blobSz = need;
+                ElsUnlock();
+                return 0;
+            }
+            if (*info->keystore.op.exportWrapped.blobSz < need) {
+                ret = WC_NO_ERR_TRACE(BUFFER_E);
+            }
+        }
+    }
+
+    if (ret == 0) {
+        ret = ElsKsWrapRef(info->keystore.op.exportWrapped.wrapKeyRef,
+                           info->keystore.op.exportWrapped.wrapKeyRefSz,
+                           1, &wrap);
+    }
+    if (ret == 0) {
+        ret = ElsKsExportRun(wrap.slot, key.slot,
+                             info->keystore.op.exportWrapped.blob);
+    }
+
+    ElsUnlock();
+
+    if (ret == 0) {
+        *info->keystore.op.exportWrapped.blobSz = need;
+    }
+
+    return ret;
+}
+
+static int ElsKsDerive(wc_CryptoInfo* info)
+{
+    wc_ElsPkc_KeyRef target, src;
+    mcuxClEls_KeyProp_t prop;
+    word32 keySz;
+    int ret;
+
+    if (info->keystore.op.derive.deriv == NULL ||
+        info->keystore.op.derive.derivSz != ELS_KS_DERIV_SZ) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    /* The engine has one KDF. Substituting it for the one the caller asked
+     * for would leave two peers deriving different keys with no diagnostic. */
+    if (info->keystore.op.derive.kdfType != WC_KDF_TYPE_NONE &&
+        info->keystore.op.derive.kdfType != WC_KDF_TYPE_TWOSTEP_CMAC) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    /* The only two sizes an ELS slot key can have. Zero takes the smaller,
+     * which is what the engine's zero-valued property word already encodes. */
+    keySz = info->keystore.op.derive.keySz;
+    if (keySz == 0) {
+        keySz = ELS_KS_KEY_128_SZ;
+    }
+    if (keySz != ELS_KS_KEY_128_SZ && keySz != ELS_KS_KEY_256_SZ) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* The source must already be a derivation key; the target is where the
+     * result lands and does not exist yet. */
+    ret = ElsKsRef(info->keystore.op.derive.srcKeyRef,
+                   info->keystore.op.derive.srcKeyRefSz,
+                   WC_ELSPKC_KEY_CKDF, 1, &src);
+    if (ret == 0) {
+        ret = wc_ElsPkc_ParseKeyRef(info->keystore.op.derive.keyRef,
+                                    info->keystore.op.derive.keyRefSz,
+                                    &target);
+    }
+    if (ret == 0) {
+        ret = ElsKsCheckType(info->keystore.op.derive.keyType,
+                             target.keyClass);
+    }
+    if (ret == 0) {
+        ret = ElsKsTargetFree(target.slot);
+    }
+    if (ret == 0 && keySz == ELS_KS_KEY_256_SZ) {
+        /* A 256-bit key occupies the slot pair, so the second one has to be
+         * free too - and in range, since the reference names only the first. */
+        if (target.slot >= WC_ELSPKC_MAX_SLOT) {
+            ret = WC_NO_ERR_TRACE(BAD_STATE_E);
+        }
+        else {
+            ret = ElsKsTargetFree((byte)(target.slot + 1u));
+        }
+    }
+    if (ret == 0) {
+        /* The derived key's permissions come from the target reference's
+         * class, which keyType has just been checked against. */
+        prop.word.value = 0u;
+        if (keySz == ELS_KS_KEY_256_SZ) {
+            prop.bits.ksize = MCUXCLELS_KEYPROPERTY_KEY_SIZE_256;
+        }
+        prop.bits.upprot_priv = MCUXCLELS_KEYPROPERTY_PRIVILEGED_FALSE;
+        prop.bits.upprot_sec  = MCUXCLELS_KEYPROPERTY_SECURE_FALSE;
+        prop.word.value |= ElsClassUsageBit(target.keyClass);
+        if (info->keystore.op.derive.attrs & WC_KEYSTORE_ATTR_EXPORTABLE) {
+            prop.bits.wrpok = MCUXCLELS_KEYPROPERTY_WRAP_TRUE;
+        }
+        if (target.keyClass == WC_ELSPKC_KEY_KWK &&
+            (info->keystore.op.derive.attrs & WC_KEYSTORE_ATTR_UNWRAP_ONLY)) {
+            /* An unwrap-only wrapping key: it can bring keys in and never
+             * take them out. */
+            prop.word.value &= ~MCUXCLELS_KEYPROPERTY_VALUE_KWK;
+            prop.word.value |= MCUXCLELS_KEYPROPERTY_VALUE_KUOK;
+        }
+
+        ret = ElsKsDeriveRun(src.slot, target.slot, prop,
+                             info->keystore.op.derive.deriv);
+    }
+
+    ElsUnlock();
+
+    return ret;
+}
+
+static int ElsKsDelete(wc_CryptoInfo* info)
+{
+    wc_ElsPkc_KeyRef key;
+    int ret = ElsLock();
+
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = wc_ElsPkc_ParseKeyRef(info->keystore.op.deleteKey.keyRef,
+                                info->keystore.op.deleteKey.keyRefSz, &key);
+    if (ret == 0) {
+        mcuxClEls_KeyProp_t prop;
+
+        ret = ElsKsProps(key.slot, &prop);
+        if (ret == 0) {
+            /* Deleting an empty slot is a caller mistake, and this part does
+             * not return errors for those. Nothing is destroyed either way. */
+            if ((prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_ACTIVE) == 0) {
+                ElsUnlock();
+                return 0;
+            }
+            ret = ElsKsDeleteRun(key.slot);
+        }
+    }
+
+    ElsUnlock();
+
+    return ret;
+}
+
+static int ElsKsGetInfo(wc_CryptoInfo* info)
+{
+    wc_ElsPkc_KeyRef key;
+    mcuxClEls_KeyProp_t prop;
+    int ret = ElsLock();
+
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = wc_ElsPkc_ParseKeyRef(info->keystore.op.getInfo.keyRef,
+                                info->keystore.op.getInfo.keyRefSz, &key);
+    if (ret == 0) {
+        ret = ElsKsProps(key.slot, &prop);
+    }
+
+    ElsUnlock();
+
+    if (ret == 0) {
+        if ((prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_ACTIVE) == 0) {
+            return WC_NO_ERR_TRACE(BAD_STATE_E);
+        }
+        if (info->keystore.op.getInfo.keyType != NULL) {
+            *info->keystore.op.getInfo.keyType = ElsKsTypeFromProp(&prop);
+        }
+        if (info->keystore.op.getInfo.keyBits != NULL) {
+            *info->keystore.op.getInfo.keyBits = ElsKsBitsFromProp(&prop);
+        }
+        if (info->keystore.op.getInfo.attrs != NULL) {
+            word32 a = 0;
+
+            if (prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_WRPOK) {
+                a |= WC_KEYSTORE_ATTR_EXPORTABLE;
+            }
+            if ((prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_KUOK) &&
+                !(prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_KWK)) {
+                a |= WC_KEYSTORE_ATTR_UNWRAP_ONLY;
+            }
+            if (prop.word.value & MCUXCLELS_KEYPROPERTY_VALUE_RETENTION_SLOT) {
+                a |= WC_KEYSTORE_ATTR_PERSISTENT;
+            }
+            *info->keystore.op.getInfo.attrs = a;
+        }
+    }
+
+    return ret;
+}
+
+#endif /* WOLF_CRYPTO_CB_KEYSTORE */
+
+/* ---------------------------------------------------------------------------
  * Random
  * ------------------------------------------------------------------------ */
 
@@ -3424,6 +4031,35 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
             }
             break;
 #endif /* HAVE_ECC || !NO_RSA || HAVE_CURVE25519 */
+
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+        case WC_ALGO_TYPE_KEYSTORE:
+            switch (info->keystore.type) {
+                /* No plaintext path in either direction: a key enters only as
+                 * an unwrapped blob or a derivation, and leaves only wrapped. */
+                case WC_KEYSTORE_IMPORT_PLAIN:
+                case WC_KEYSTORE_EXPORT_PLAIN:
+                    break;
+                case WC_KEYSTORE_IMPORT_WRAPPED:
+                    ret = ElsKsImport(info);
+                    break;
+                case WC_KEYSTORE_EXPORT_WRAPPED:
+                    ret = ElsKsExport(info);
+                    break;
+                case WC_KEYSTORE_DERIVE:
+                    ret = ElsKsDerive(info);
+                    break;
+                case WC_KEYSTORE_DELETE:
+                    ret = ElsKsDelete(info);
+                    break;
+                case WC_KEYSTORE_GET_INFO:
+                    ret = ElsKsGetInfo(info);
+                    break;
+                default:
+                    break;
+            }
+            break;
+#endif /* WOLF_CRYPTO_CB_KEYSTORE */
 
 #ifndef NO_AES
         case WC_ALGO_TYPE_CIPHER:
