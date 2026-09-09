@@ -54,7 +54,8 @@ see [README_SE050.md](./README_SE050.md).
 RW612 and related parts, through the crypto callback interface. The ELS
 peripheral serves SHA-256, SHA-384, SHA-512, AES (ECB/CBC/CTR), AES-GCM,
 CMAC, the DRBG, and ECDSA on P-256 for a key that names a slot; the PKC
-coprocessor serves RSA and X25519.
+coprocessor serves RSA, X25519, and ECDSA on every curve, P-256 included when
+the key holds ordinary material.
 
 Anything the hardware does not serve is declined with `CRYPTOCB_UNAVAILABLE`
 and completed in software, so an unsupported algorithm or key size costs
@@ -110,7 +111,7 @@ the free crypto-callback hook.
 
 ELS declines an ECDSA digest that is not a full 32 bytes - reachable, since
 `wc_ecc_sign_hash()` takes a digest of any length and a SHA-1 hash under
-P-256 is 20 bytes - so that signature is made in software.
+P-256 is 20 bytes - but the PKC then serves it, so it stays in hardware.
 
 **What the hardware declines**, so it runs in software instead: AES-192 (no
 ELS key size), any trailing partial block, and an AES-GCM IV other than 12
@@ -121,9 +122,10 @@ slot, which cannot be read back, while the wolfCrypt ECDH callback has to
 hand a buffer to its caller - so the callback declines and software answers.
 
 **The PKC uses a CTR_DRBG, not the ELS DRBG.** The ELS DRBG's security
-strength is 128 bits on this part, which the PKC's own key operations
-outgrow. A plain `wc_GenerateRandom()` is a different path and does reach the
-ELS DRBG directly. The PKC workarea is a fixed hardware region shared by
+strength is 128 bits on this part, so `mcuxClEcc_Sign` refuses P-384 and
+P-521 with `RNG_ERROR` - a failure that names the random source rather than
+the curve. A plain `wc_GenerateRandom()` is a different path and does reach
+the ELS DRBG directly. The PKC workarea is a fixed hardware region shared by
 every PKC consumer, which is why PKC work runs under the same lock as ELS.
 
 ### Vendor library
