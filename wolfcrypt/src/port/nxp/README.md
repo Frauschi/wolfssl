@@ -55,7 +55,10 @@ RW612 and related parts, through the crypto callback interface. The ELS
 peripheral serves SHA-256, SHA-384, SHA-512, AES (ECB/CBC/CTR), AES-GCM,
 CMAC, the DRBG, and ECDSA on P-256 for a key that names a slot; the PKC
 coprocessor serves RSA, X25519, and ECDSA on every curve, P-256 included when
-the key holds ordinary material.
+the key holds ordinary material. Five key store operations cover importing
+and exporting wrapped keys, deriving one key from another, deleting a key,
+and reading back what a slot holds. Generating happens through
+`wc_ecc_make_key()` instead.
 
 Anything the hardware does not serve is declined with `CRYPTOCB_UNAVAILABLE`
 and completed in software, so an unsupported algorithm or key size costs
@@ -120,6 +123,14 @@ bytes.
 **ECDH is not offloaded at all.** ELS deposits the agreed secret in a key
 slot, which cannot be read back, while the wolfCrypt ECDH callback has to
 hand a buffer to its caller - so the callback declines and software answers.
+An in-slot agreement would need `mcuxClEls_EccKeyExchange_Async` exposed
+through a key store operation, which this port does not yet do:
+`wc_KeyStore_Derive()` drives the SP800-108 CMAC KDF only, from a
+`WC_ELSPKC_KEY_CKDF` source, in either of the two sizes an ELS slot key can
+have - pass 16 or 32 bytes as `keySz`, or 0 for the 128-bit default. A
+256-bit key spans the slot pair, so the reference must name the first of two
+free slots. A slot generated as `WC_ELSPKC_KEY_ECC_DH` therefore has no
+consumer here yet.
 
 **The PKC uses a CTR_DRBG, not the ELS DRBG.** The ELS DRBG's security
 strength is 128 bits on this part, so `mcuxClEcc_Sign` refuses P-384 and
@@ -127,6 +138,12 @@ P-521 with `RNG_ERROR` - a failure that names the random source rather than
 the curve. A plain `wc_GenerateRandom()` is a different path and does reach
 the ELS DRBG directly. The PKC workarea is a fixed hardware region shared by
 every PKC consumer, which is why PKC work runs under the same lock as ELS.
+
+**Key store permissions are per-purpose.** `uaes` and `ucmac` are separate
+permission bits, so a slot holding both needs one reference per class, and
+`wrpok` is set at creation and cannot be added later - a key not made
+exportable can never leave. A generated key's public point is available only
+at the moment of generation; the hardware will not hand it back afterwards.
 
 ### Vendor library
 
