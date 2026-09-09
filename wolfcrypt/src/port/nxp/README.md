@@ -48,12 +48,13 @@ NOTE: Both can be defined with no problem.
 For details on wolfSSL integration with NXP SE050,
 see [README_SE050.md](./README_SE050.md).
 
-## NXP EdgeLock (ELS)
+## NXP EdgeLock (ELS + PKC)
 
 `els_pkc_port.c` offloads wolfCrypt to the EdgeLock subsystem found on the
 RW612 and related parts, through the crypto callback interface. The ELS
 peripheral serves SHA-256, SHA-384, SHA-512, AES (ECB/CBC/CTR), AES-GCM,
-CMAC, the DRBG, and ECDSA on P-256 for a key that names a slot.
+CMAC, the DRBG, and ECDSA on P-256 for a key that names a slot; the PKC
+coprocessor serves RSA.
 
 Anything the hardware does not serve is declined with `CRYPTOCB_UNAVAILABLE`
 and completed in software, so an unsupported algorithm or key size costs
@@ -118,6 +119,12 @@ bytes.
 **ECDH is not offloaded at all.** ELS deposits the agreed secret in a key
 slot, which cannot be read back, while the wolfCrypt ECDH callback has to
 hand a buffer to its caller - so the callback declines and software answers.
+
+**The PKC uses a CTR_DRBG, not the ELS DRBG.** The ELS DRBG's security
+strength is 128 bits on this part, which the PKC's own key operations
+outgrow. A plain `wc_GenerateRandom()` is a different path and does reach the
+ELS DRBG directly. The PKC workarea is a fixed hardware region shared by
+every PKC consumer, which is why PKC work runs under the same lock as ELS.
 
 ### Vendor library
 
