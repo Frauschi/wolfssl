@@ -8,6 +8,10 @@
 * Made `wc_falcon_check_key()` constant time, and cut Falcon key generation's peak heap by about 20% with a constant-time inversion of f. by @Frauschi
 * Added `--enable-falcon=smallest-mem`, a Falcon signer working in 20*n bytes (12KB peak heap at Falcon-512, 22KB at Falcon-1024). by @Frauschi
 
+## Hardware and Embedded Ports
+
+* Added an NXP EdgeLock (ELS) crypto callback port for the RW612 and related parts, in `wolfcrypt/src/port/nxp/els_pkc_port.c` behind `WOLFSSL_ELS_PKC`. The ELS peripheral serves SHA-256. Under Zephyr, turn it on with `CONFIG_WOLFSSL_ELS_PKC=y`. NXP's CLNS library is linked by the application and is neither built nor vendored here.
+
 # wolfSSL Release 5.9.4 (Sep 25, 2026)
 
 Release 5.9.4 has been developed according to wolfSSL's development and QA
