@@ -1660,6 +1660,350 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
 
 #endif /* HAVE_ECC */
 
+/* The PKC workarea is a fixed hardware region at PKC_RAM_ADDR shared with
+ * ELS, so PKC work runs under the ELS lock. */
+
+/* Shared by every PKC consumer - RSA, ECDSA and X25519 - so guarded on the
+ * union of them, not on RSA alone. */
+#if !defined(NO_RSA) || defined(HAVE_CURVE25519) || \
+    (defined(HAVE_ECC) && \
+     (defined(HAVE_ECC_SIGN) || defined(HAVE_ECC_VERIFY)))
+#define ELS_PKC_HAVE_SESSION
+
+#include <mcuxClSession.h>
+#include <mcuxClPkc_Types.h>   /* MCUXCLPKC_PACKARGS4, used by the ECC
+                                * domain-parameter packing macro */
+#include <mcuxClRandom.h>
+#include <mcuxClRandomModes.h>
+#if defined(HAVE_ECC) || defined(HAVE_CURVE25519)
+    /* Shared by the ECDSA and Montgomery-curve paths, either of which
+     * can be built without the other. */
+    #include <mcuxClEcc.h>
+#endif
+#ifndef NO_RSA
+    #include <mcuxClRsa.h>
+#endif
+
+/* Fixed PKC RAM window on rw61x, mirrored from the vendor platform header so a
+ * build that does not export ip_platform.h still gets the right region. */
+#ifndef WOLFSSL_ELS_PKC_RAM_ADDR
+    #define WOLFSSL_ELS_PKC_RAM_ADDR 0x5015A000u
+#endif
+#ifndef WOLFSSL_ELS_PKC_RAM_SIZE
+    #define WOLFSSL_ELS_PKC_RAM_SIZE 0x2000u
+#endif
+
+/* CLNS bookkeeping: RSA-4096 sign/verify needs 536 bytes, ECC 504. */
+#ifndef WOLFSSL_ELS_PKC_CPU_WA_SZ
+    #define WOLFSSL_ELS_PKC_CPU_WA_SZ 1024
+#endif
+
+static uint32_t elsPkcCpuWa[(WOLFSSL_ELS_PKC_CPU_WA_SZ + 3u) / 4u];
+static uint32_t elsPkcRngCtx[64];
+/* The vendor publishes the context size per mode; a bigger SDK context would
+ * otherwise overflow this .bss object silently. */
+wc_static_assert(sizeof(elsPkcRngCtx) >=
+                 MCUXCLRANDOMMODES_CTR_DRBG_AES256_CONTEXT_SIZE);
+
+/* The ELS DRBG is 128-bit, too weak for P-384/521; DRG.3 costs ~90ms, so it
+ * serves only RSA-4096 and orders over 32 bytes. Caller holds the lock. */
+static int ElsPkcRandomInit(mcuxClSession_Descriptor_t* sess, int need256)
+{
+    mcuxClRandom_Mode_t mode = need256
+                                   ? mcuxClRandomModes_Mode_CtrDrbg_AES256_DRG3
+                                   : mcuxClRandomModes_Mode_ELS_Drbg;
+
+    XMEMSET(elsPkcRngCtx, 0, sizeof(elsPkcRngCtx));
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(rr, rt, mcuxClRandom_init(
+        sess, (mcuxClRandom_Context_t)elsPkcRngCtx, mode));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClRandom_init) != rt) ||
+        (MCUXCLRANDOM_STATUS_OK != rr)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return 0;
+}
+
+static int ElsPkcRandomNcInit(mcuxClSession_Descriptor_t* sess)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(pr, pt, mcuxClRandom_ncInit(sess));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClRandom_ncInit) != pt) ||
+        (MCUXCLRANDOM_STATUS_OK != pr)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return 0;
+}
+
+static int ElsPkcSessionInit(mcuxClSession_Descriptor_t* sess)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(sr, st, mcuxClSession_init(
+        sess, elsPkcCpuWa, WOLFSSL_ELS_PKC_CPU_WA_SZ,
+        (uint32_t*)WOLFSSL_ELS_PKC_RAM_ADDR, WOLFSSL_ELS_PKC_RAM_SIZE));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClSession_init) != st) ||
+        (MCUXCLSESSION_STATUS_OK != sr)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return 0;
+}
+
+/* Bring up a session over the shared workareas. Caller holds the lock. */
+static int ElsPkcSessionOpen(mcuxClSession_Descriptor_t* sess, int need256)
+{
+    int ret = ElsPkcSessionInit(sess);
+
+    if (ret == 0) {
+        ret = ElsPkcRandomInit(sess, need256);
+    }
+    if (ret == 0) {
+        ret = ElsPkcRandomNcInit(sess);
+    }
+
+    return ret;
+}
+
+/* Pair every Open: CLNS wipes the work areas, including key material left
+ * in the shared PKC window. Best effort. */
+/* Only while the peripheral is up: writing the PKC window unclocked faults
+ * the bus. Caller holds the lock. */
+static void ElsCleanupSession(void)
+{
+    ForceZero(elsPkcRngCtx, sizeof(elsPkcRngCtx));
+    ForceZero(elsPkcCpuWa, sizeof(elsPkcCpuWa));
+    ForceZero((void*)(wc_ptr_t)WOLFSSL_ELS_PKC_RAM_ADDR,
+              WOLFSSL_ELS_PKC_RAM_SIZE);
+}
+
+static void ElsPkcSessionClose(mcuxClSession_Descriptor_t* sess)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(ur, ut, mcuxClRandom_uninit(sess));
+    (void)ur;
+    (void)ut;
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(cr, ct, mcuxClSession_cleanup(sess));
+    (void)cr;
+    (void)ct;
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(dr, dt, mcuxClSession_destroy(sess));
+    (void)dr;
+    (void)dt;
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+}
+
+#ifndef NO_RSA
+
+/* Export an mp_int as a fixed-width big-endian string, which is the only form
+ * the vendor key entries accept. */
+static int ElsPkcMpToBin(mp_int* a, byte* out, word32 len)
+{
+    if (mp_unsigned_bin_size(a) > (int)len) {
+        return WC_NO_ERR_TRACE(BUFFER_E);
+    }
+
+    return mp_to_unsigned_bin_len(a, out, (int)len);
+}
+
+/* RSAVP1: the raw public operation, out = in^e mod n. */
+static int ElsPkcRsaPublic(mcuxClSession_Descriptor_t* sess,
+                           mcuxClRsa_Key* k, const byte* in, word32 modLen,
+                           byte* out)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClRsa_verify(
+        sess, k, NULL, 0u, (mcuxCl_Buffer_t)(uintptr_t)in,
+        (mcuxClRsa_SignVerifyMode)&mcuxClRsa_Mode_Verify_NoVerify,
+        0u, 0u, out));
+    /* RSAVP1 reports VERIFYPRIMITIVE_OK, not VERIFY_OK - the latter belongs to
+     * the padded modes. */
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClRsa_verify) != t) ||
+        ((MCUXCLRSA_STATUS_VERIFYPRIMITIVE_OK != r) &&
+         (MCUXCLRSA_STATUS_VERIFY_OK != r))) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    (void)modLen;
+
+    return 0;
+}
+
+/* RSASP1: the raw private operation, out = in^d mod n (by CRT when possible). */
+static int ElsPkcRsaPrivate(mcuxClSession_Descriptor_t* sess,
+                            mcuxClRsa_Key* k, const byte* in, word32 modLen,
+                            byte* out)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClRsa_sign(
+        sess, k, in, modLen,
+        (mcuxClRsa_SignVerifyMode)&mcuxClRsa_Mode_Sign_NoEncode,
+        0u, 0u, out));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClRsa_sign) != t) ||
+        (MCUXCLRSA_STATUS_SIGN_OK != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return 0;
+}
+
+/* RSA at the raw primitive, beneath padding: NoVerify and NoEncode. */
+/* Mirror rsa.h's conditions for the p/q and dP/dQ/u members. */
+#if !defined(WOLFSSL_RSA_PUBLIC_ONLY) && \
+    (defined(WOLFSSL_KEY_GEN) || defined(OPENSSL_EXTRA) || \
+     !defined(RSA_LOW_MEM))
+    #define ELS_PKC_RSA_HAVE_CRT
+#endif
+
+/* Whether the key carries a full CRT set. */
+#ifdef ELS_PKC_RSA_HAVE_CRT
+static int ElsPkcRsaHaveCrt(const RsaKey* key)
+{
+    return mp_unsigned_bin_size((mp_int*)&key->p)  > 0 &&
+           mp_unsigned_bin_size((mp_int*)&key->q)  > 0 &&
+           mp_unsigned_bin_size((mp_int*)&key->dP) > 0 &&
+           mp_unsigned_bin_size((mp_int*)&key->dQ) > 0 &&
+           mp_unsigned_bin_size((mp_int*)&key->u)  > 0;
+}
+#endif
+
+static int ElsPkcRsaFunction(const byte* in, word32 inLen, byte* out,
+                             word32* outLen, int type, RsaKey* key)
+{
+    mcuxClSession_Descriptor_t sess;
+    mcuxClRsa_Key      rsaKey;
+    mcuxClRsa_KeyEntry_t e1, e4;
+#ifdef ELS_PKC_RSA_HAVE_CRT
+    mcuxClRsa_KeyEntry_t e2, e3, e5;   /* the CRT-only entries */
+#endif
+    byte*  buf = NULL;
+    word32 modLen;
+    int    isPrivate;
+    int    ret;
+
+    if (in == NULL || out == NULL || outLen == NULL || key == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+
+    modLen = (word32)mp_unsigned_bin_size(&key->n);
+    /* The engine covers 512..4096-bit moduli in multiples of 8 bits. Anything
+     * else, including a modulus wolfCrypt would accept, goes to software. */
+    if (modLen < 64 || modLen > 512 || inLen != modLen) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    if (*outLen < modLen) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    isPrivate = (type == RSA_PRIVATE_DECRYPT || type == RSA_PRIVATE_ENCRYPT);
+#ifdef WOLFSSL_RSA_PUBLIC_ONLY
+    /* RsaKey carries no private members at all in this build. */
+    if (isPrivate) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+#endif
+
+    /* One scratch block holds every key entry, sized for the CRT case: five
+     * entries of at most half a modulus each, plus the modulus itself. */
+    buf = (byte*)XMALLOC(modLen * 4u, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
+    if (buf == NULL) {
+        return WC_NO_ERR_TRACE(MEMORY_E);
+    }
+    XMEMSET(buf, 0, modLen * 4u);
+    XMEMSET(&rsaKey, 0, sizeof(rsaKey));
+
+    if (!isPrivate) {
+        /* public: N and E */
+        e1.pKeyEntryData = buf;
+        e1.keyEntryLength = modLen;
+        ret = ElsPkcMpToBin(&key->n, e1.pKeyEntryData, modLen);
+
+        if (ret == 0) {
+            word32 eLen = (word32)mp_unsigned_bin_size(&key->e);
+            e4.pKeyEntryData = buf + modLen;
+            e4.keyEntryLength = eLen;
+            ret = ElsPkcMpToBin(&key->e, e4.pKeyEntryData, eLen);
+        }
+        rsaKey.keytype = MCUXCLRSA_KEY_PUBLIC;
+        rsaKey.pMod1 = &e1;
+        rsaKey.pExp1 = &e4;
+    }
+#ifndef WOLFSSL_RSA_PUBLIC_ONLY
+    else {
+        /* All five CRT factors are required: ElsPkcMpToBin() writes an empty
+         * mp_int as zeros. */
+        word32 half = (modLen + 1u) / 2u;
+
+#ifdef ELS_PKC_RSA_HAVE_CRT
+        if (ElsPkcRsaHaveCrt(key)) {
+            e1.pKeyEntryData = buf;              e1.keyEntryLength = half;
+            e2.pKeyEntryData = buf + half;       e2.keyEntryLength = half;
+            e3.pKeyEntryData = buf + 2u * half;  e3.keyEntryLength = half;
+            e4.pKeyEntryData = buf + 3u * half;  e4.keyEntryLength = half;
+            e5.pKeyEntryData = buf + 4u * half;  e5.keyEntryLength = half;
+
+            ret = ElsPkcMpToBin(&key->p, e1.pKeyEntryData, half);
+            if (ret == 0) ret = ElsPkcMpToBin(&key->q,  e2.pKeyEntryData, half);
+            if (ret == 0) ret = ElsPkcMpToBin(&key->u,  e3.pKeyEntryData, half);
+            if (ret == 0) ret = ElsPkcMpToBin(&key->dP, e4.pKeyEntryData, half);
+            if (ret == 0) ret = ElsPkcMpToBin(&key->dQ, e5.pKeyEntryData, half);
+
+            rsaKey.keytype = MCUXCLRSA_KEY_PRIVATECRT;
+            rsaKey.pMod1 = &e1;
+            rsaKey.pMod2 = &e2;
+            rsaKey.pQInv = &e3;
+            rsaKey.pExp1 = &e4;
+            rsaKey.pExp2 = &e5;
+        }
+        else
+#endif /* ELS_PKC_RSA_HAVE_CRT */
+        {
+            e1.pKeyEntryData = buf;           e1.keyEntryLength = modLen;
+            e4.pKeyEntryData = buf + modLen;  e4.keyEntryLength = modLen;
+
+            ret = ElsPkcMpToBin(&key->n, e1.pKeyEntryData, modLen);
+            if (ret == 0) ret = ElsPkcMpToBin(&key->d, e4.pKeyEntryData, modLen);
+
+            rsaKey.keytype = MCUXCLRSA_KEY_PRIVATEPLAIN;
+            rsaKey.pMod1 = &e1;
+            rsaKey.pExp1 = &e4;
+        }
+    }
+#endif /* !WOLFSSL_RSA_PUBLIC_ONLY */
+
+    if (ret == 0) {
+        ret = ElsLock();
+    }
+    if (ret == 0) {
+        /* Only the private operation blinds from the DRBG. */
+        ret = ElsPkcSessionOpen(&sess, isPrivate && modLen >= 512u);
+        if (ret == 0) {
+            ret = isPrivate
+                ? ElsPkcRsaPrivate(&sess, &rsaKey, in, modLen, out)
+                : ElsPkcRsaPublic(&sess, &rsaKey, in, modLen, out);
+            ElsPkcSessionClose(&sess);
+        }
+        ElsUnlock();
+    }
+
+    if (ret == 0) {
+        *outLen = modLen;
+    }
+
+    ForceZero(buf, modLen * 4u);
+    XFREE(buf, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
+
+    return ret;
+}
+
+#endif /* !NO_RSA */
+
+#endif /* ELS_PKC_HAVE_SESSION */
+
 /* Serving WC_ALGO_TYPE_SEED as well as _RNG means wolfCrypt's own Hash-DRBG is
  * seeded from the hardware, not just the direct generate path. */
 
@@ -2113,9 +2457,17 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
             break;
 #endif
 
-#ifdef HAVE_ECC
+#if defined(HAVE_ECC) || !defined(NO_RSA)
         case WC_ALGO_TYPE_PK:
             switch (info->pk.type) {
+    #ifndef NO_RSA
+                case WC_PK_TYPE_RSA:
+                    ret = ElsPkcRsaFunction(info->pk.rsa.in,
+                            info->pk.rsa.inLen, info->pk.rsa.out,
+                            info->pk.rsa.outLen, info->pk.rsa.type,
+                            info->pk.rsa.key);
+                    break;
+    #endif
     /* info->pk.eckg itself is declared under HAVE_ECC_DHE. */
     #if defined(HAVE_ECC) && defined(HAVE_ECC_KEY_IMPORT) && \
         defined(HAVE_ECC_DHE)
@@ -2159,7 +2511,7 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
                     break;
             }
             break;
-#endif /* HAVE_ECC */
+#endif /* HAVE_ECC || !NO_RSA */
 
 #ifndef NO_AES
         case WC_ALGO_TYPE_CIPHER:
@@ -2371,6 +2723,9 @@ int wc_ElsPkc_Cleanup(void)
         /* Close the gate under the lock. The mutex outlives cleanup, since a
          * blocked caller still has to unlock it. */
         if (wc_LockMutex(&elsLock) == 0) {
+#ifdef ELS_PKC_HAVE_SESSION
+            ElsCleanupSession();
+#endif
             elsReady = 0;
             ElsIrqDisarm();
             (void)wc_UnLockMutex(&elsLock);
