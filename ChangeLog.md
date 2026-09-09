@@ -28,7 +28,7 @@
 
 ## Hardware and Embedded Ports
 
-* Added an NXP EdgeLock (ELS) crypto callback port for the RW612 and related parts, in `wolfcrypt/src/port/nxp/els_pkc_port.c` behind `WOLFSSL_ELS_PKC`. The ELS peripheral serves SHA-256/384/512, AES (ECB/CBC/CTR), AES-GCM, CMAC and the DRBG. Under Zephyr, turn it on with `CONFIG_WOLFSSL_ELS_PKC=y`. NXP's CLNS library is linked by the application and is neither built nor vendored here.
+* Added an NXP EdgeLock (ELS) crypto callback port for the RW612 and related parts, in `wolfcrypt/src/port/nxp/els_pkc_port.c` behind `WOLFSSL_ELS_PKC`. The ELS peripheral serves SHA-256/384/512, AES (ECB/CBC/CTR), AES-GCM, CMAC, the DRBG and ECDSA on P-256 from a key slot. Under Zephyr, turn it on with `CONFIG_WOLFSSL_ELS_PKC=y`. NXP's CLNS library is linked by the application and is neither built nor vendored here.
 
 # wolfSSL Release 5.9.4 (Sep 25, 2026)
 
