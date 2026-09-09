@@ -300,6 +300,9 @@ extern "C" {
     #ifndef WOLF_CRYPTO_CB
         #define WOLF_CRYPTO_CB
     #endif
+    #ifndef WOLF_CRYPTO_CB_KEYSTORE
+        #define WOLF_CRYPTO_CB_KEYSTORE
+    #endif
 #endif
 
 /* ------------------------------------------------------------------------- */
