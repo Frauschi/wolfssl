@@ -1216,6 +1216,82 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
 #endif /* !NO_AES */
 
 /* ---------------------------------------------------------------------------
+ * Random
+ * ------------------------------------------------------------------------ */
+
+/* Serving WC_ALGO_TYPE_SEED as well as _RNG means wolfCrypt's own Hash-DRBG is
+ * seeded from the hardware, not just the direct generate path. */
+
+#ifndef WC_NO_RNG
+
+/* Issue one DRBG request. Caller holds the lock, and len must already satisfy
+ * the engine's contract. */
+static int ElsRandomRun(byte* out, word32 len)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t,
+        mcuxClEls_Rng_DrbgRequest_Async(out, (size_t)len));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_Rng_DrbgRequest_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+static int ElsRandom(byte* out, word32 sz)
+{
+    /* The DRBG takes at least four bytes and only whole words; with the
+     * driver's parameter checks compiled out a sub-word length would program
+     * the DMA past the end of the caller's buffer. Odd sizes are ordinary
+     * (wc_RNG_GenerateByte), so the tail comes from a word-sized scratch. */
+    ALIGN32 byte tail[MCUXCLELS_RNG_DRBG_TEST_EXTRACT_OUTPUT_MIN_SIZE];
+    word32 whole;
+    word32 rest;
+    int ret;
+
+    if (out == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (sz == 0) {
+        return 0;
+    }
+
+    whole = sz & ~(word32)(sizeof(tail) - 1u);
+    rest  = sz - whole;
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* One request is capped; the caller's size is not. */
+    while (ret == 0 && whole > 0) {
+        word32 chunk = whole;
+        if (chunk > MCUXCLELS_RNG_DRBG_TEST_EXTRACT_OUTPUT_MAX_SIZE) {
+            chunk = MCUXCLELS_RNG_DRBG_TEST_EXTRACT_OUTPUT_MAX_SIZE;
+        }
+        ret = ElsRandomRun(out, chunk);
+        out   += chunk;
+        whole -= chunk;
+    }
+    if (ret == 0 && rest > 0) {
+        ret = ElsRandomRun(tail, (word32)sizeof(tail));
+        if (ret == 0) {
+            XMEMCPY(out, tail, rest);
+        }
+    }
+
+    ElsUnlock();
+
+    ForceZero(tail, sizeof(tail));
+
+    return ret;
+}
+
+#endif /* !WC_NO_RNG */
+
+/* ---------------------------------------------------------------------------
  * AES-CMAC
  * ------------------------------------------------------------------------ */
 
@@ -1576,6 +1652,16 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
             }
             /* the one-shot form (key + in + out together) is left to software:
              * it would need init/update/final stitched here for no gain */
+            break;
+#endif
+
+#ifndef WC_NO_RNG
+        case WC_ALGO_TYPE_RNG:
+            ret = ElsRandom(info->rng.out, info->rng.sz);
+            break;
+
+        case WC_ALGO_TYPE_SEED:
+            ret = ElsRandom(info->seed.seed, info->seed.sz);
             break;
 #endif
 
