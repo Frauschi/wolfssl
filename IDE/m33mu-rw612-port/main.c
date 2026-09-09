@@ -1,0 +1,408 @@
+/* main.c
+ *
+ * Copyright (C) 2006-2026 wolfSSL Inc.
+ *
+ * This file is part of wolfSSL.
+ *
+ * wolfSSL is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * wolfSSL is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
+ */
+
+/* Bare-metal checks for the EdgeLock port under m33mu. BKPT 0x7f is a pass;
+ * README.md lists the other immediates. */
+
+#include <wolfssl/wolfcrypt/settings.h>
+#include <wolfssl/wolfcrypt/types.h>
+#include <wolfssl/wolfcrypt/error-crypt.h>
+#include <wolfssl/wolfcrypt/sha256.h>
+#include <wolfssl/wolfcrypt/aes.h>
+#include <wolfssl/wolfcrypt/cmac.h>
+#include <wolfssl/wolfcrypt/ecc.h>
+#include <wolfssl/wolfcrypt/random.h>
+#include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
+
+#include <string.h>
+#include <stdint.h>
+
+#define BKPT(imm) __asm volatile("bkpt %0" :: "I"(imm))
+
+static void spin_forever(void)
+{
+    while (1) {
+    }
+}
+
+static int failures = 0;
+
+#define CHECK(cond) do { if (!(cond)) { failures++; return -1; } } while (0)
+
+/* The blob is attacker-reachable in the wolfPSA flow, so every malformed shape
+ * must be rejected as content before anything treats the slot as real. */
+static int check_keyref(void)
+{
+    wc_ElsPkc_KeyRef ref;
+    wc_ElsPkc_KeyRef out;
+    byte blob[WC_ELSPKC_KEYREF_SZ + 65];
+    word32 sz;
+    int i;
+
+    XMEMSET(&ref, 0, sizeof(ref));
+    ref.keyClass = WC_ELSPKC_KEY_ECC_SIGN;
+    ref.slot     = 4;
+    ref.flags    = WC_ELSPKC_REF_FLAG_BIND | WC_ELSPKC_REF_FLAG_EXPORTABLE;
+    for (i = 0; i < WC_ELSPKC_BIND_SZ; i++) {
+        ref.bind[i] = (byte)(0xA0 + i);
+    }
+
+    /* size query */
+    sz = 0;
+    CHECK(wc_ElsPkc_MakeKeyRef(&ref, NULL, &sz) == WC_NO_ERR_TRACE(LENGTH_ONLY_E));
+    CHECK(sz == WC_ELSPKC_KEYREF_SZ);
+
+    /* round trip */
+    sz = sizeof(blob);
+    CHECK(wc_ElsPkc_MakeKeyRef(&ref, blob, &sz) == 0);
+    CHECK(sz == WC_ELSPKC_KEYREF_SZ);
+
+    XMEMSET(&out, 0, sizeof(out));
+    CHECK(wc_ElsPkc_ParseKeyRef(blob, sz, &out) == 0);
+    CHECK(out.keyClass == ref.keyClass);
+    CHECK(out.slot == ref.slot);
+    CHECK(out.flags == ref.flags);
+    CHECK(XMEMCMP(out.bind, ref.bind, WC_ELSPKC_BIND_SZ) == 0);
+
+    /* a longer buffer is accepted: wolfPSA stores the public point after it */
+    XMEMSET(blob + WC_ELSPKC_KEYREF_SZ, 0x5A, 65);
+    CHECK(wc_ElsPkc_ParseKeyRef(blob, WC_ELSPKC_KEYREF_SZ + 65, &out) == 0);
+    CHECK(out.slot == ref.slot);
+
+    /* truncated */
+    CHECK(wc_ElsPkc_ParseKeyRef(blob, WC_ELSPKC_KEYREF_SZ - 1, &out) != 0);
+
+    /* wrong magic */
+    sz = sizeof(blob);
+    CHECK(wc_ElsPkc_MakeKeyRef(&ref, blob, &sz) == 0);
+    blob[0] ^= 0xFF;
+    CHECK(wc_ElsPkc_ParseKeyRef(blob, sz, &out) == WC_NO_ERR_TRACE(BAD_STATE_E));
+
+    /* unknown version */
+    sz = sizeof(blob);
+    CHECK(wc_ElsPkc_MakeKeyRef(&ref, blob, &sz) == 0);
+    blob[2] = WC_ELSPKC_KEYREF_VER + 7;
+    CHECK(wc_ElsPkc_ParseKeyRef(blob, sz, &out) == WC_NO_ERR_TRACE(BAD_STATE_E));
+
+    /* slot past the end of the key store */
+    ref.slot = WC_ELSPKC_MAX_SLOT + 1;
+    sz = sizeof(blob);
+    CHECK(wc_ElsPkc_MakeKeyRef(&ref, blob, &sz) != 0 ||
+          wc_ElsPkc_ParseKeyRef(blob, sz, &out) == WC_NO_ERR_TRACE(BAD_STATE_E));
+    ref.slot = 4;
+
+    /* unassigned key class */
+    ref.keyClass = WC_ELSPKC_KEY_NONE;
+    sz = sizeof(blob);
+    CHECK(wc_ElsPkc_MakeKeyRef(&ref, blob, &sz) != 0 ||
+          wc_ElsPkc_ParseKeyRef(blob, sz, &out) == WC_NO_ERR_TRACE(BAD_STATE_E));
+
+    ref.keyClass = 0x7E;
+    sz = sizeof(blob);
+    CHECK(wc_ElsPkc_MakeKeyRef(&ref, blob, &sz) != 0 ||
+          wc_ElsPkc_ParseKeyRef(blob, sz, &out) == WC_NO_ERR_TRACE(BAD_STATE_E));
+    ref.keyClass = WC_ELSPKC_KEY_ECC_SIGN;
+
+    /* undefined flag bits, on either side of the codec */
+    ref.flags = 0x80;
+    sz = sizeof(blob);
+    CHECK(wc_ElsPkc_MakeKeyRef(&ref, blob, &sz) == WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ref.flags = WC_ELSPKC_REF_FLAG_BIND;
+    sz = sizeof(blob);
+    CHECK(wc_ElsPkc_MakeKeyRef(&ref, blob, &sz) == 0);
+    blob[5] |= 0x80;
+    CHECK(wc_ElsPkc_ParseKeyRef(blob, sz, &out) == WC_NO_ERR_TRACE(BAD_STATE_E));
+
+    /* reserved bytes */
+    blob[5] &= 0x7F;
+    blob[6] = 1;
+    CHECK(wc_ElsPkc_ParseKeyRef(blob, sz, &out) == WC_NO_ERR_TRACE(BAD_STATE_E));
+
+    /* bind bytes without the bind flag */
+    ref.flags = 0;
+    sz = sizeof(blob);
+    CHECK(wc_ElsPkc_MakeKeyRef(&ref, blob, &sz) == 0);
+    blob[8] = 1;
+    CHECK(wc_ElsPkc_ParseKeyRef(blob, sz, &out) == WC_NO_ERR_TRACE(BAD_STATE_E));
+
+    return 0;
+}
+
+/* A slot key has no software copy, so a shape the hardware cannot serve must
+ * fail with its own error rather than fall through to MISSING_KEY. */
+static int check_slot_keys(void)
+{
+    wc_ElsPkc_KeyRef ref;
+    Aes aes;
+
+    XMEMSET(&ref, 0, sizeof(ref));
+    ref.keyClass = WC_ELSPKC_KEY_KWK;
+    ref.slot     = 12;
+    CHECK(wc_ElsPkc_AesUseSlot(&aes, &ref, NULL, WOLFSSL_ELS_PKC_DEVID) ==
+          WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+
+#ifdef HAVE_AESGCM
+    {
+        static const byte iv16[16] = { 0 };
+        byte data[16] = { 0 };
+        byte tag[16];
+        int ret;
+
+        ref.keyClass = WC_ELSPKC_KEY_AES;
+        CHECK(wc_ElsPkc_AesUseSlot(&aes, &ref, NULL,
+                                   WOLFSSL_ELS_PKC_DEVID) == 0);
+        ret = wc_AesGcmEncrypt(&aes, data, data, sizeof(data), iv16,
+                               sizeof(iv16), tag, sizeof(tag), NULL, 0);
+        wc_AesFree(&aes);
+        CHECK(ret == WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    }
+#endif
+
+    return 0;
+}
+
+static int foreign_cb(int devId, wc_CryptoInfo* info, void* ctx)
+{
+    (void)devId;
+    (void)info;
+    (void)ctx;
+    return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+}
+
+/* A repeated init keeps the port's own registration; another callback on its
+ * devId makes init fail instead of being adopted. */
+static int check_registration(void)
+{
+    CHECK(wc_ElsPkc_Init() == 0);
+    CHECK(wc_ElsPkc_Cleanup() == 0);
+    CHECK(wc_CryptoCb_RegisterDevice(WOLFSSL_ELS_PKC_DEVID, foreign_cb,
+                                     NULL) == 0);
+    CHECK(wc_ElsPkc_Init() != 0);
+    wc_CryptoCb_UnRegisterDevice(WOLFSSL_ELS_PKC_DEVID);
+    CHECK(wc_ElsPkc_Init() == 0);
+
+    return 0;
+}
+
+#ifndef WC_NO_RNG
+extern volatile unsigned int els_stub_drbg_calls;
+
+/* wc_InitRng() names no device; its seed must still come from the ELS DRBG. */
+static int check_rng_seed(void)
+{
+    WC_RNG rng;
+    unsigned int before = els_stub_drbg_calls;
+
+    CHECK(wc_InitRng(&rng) != 0);
+    CHECK(els_stub_drbg_calls != before);
+
+    return 0;
+}
+#endif
+
+/* With every CLNS call failing, the port's devId must return an error while
+ * the default devId still computes the right answer. */
+
+/* NIST FIPS 180-4, SHA-256 of "abc" */
+static const byte abc[3] = { 'a', 'b', 'c' };
+static const byte abcDigest[WC_SHA256_DIGEST_SIZE] = {
+    0xBA,0x78,0x16,0xBF,0x8F,0x01,0xCF,0xEA,
+    0x41,0x41,0x40,0xDE,0x5D,0xAE,0x22,0x23,
+    0xB0,0x03,0x61,0xA3,0x96,0x17,0x7A,0x9C,
+    0xB4,0x10,0xFF,0x61,0xF2,0x00,0x15,0xAD
+};
+
+static int sha256_once(int devId, byte* digest)
+{
+    wc_Sha256 sha;
+    int ret;
+
+    ret = wc_InitSha256_ex(&sha, NULL, devId);
+    if (ret != 0) {
+        return ret;
+    }
+    ret = wc_Sha256Update(&sha, abc, sizeof(abc));
+    if (ret == 0) {
+        ret = wc_Sha256Final(&sha, digest);
+    }
+    wc_Sha256Free(&sha);
+
+    return ret;
+}
+
+static int check_fails_closed(void)
+{
+    byte digest[WC_SHA256_DIGEST_SIZE];
+
+    /* through the port, with the hardware failing: an error, not a digest */
+    XMEMSET(digest, 0, sizeof(digest));
+    CHECK(sha256_once(WOLFSSL_ELS_PKC_DEVID, digest) != 0);
+
+    /* and it must not have produced the right answer by accident either, or
+     * the check above would be passing for the wrong reason */
+    CHECK(XMEMCMP(digest, abcDigest, sizeof(abcDigest)) != 0);
+
+    return 0;
+}
+
+static int check_software_path(void)
+{
+    byte digest[WC_SHA256_DIGEST_SIZE];
+
+    /* the port is registered, but this operation never asked for it */
+    XMEMSET(digest, 0, sizeof(digest));
+    CHECK(sha256_once(INVALID_DEVID, digest) == 0);
+    CHECK(XMEMCMP(digest, abcDigest, sizeof(abcDigest)) == 0);
+
+#ifdef WOLFSSL_CMAC
+    {
+        /* NIST SP 800-38B, AES-128 CMAC of the empty message */
+        static const byte cmacKey[16] = {
+            0x2B,0x7E,0x15,0x16,0x28,0xAE,0xD2,0xA6,
+            0xAB,0xF7,0x15,0x88,0x09,0xCF,0x4F,0x3C
+        };
+        static const byte cmacEmpty[16] = {
+            0xBB,0x1D,0x69,0x29,0xE9,0x59,0x37,0x28,
+            0x7F,0xA3,0x7D,0x12,0x9B,0x75,0x67,0x46
+        };
+        Cmac cmac;
+        byte mac[16];
+        word32 macSz = sizeof(mac);
+
+        CHECK(wc_InitCmac_ex(&cmac, cmacKey, sizeof(cmacKey), WC_CMAC_AES,
+                             NULL, NULL, INVALID_DEVID) == 0);
+        CHECK(wc_CmacFinal(&cmac, mac, &macSz) == 0);
+        CHECK(macSz == sizeof(cmacEmpty));
+        CHECK(XMEMCMP(mac, cmacEmpty, sizeof(cmacEmpty)) == 0);
+    }
+#endif
+
+#ifdef HAVE_AESGCM
+    {
+        /* NIST GCM test case 2: 128-bit zero key, zero IV, 16 zero bytes */
+        static const byte gcmKey[16] = { 0 };
+        static const byte gcmIv[12]  = { 0 };
+        static const byte gcmPlain[16] = { 0 };
+        static const byte gcmCipher[16] = {
+            0x03,0x88,0xDA,0xCE,0x60,0xB6,0xA3,0x92,
+            0xF3,0x28,0xC2,0xB9,0x71,0xB2,0xFE,0x78
+        };
+        static const byte gcmTag[16] = {
+            0xAB,0x6E,0x47,0xD4,0x2C,0xEC,0x13,0xBD,
+            0xF5,0x3A,0x67,0xB2,0x12,0x57,0xBD,0xDF
+        };
+        Aes aes;
+        byte ct[16];
+        byte tag[16];
+
+        CHECK(wc_AesInit(&aes, NULL, INVALID_DEVID) == 0);
+        CHECK(wc_AesGcmSetKey(&aes, gcmKey, sizeof(gcmKey)) == 0);
+        CHECK(wc_AesGcmEncrypt(&aes, ct, gcmPlain, sizeof(gcmPlain),
+                               gcmIv, sizeof(gcmIv), tag, sizeof(tag),
+                               NULL, 0) == 0);
+        wc_AesFree(&aes);
+        CHECK(XMEMCMP(ct, gcmCipher, sizeof(gcmCipher)) == 0);
+        CHECK(XMEMCMP(tag, gcmTag, sizeof(gcmTag)) == 0);
+    }
+#endif
+
+    return 0;
+}
+
+int main(void)
+{
+    if (wolfCrypt_Init() != 0) {
+        BKPT(0x70);
+        spin_forever();
+    }
+
+    /* Expected to succeed: the bring-up stub reports the peripheral is up, so
+     * the callback registers and dispatches. The crypto stubs are what fail. */
+    if (wc_ElsPkc_Init() != 0) {
+        BKPT(0x70);
+        spin_forever();
+    }
+
+    if (check_keyref() != 0) {
+        BKPT(0x71);
+        spin_forever();
+    }
+    if (check_fails_closed() != 0) {
+        BKPT(0x73);
+        spin_forever();
+    }
+    if (check_software_path() != 0) {
+        BKPT(0x75);
+        spin_forever();
+    }
+    if (check_slot_keys() != 0) {
+        BKPT(0x77);
+        spin_forever();
+    }
+#ifndef WC_NO_RNG
+    if (check_rng_seed() != 0) {
+        BKPT(0x79);
+        spin_forever();
+    }
+#endif
+    if (check_registration() != 0) {
+        BKPT(0x7b);
+        spin_forever();
+    }
+
+    (void)wc_ElsPkc_Cleanup();
+    (void)wolfCrypt_Cleanup();
+
+    if (failures == 0) {
+        BKPT(0x7f);
+    }
+    else {
+        BKPT(0x70);
+    }
+    spin_forever();
+    return 0;
+}
+
+extern unsigned long _sidata;
+extern unsigned long _sdata;
+extern unsigned long _edata;
+extern unsigned long _sbss;
+extern unsigned long _ebss;
+extern void __libc_init_array(void);
+
+void Reset_Handler(void);
+void Reset_Handler(void)
+{
+    uint32_t* src;
+    uint32_t* dst;
+
+    src = (uint32_t*)&_sidata;
+    for (dst = (uint32_t*)&_sdata; dst < (uint32_t*)&_edata; ++dst) {
+        *dst = *src++;
+    }
+    for (dst = (uint32_t*)&_sbss; dst < (uint32_t*)&_ebss; ++dst) {
+        *dst = 0;
+    }
+    __libc_init_array();
+    (void)main();
+    BKPT(0x70);
+    spin_forever();
+}
