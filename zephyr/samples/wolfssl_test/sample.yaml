@@ -84,3 +84,31 @@ tests:
       - CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=65536
     integration_platforms:
       - mps2/an521/cpu0
+  sample.crypto.wolfssl_test_els_pkc:
+    # The whole suite against the EdgeLock offload. No software platform can
+    # stand in for it. Carried here rather than in boards/frdm_rw612.conf,
+    # which Zephyr would merge into every other build of this sample for the
+    # board, this scenario's and CI's alike.
+    timeout: 600
+    platform_allow: frdm_rw612
+    extra_configs:
+      # Registers the crypto callback and selects MCUX_ELS_PKC for the vendor
+      # headers; settings.h then maps WC_USE_DEVID at it, so every context the
+      # suite creates reaches the hardware.
+      - CONFIG_WOLFSSL_ELS_PKC=y
+      # wc_port.c calls clock_gettime(). POSIX_TIMERS is gated behind
+      # POSIX_SYSTEM_INTERFACES and silently does nothing without it.
+      - CONFIG_POSIX_SYSTEM_INTERFACES=y
+      - CONFIG_POSIX_TIMERS=y
+      # The board has a real entropy source, so drop prj.conf's placeholder.
+      - CONFIG_TEST_RANDOM_GENERATOR=n
+      - CONFIG_ENTROPY_GENERATOR=y
+      # The curves the PKC offloads beyond the module's default P-256.
+      - CONFIG_WOLFSSL_ECC_384=y
+      - CONFIG_WOLFSSL_ECC_521=y
+      - CONFIG_WOLFSSL_CURVE25519=y
+      # P-521 in software is the stack peak, PKCS12 the heap peak.
+      - CONFIG_MAIN_STACK_SIZE=65536
+      - CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=65536
+    integration_platforms:
+      - frdm_rw612
