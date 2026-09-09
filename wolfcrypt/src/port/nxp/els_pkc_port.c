@@ -38,6 +38,9 @@
 #include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/logging.h>
+#ifdef HAVE_ECC
+    #include <wolfssl/wolfcrypt/asn.h>
+#endif
 
 #include <mcuxClEls.h>
 #include <mcuxCsslFlowProtection.h>
@@ -68,7 +71,8 @@
  * hardware before issuing a command, because a permission violation resets the
  * SoC, so they share the helpers in the next section. */
 #if defined(ELS_HAVE_AES_BLOCK_CIPHER) || \
-    (!defined(NO_AES) && (defined(HAVE_AESGCM) || defined(WOLFSSL_CMAC)))
+    (!defined(NO_AES) && (defined(HAVE_AESGCM) || defined(WOLFSSL_CMAC))) || \
+    defined(HAVE_ECC)
     #define ELS_HAVE_SLOT_KEYS
 #endif
 
@@ -365,6 +369,22 @@ int wc_ElsPkc_ParseKeyRef(const byte* in, word32 inSz, wc_ElsPkc_KeyRef* ref)
 
 /* Slot validation, reached from every path that can name a slot. */
 #ifdef ELS_HAVE_SLOT_KEYS
+
+#ifdef HAVE_ECC
+/* Read a slot's properties. Caller holds the lock. */
+static int ElsKsProps(byte slot, mcuxClEls_KeyProp_t* prop)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t,
+        mcuxClEls_GetKeyProperties((mcuxClEls_KeyIndex_t)slot, prop));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_GetKeyProperties) != t) ||
+        (MCUXCLELS_STATUS_OK != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return 0;
+}
+#endif
 
 /* The ELS permission bit each class stands for. */
 static word32 ElsClassUsageBit(byte keyClass)
@@ -1216,6 +1236,375 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
 #endif /* !NO_AES */
 
 /* ---------------------------------------------------------------------------
+ * ECC over slot keys
+ * ------------------------------------------------------------------------ */
+
+/* P-256 only: the key property word has no bit for RSA or the Ed curves. ELS
+ * speaks raw X9.62 (X||Y, R||S) where the callback boundary is DER. */
+
+#ifdef HAVE_ECC
+
+#define ELS_ECC_COORD_SZ 32                          /* P-256 */
+#define ELS_ECC_PUB_SZ   MCUXCLELS_ECC_PUBLICKEY_SIZE /* X||Y   */
+#define ELS_ECC_SIG_SZ   MCUXCLELS_ECC_SIGNATURE_SIZE /* R||S   */
+
+#if (defined(HAVE_ECC_SIGN) || defined(HAVE_ECC_VERIFY)) && \
+    !defined(WC_ALLOW_ECC_ZERO_HASH)
+/* wolfCrypt rejects an all-zero digest, but only below the callback, so an
+ * offload would accept what software refuses. Declining keeps one contract
+ * and one copy of the rule. */
+static int ElsEccDigestIsZero(const byte* d, word32 len)
+{
+    byte acc = 0;
+    word32 i;
+
+    for (i = 0; i < len; i++) {
+        acc |= d[i];
+    }
+
+    return acc == 0;
+}
+#endif
+
+#ifdef HAVE_ECC_VERIFY
+/* DecodeECC_DSA_Sig_Bin() reports each INTEGER's own length, not the field
+ * width, so a component with leading zero bytes comes back short - about one
+ * verify in 128 for P-256, and almost every one for P-521, whose order is 521
+ * bits. The engine wants fixed-width big-endian, so right-align rather than
+ * decline. */
+static int ElsPadSigComponent(byte* buf, word32 len, word32 width)
+{
+    if (len > width) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    if (len < width) {
+        XMEMMOVE(buf + (width - len), buf, len);
+        XMEMSET(buf, 0, width - len);
+    }
+
+    return 0;
+}
+#endif /* HAVE_ECC_VERIFY */
+
+/* Read the slot reference an ecc_key carries, if it carries one at all. */
+static int ElsEccRef(const ecc_key* key, wc_ElsPkc_KeyRef* ref)
+{
+    if (key == NULL || key->idLen <= 0) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    return wc_ElsPkc_ParseKeyRef(key->id, (word32)key->idLen, ref);
+}
+
+/* P-256 is the only curve with a slot to reference. */
+static int ElsEccCurveOk(const ecc_key* key)
+{
+    return (key != NULL && key->dp != NULL &&
+            key->dp->id == ECC_SECP256R1);
+}
+
+int wc_ElsPkc_EccUseSlot(ecc_key* key, const wc_ElsPkc_KeyRef* ref,
+                         void* heap, int devId)
+{
+    byte   blob[WC_ELSPKC_KEYREF_SZ];
+    word32 blobSz = sizeof(blob);
+    int    ret;
+
+    if (key == NULL || ref == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (ref->keyClass != WC_ELSPKC_KEY_ECC_SIGN &&
+        ref->keyClass != WC_ELSPKC_KEY_ECC_DH) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+
+    ret = wc_ElsPkc_MakeKeyRef(ref, blob, &blobSz);
+    if (ret == 0) {
+        ret = wc_ecc_init_id(key, blob, (int)blobSz, heap, devId);
+    }
+    if (ret == 0) {
+        /* Pin the curve now. Without it the first operation would have to
+         * infer P-256 from a key whose private part it can never see. */
+        ret = wc_ecc_set_curve(key, ELS_ECC_COORD_SZ, ECC_SECP256R1);
+        if (ret != 0) {
+            wc_ecc_free(key);
+        }
+    }
+
+    ForceZero(blob, sizeof(blob));
+
+    return ret;
+}
+
+/* Generate a key inside the slot the reference names. The reference is a
+ * request, not a lookup: the slot is empty and the flags say what the key may
+ * do. This is also the only moment the public point is available. */
+#if defined(HAVE_ECC_KEY_IMPORT) && defined(HAVE_ECC_DHE)
+static int ElsEccKeyGen(ecc_key* key)
+{
+    mcuxClEls_EccKeyGenOption_t opt;
+    mcuxClEls_KeyProp_t         prop;
+    mcuxClEls_KeyProp_t         cur;
+    wc_ElsPkc_KeyRef            ref;
+    ALIGN32 byte pub[ELS_ECC_PUB_SZ];
+    int ret;
+
+    ret = ElsEccRef(key, &ref);
+    if (ret != 0) {
+        return ret;
+    }
+    if (!ElsEccCurveOk(key)) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    if (ref.keyClass != WC_ELSPKC_KEY_ECC_SIGN &&
+        ref.keyClass != WC_ELSPKC_KEY_ECC_DH) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    /* Ask for as little as possible. The usage bit, key size and slot kind are
+     * set by the hardware from kgtypedh, and a property word ELS disagrees
+     * with is a tamper event, not an error return. ElsCheckSlot() reads the
+     * bits back before first use. */
+    prop.word.value = 0u;
+    prop.bits.upprot_priv = MCUXCLELS_KEYPROPERTY_PRIVILEGED_FALSE;
+    prop.bits.upprot_sec  = MCUXCLELS_KEYPROPERTY_SECURE_FALSE;
+    if (ref.flags & WC_ELSPKC_REF_FLAG_EXPORTABLE) {
+        prop.bits.wrpok = MCUXCLELS_KEYPROPERTY_WRAP_TRUE;
+    }
+    /* WC_ELSPKC_REF_FLAG_PERSISTENT is parsed but not applied: retention is a
+     * slot attribute, not something a generation requests. */
+
+    opt.word.value  = 0u;
+    opt.bits.kgsrc  = MCUXCLELS_ECC_OUTPUTKEY_RANDOM;
+    opt.bits.kgtypedh = (ref.keyClass == WC_ELSPKC_KEY_ECC_DH)
+                        ? MCUXCLELS_ECC_OUTPUTKEY_KEYEXCHANGE
+                        : MCUXCLELS_ECC_OUTPUTKEY_SIGN;
+    opt.bits.kgsign = MCUXCLELS_ECC_PUBLICKEY_SIGN_DISABLE;
+    opt.bits.kgsign_rnd = MCUXCLELS_ECC_NO_RANDOM_DATA;
+    opt.bits.skip_pbk = MCUXCLELS_ECC_GEN_PUBLIC_KEY;
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* Validate the target even though it should still be empty, and refuse an
+     * occupied slot: overwriting a key nobody asked to replace is not this
+     * function's decision. */
+    ret = ElsKsProps(ref.slot, &cur);
+    if (ret == 0 && (cur.word.value & MCUXCLELS_KEYPROPERTY_VALUE_ACTIVE)) {
+        ret = WC_NO_ERR_TRACE(BAD_STATE_E);
+    }
+    if (ret != 0) {
+        ElsUnlock();
+        return ret;
+    }
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_EccKeyGen_Async(
+        opt, 0u, (mcuxClEls_KeyIndex_t)ref.slot, prop, NULL, pub));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_EccKeyGen_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        ElsUnlock();
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    ret = ElsWait();
+
+    ElsUnlock();
+
+    if (ret == 0) {
+        /* Keep the id[] reference: wc_ecc_import_unsigned would otherwise be
+         * the last word on this key and the slot would be forgotten. */
+        byte savedId[ECC_MAX_ID_LEN];
+        int  savedLen = key->idLen;
+
+        XMEMCPY(savedId, key->id, sizeof(savedId));
+
+        ret = wc_ecc_import_unsigned(key, pub, pub + ELS_ECC_COORD_SZ,
+                                     NULL, ECC_SECP256R1);
+        /* Restored even on failure: the key now exists in the slot, and the
+         * reference is the only way left to name or delete it - the hardware
+         * will not hand the public point back a second time. */
+        XMEMCPY(key->id, savedId, sizeof(savedId));
+        key->idLen = savedLen;
+        if (ret == 0) {
+            /* The import saw no d and typed the key public; the private half
+             * is in the slot, and export and wc_ecc_check_key() test for it. */
+            key->type = ECC_PRIVATEKEY;
+        }
+        ForceZero(savedId, sizeof(savedId));
+    }
+
+    ForceZero(pub, sizeof(pub));
+
+    return ret;
+}
+
+#endif /* HAVE_ECC_KEY_IMPORT && HAVE_ECC_DHE */
+
+#ifdef HAVE_ECC_SIGN
+/* Issue the sign command. Caller holds the lock and has validated the slot.
+ * Split out so the flow-protection macro pair stays within one scope. */
+static int ElsEccSignRun(mcuxClEls_EccSignOption_t opt, byte slot,
+                         const byte* hash, byte* sig)
+{
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_EccSign_Async(
+        opt, (mcuxClEls_KeyIndex_t)slot, hash, NULL, 0u, sig));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_EccSign_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    return ElsWait();
+}
+
+static int ElsEccSign(const byte* in, word32 inlen, byte* out, word32* outlen,
+                      ecc_key* key)
+{
+    mcuxClEls_EccSignOption_t opt;
+    wc_ElsPkc_KeyRef ref;
+    ALIGN32 byte hash[ELS_ECC_COORD_SZ];
+    ALIGN32 byte sig[ELS_ECC_SIG_SZ];
+    int ret;
+
+    if (in == NULL || out == NULL || outlen == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    ret = ElsEccRef(key, &ref);
+    if (ret != 0) {
+        return ret;
+    }
+    if (!ElsEccCurveOk(key) || ref.keyClass != WC_ELSPKC_KEY_ECC_SIGN) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    /* ELS consumes a full 32-byte digest. Rather than guess whether a caller
+     * wants left-padding or truncation, decline. */
+    if (inlen != ELS_ECC_COORD_SZ) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    XMEMCPY(hash, in, ELS_ECC_COORD_SZ);
+
+    opt.word.value    = 0u;
+    opt.bits.echashchl = MCUXCLELS_ECC_HASHED;
+    opt.bits.signrtf   = MCUXCLELS_ECC_NO_RTF;
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = ElsCheckSlot(&ref, WC_ELSPKC_KEY_ECC_SIGN);
+    if (ret == 0) {
+        ret = ElsEccSignRun(opt, ref.slot, hash, sig);
+    }
+
+    ElsUnlock();
+
+    if (ret == 0) {
+        /* ELS returns raw R||S; the callback boundary is DER. */
+        ret = StoreECC_DSA_Sig_Bin(out, outlen,
+                                   sig, ELS_ECC_COORD_SZ,
+                                   sig + ELS_ECC_COORD_SZ, ELS_ECC_COORD_SZ);
+    }
+
+    ForceZero(hash, sizeof(hash));
+    ForceZero(sig, sizeof(sig));
+
+    return ret;
+}
+
+#endif /* HAVE_ECC_SIGN */
+
+#ifdef HAVE_ECC_VERIFY
+/* Verification needs no slot - the public key is ordinary wolfCrypt material,
+ * so this accelerates any P-256 verify, vaulted key or not. */
+static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
+                        word32 hashlen, int* res, ecc_key* key)
+{
+    mcuxClEls_EccVerifyOption_t opt;
+    ALIGN32 byte sigAndPub[ELS_ECC_SIG_SZ + ELS_ECC_PUB_SZ];
+    ALIGN32 byte hash[ELS_ECC_COORD_SZ];
+    ALIGN32 byte rCalc[ELS_ECC_COORD_SZ];
+    byte   x963[1 + ELS_ECC_PUB_SZ];
+    word32 x963Sz = sizeof(x963);
+    word32 rLen = ELS_ECC_COORD_SZ, sLen = ELS_ECC_COORD_SZ;
+    int    ret;
+
+    if (sig == NULL || hashIn == NULL || res == NULL) {
+        return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
+    }
+    if (!ElsEccCurveOk(key) || hashlen != ELS_ECC_COORD_SZ) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+
+    *res = 0;
+
+    /* DER in, raw R||S out, both fixed 32-byte components. */
+    ret = DecodeECC_DSA_Sig_Bin(sig, siglen, sigAndPub, &rLen,
+                                sigAndPub + ELS_ECC_COORD_SZ, &sLen);
+    if (ret != 0) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    ret = ElsPadSigComponent(sigAndPub, rLen, ELS_ECC_COORD_SZ);
+    if (ret == 0) {
+        ret = ElsPadSigComponent(sigAndPub + ELS_ECC_COORD_SZ, sLen,
+                                 ELS_ECC_COORD_SZ);
+    }
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* X9.62 uncompressed is 0x04 || X || Y; ELS wants the point without the
+     * leading tag byte. */
+    ret = wc_ecc_export_x963_ex(key, x963, &x963Sz, 0);
+    if (ret != 0 || x963Sz != sizeof(x963) || x963[0] != 0x04) {
+        return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+    }
+    XMEMCPY(sigAndPub + ELS_ECC_SIG_SZ, x963 + 1, ELS_ECC_PUB_SZ);
+    XMEMCPY(hash, hashIn, ELS_ECC_COORD_SZ);
+
+    opt.word.value     = 0u;
+    opt.bits.echashchl = MCUXCLELS_ECC_HASHED;
+
+    ret = ElsLock();
+    if (ret != 0) {
+        return ret;
+    }
+
+    MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_EccVerify_Async(
+        opt, hash, NULL, 0u, sigAndPub, rCalc));
+    if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_EccVerify_Async) != t) ||
+        (MCUXCLELS_STATUS_OK_WAIT != r)) {
+        ElsUnlock();
+        return WC_NO_ERR_TRACE(WC_HW_E);
+    }
+    MCUX_CSSL_FP_FUNCTION_CALL_END();
+
+    ret = ElsWait();
+
+    ElsUnlock();
+
+    if (ret == 0) {
+        /* THE RESULT IS THE COMPARISON, NOT THE STATUS. ELS does not report a
+         * bad signature through the return code: it recomputes R, and the
+         * verification succeeds only if that equals the caller's R. */
+        *res = (wc_ConstantCompare(rCalc, sigAndPub, ELS_ECC_COORD_SZ) == 0);
+    }
+
+    ForceZero(hash, sizeof(hash));
+    ForceZero(rCalc, sizeof(rCalc));
+
+    return ret;
+}
+
+#endif /* HAVE_ECC_VERIFY */
+
+#endif /* HAVE_ECC */
+
+/* ---------------------------------------------------------------------------
  * Random
  * ------------------------------------------------------------------------ */
 
@@ -1664,6 +2053,58 @@ int wc_ElsPkc_CryptoCb(int devId, wc_CryptoInfo* info, void* ctx)
             ret = ElsRandom(info->seed.seed, info->seed.sz);
             break;
 #endif
+
+#ifdef HAVE_ECC
+        case WC_ALGO_TYPE_PK:
+            switch (info->pk.type) {
+    /* info->pk.eckg itself is declared under HAVE_ECC_DHE. */
+    #if defined(HAVE_ECC) && defined(HAVE_ECC_KEY_IMPORT) && \
+        defined(HAVE_ECC_DHE)
+                case WC_PK_TYPE_EC_KEYGEN:
+                    ret = ElsEccKeyGen(info->pk.eckg.key);
+                    break;
+    #endif
+    #if defined(HAVE_ECC) && defined(HAVE_ECC_SIGN)
+                case WC_PK_TYPE_ECDSA_SIGN:
+        #ifndef WC_ALLOW_ECC_ZERO_HASH
+                    if (ElsEccDigestIsZero(info->pk.eccsign.in,
+                                           info->pk.eccsign.inlen)) {
+                        break;
+                    }
+        #endif
+                    /* ELS first: it signs only for a P-256 key that names a
+                     * slot, and declines everything else, which the PKC
+                     * then covers. */
+                    ret = ElsEccSign(info->pk.eccsign.in,
+                            info->pk.eccsign.inlen, info->pk.eccsign.out,
+                            info->pk.eccsign.outlen, info->pk.eccsign.key);
+                    break;
+    #endif
+    #if defined(HAVE_ECC) && defined(HAVE_ECC_VERIFY)
+                case WC_PK_TYPE_ECDSA_VERIFY:
+        #ifndef WC_ALLOW_ECC_ZERO_HASH
+                    if (ElsEccDigestIsZero(info->pk.eccverify.hash,
+                                           info->pk.eccverify.hashlen)) {
+                        break;
+                    }
+        #endif
+                    ret = ElsEccVerify(info->pk.eccverify.sig,
+                            info->pk.eccverify.siglen,
+                            info->pk.eccverify.hash,
+                            info->pk.eccverify.hashlen,
+                            info->pk.eccverify.res,
+                            info->pk.eccverify.key);
+                    break;
+    #endif
+                /* WC_PK_TYPE_ECDH is deliberately absent: ELS deposits the
+                 * shared secret in a slot, which cannot be read back, while
+                 * the ecdh callback must hand a buffer back. The keystore
+                 * derive path covers an in-slot agreement. */
+                default:
+                    break;
+            }
+            break;
+#endif /* HAVE_ECC */
 
 #ifndef NO_AES
         case WC_ALGO_TYPE_CIPHER:
