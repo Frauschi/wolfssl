@@ -80,6 +80,27 @@
  * Peripheral serialization
  * ------------------------------------------------------------------------ */
 
+/* Offload counters, so a test can assert the hardware actually ran rather than
+ * only that its result agrees with software. Off by default; incremented
+ * without atomics and some outside the lock, so best-effort. */
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+    #define ELS_COUNT(c) do { (c)++; } while (0)
+#else
+    #define ELS_COUNT(c) WC_DO_NOTHING
+#endif
+
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+#if !defined(NO_SHA256) || defined(WOLFSSL_SHA384) || defined(WOLFSSL_SHA512)
+unsigned long wc_ElsPkc_HashOffloadCount = 0;
+#endif
+/* which completion path ran: interrupt-driven vs polled fallback, and how
+ * many of the former were caught by the spin rather than a thread switch */
+unsigned long wc_ElsPkc_IrqWaitCount = 0;
+unsigned long wc_ElsPkc_SpinHitCount = 0;
+unsigned long wc_ElsPkc_PollWaitCount = 0;
+unsigned long wc_ElsPkc_TimeoutCount = 0;
+#endif
+
 static wolfSSL_Mutex elsLock;
 /* Read from the crypto-callback path, written by init/cleanup. Volatile so a
  * compiler cannot cache the flag across the mutex operations that order them. */
@@ -195,6 +216,7 @@ static int ElsSpinForDone(void)
 
     do {
         if (k_sem_take(&elsDone, K_NO_WAIT) == 0) {
+            ELS_COUNT(wc_ElsPkc_SpinHitCount);
             return 1;
         }
     } while ((k_cycle_get_32() - start) < budget);
@@ -233,9 +255,11 @@ static int ElsWait(void)
 #endif
 
     if (ElsCanSleep()) {
+        ELS_COUNT(wc_ElsPkc_IrqWaitCount);
         if (!ElsSpinForDone() &&
             k_sem_take(&elsDone, K_MSEC(WOLFSSL_ELS_PKC_TIMEOUT_MS)) != 0) {
             timedOut = 1;
+            ELS_COUNT(wc_ElsPkc_TimeoutCount);
             WOLFSSL_MSG("els_pkc: completion interrupt late");
 #ifdef WOLFSSL_ELS_PKC_ALLOW_CANCEL
             /* Cancel, then fall through to the vendor wait below: the reset
@@ -247,6 +271,11 @@ static int ElsWait(void)
 #endif
         }
     }
+    else {
+        ELS_COUNT(wc_ElsPkc_PollWaitCount);
+    }
+#else
+    ELS_COUNT(wc_ElsPkc_PollWaitCount);
 #endif
 
     MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(res, tok,
@@ -651,6 +680,9 @@ static int ElsHashBlocks(const ElsHashObj* o, const byte* in, word32 len)
     *o->devCtx = (void*)(st | ELS_HASH_STARTED);
 
     ret = ElsWait();
+    if (ret == 0) {
+        ELS_COUNT(wc_ElsPkc_HashOffloadCount);
+    }
 
     return ret;
 }
@@ -806,6 +838,10 @@ static int ElsHashFinal(ElsHashObj* o, byte* digest, word32 digestSz)
  * trailing partial block are declined so software handles them. */
 
 #ifndef NO_AES
+
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+unsigned long wc_ElsPkc_AesOffloadCount = 0;
+#endif
 
 int wc_ElsPkc_AesUseSlot(Aes* aes, const wc_ElsPkc_KeyRef* ref,
                          void* heap, int devId)
@@ -966,6 +1002,7 @@ static int ElsAesCipher(Aes* aes, byte* out, const byte* in, word32 sz,
                         MCUXCLELS_CIPHER_BLOCK_SIZE_AES);
             }
         }
+        ELS_COUNT(wc_ElsPkc_AesOffloadCount);
     }
 
     ForceZero(lastCipher, sizeof(lastCipher));
@@ -985,6 +1022,10 @@ static int ElsAesCipher(Aes* aes, byte* out, const byte* in, word32 sz,
  * yields a clean-looking wrong tag. */
 
 #ifdef HAVE_AESGCM
+
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+unsigned long wc_ElsPkc_GcmOffloadCount = 0;
+#endif
 
 #define ELS_GCM_BLOCK MCUXCLELS_AEAD_IV_BLOCK_SIZE
 
@@ -1220,6 +1261,9 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
             }
             ret = WC_NO_ERR_TRACE(AES_GCM_AUTH_E);
         }
+        if (ret == 0) {
+            ELS_COUNT(wc_ElsPkc_GcmOffloadCount);
+        }
     }
 
     ForceZero(tag, sizeof(tag));
@@ -1243,6 +1287,10 @@ static int ElsAesGcm(Aes* aes, byte* out, const byte* in, word32 sz,
  * speaks raw X9.62 (X||Y, R||S) where the callback boundary is DER. */
 
 #ifdef HAVE_ECC
+
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+unsigned long wc_ElsPkc_EccOffloadCount = 0;
+#endif
 
 #define ELS_ECC_COORD_SZ 32                          /* P-256 */
 #define ELS_ECC_PUB_SZ   MCUXCLELS_ECC_PUBLICKEY_SIZE /* X||Y   */
@@ -1432,6 +1480,7 @@ static int ElsEccKeyGen(ecc_key* key)
             /* The import saw no d and typed the key public; the private half
              * is in the slot, and export and wc_ecc_check_key() test for it. */
             key->type = ECC_PRIVATEKEY;
+            ELS_COUNT(wc_ElsPkc_EccOffloadCount);
         }
         ForceZero(savedId, sizeof(savedId));
     }
@@ -1508,6 +1557,9 @@ static int ElsEccSign(const byte* in, word32 inlen, byte* out, word32* outlen,
         ret = StoreECC_DSA_Sig_Bin(out, outlen,
                                    sig, ELS_ECC_COORD_SZ,
                                    sig + ELS_ECC_COORD_SZ, ELS_ECC_COORD_SZ);
+        if (ret == 0) {
+            ELS_COUNT(wc_ElsPkc_EccOffloadCount);
+        }
     }
 
     ForceZero(hash, sizeof(hash));
@@ -1592,6 +1644,7 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
          * bad signature through the return code: it recomputes R, and the
          * verification succeeds only if that equals the caller's R. */
         *res = (wc_ConstantCompare(rCalc, sigAndPub, ELS_ECC_COORD_SZ) == 0);
+        ELS_COUNT(wc_ElsPkc_EccOffloadCount);
     }
 
     ForceZero(hash, sizeof(hash));
@@ -1649,6 +1702,12 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
  * bytes (4096-bit, NoEncode) and ECC at 504. */
 #ifndef WOLFSSL_ELS_PKC_CPU_WA_SZ
     #define WOLFSSL_ELS_PKC_CPU_WA_SZ 1024
+#endif
+
+#ifndef NO_RSA
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+unsigned long wc_ElsPkc_RsaOffloadCount = 0;
+#endif
 #endif
 
 static uint32_t elsPkcCpuWa[(WOLFSSL_ELS_PKC_CPU_WA_SZ + 3u) / 4u];
@@ -1969,6 +2028,7 @@ static int ElsPkcRsaFunction(const byte* in, word32 inLen, byte* out,
 
     if (ret == 0) {
         *outLen = modLen;
+        ELS_COUNT(wc_ElsPkc_RsaOffloadCount);
     }
 
     ForceZero(buf, modLen * 4u);
@@ -1990,6 +2050,10 @@ static int ElsPkcRsaFunction(const byte* in, word32 inLen, byte* out,
 #ifdef HAVE_CURVE25519
 
 #include <mcuxClKey.h>
+
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+unsigned long wc_ElsPkc_X25519OffloadCount = 0;
+#endif
 
 #define ELS_X25519_KEY_SZ MCUXCLECC_MONTDH_CURVE25519_SIZE_PRIVATEKEY
 
@@ -2128,6 +2192,10 @@ static int ElsPkcX25519(curve25519_key* privKey, curve25519_key* pubKey,
         ElsUnlock();
     }
 
+    if (ret == 0) {
+        ELS_COUNT(wc_ElsPkc_X25519OffloadCount);
+    }
+
     ForceZero(priv, sizeof(priv));
 
     return ret;
@@ -2150,6 +2218,10 @@ static int ElsPkcX25519(curve25519_key* privKey, curve25519_key* pubKey,
 
 #define ELS_PKC_ECC_MAX_P MCUXCLECC_WEIERECC_MAX_SIZE_PRIMEP
 #define ELS_PKC_ECC_MAX_N MCUXCLECC_WEIERECC_MAX_SIZE_BASEPOINTORDER
+
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+unsigned long wc_ElsPkc_EccPkcOffloadCount = 0;
+#endif
 
 /* Curve constants for the operation in flight. Caller holds the lock. */
 static struct {
@@ -2301,6 +2373,9 @@ static int ElsPkcEccSign(const byte* in, word32 inlen, byte* out,
     if (ret == 0) {
         /* raw R||S out of the engine, DER at the callback boundary */
         ret = StoreECC_DSA_Sig_Bin(out, outlen, sig, lenP, sig + lenP, lenP);
+        if (ret == 0) {
+            ELS_COUNT(wc_ElsPkc_EccPkcOffloadCount);
+        }
     }
 
     ForceZero(priv, sizeof(priv));
@@ -2884,6 +2959,10 @@ static int ElsPkcEccVerify(const byte* sigDer, word32 sigLen,
 
     ElsUnlock();
 
+    if (ret == 0) {
+        ELS_COUNT(wc_ElsPkc_EccPkcOffloadCount);
+    }
+
     ForceZero(hash, sizeof(hash));
     ForceZero(rOut, sizeof(rOut));
 
@@ -2901,6 +2980,10 @@ static int ElsPkcEccVerify(const byte* sigDer, word32 sigLen,
  * the SoC, so both references are validated against the hardware first. */
 
 #ifdef WOLF_CRYPTO_CB_KEYSTORE
+
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+unsigned long wc_ElsPkc_KeyStoreOffloadCount = 0;
+#endif
 
 /* The container is the key plus an 8-byte property/padding prefix, all inside
  * an RFC 3394 wrap that adds its own 8-byte integrity block. */
@@ -3259,6 +3342,10 @@ static int ElsKsImport(wc_CryptoInfo* info)
 
     ElsUnlock();
 
+    if (ret == 0) {
+        ELS_COUNT(wc_ElsPkc_KeyStoreOffloadCount);
+    }
+
     return ret;
 }
 
@@ -3333,6 +3420,7 @@ static int ElsKsExport(wc_CryptoInfo* info)
 
     if (ret == 0) {
         *info->keystore.op.exportWrapped.blobSz = need;
+        ELS_COUNT(wc_ElsPkc_KeyStoreOffloadCount);
     }
 
     return ret;
@@ -3424,6 +3512,10 @@ static int ElsKsDerive(wc_CryptoInfo* info)
 
     ElsUnlock();
 
+    if (ret == 0) {
+        ELS_COUNT(wc_ElsPkc_KeyStoreOffloadCount);
+    }
+
     return ret;
 }
 
@@ -3462,6 +3554,7 @@ int wc_ElsPkc_DeriveDieKek(wc_ElsPkc_KeyRef* ref)
     ElsUnlock();
 
     if (ret == 0) {
+        ELS_COUNT(wc_ElsPkc_KeyStoreOffloadCount);
     }
     else {
         XMEMSET(ref, 0, sizeof(*ref));
@@ -3497,6 +3590,10 @@ static int ElsKsDelete(wc_CryptoInfo* info)
     }
 
     ElsUnlock();
+
+    if (ret == 0) {
+        ELS_COUNT(wc_ElsPkc_KeyStoreOffloadCount);
+    }
 
     return ret;
 }
@@ -3544,6 +3641,7 @@ static int ElsKsGetInfo(wc_CryptoInfo* info)
             }
             *info->keystore.op.getInfo.attrs = a;
         }
+        ELS_COUNT(wc_ElsPkc_KeyStoreOffloadCount);
     }
 
     return ret;
@@ -3559,6 +3657,10 @@ static int ElsKsGetInfo(wc_CryptoInfo* info)
  * seeded from the hardware, not just the direct generate path. */
 
 #ifndef WC_NO_RNG
+
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+unsigned long wc_ElsPkc_RngOffloadCount = 0;
+#endif
 
 /* Issue one DRBG request. Caller holds the lock, and len must already satisfy
  * the engine's contract. */
@@ -3620,6 +3722,10 @@ static int ElsRandom(byte* out, word32 sz)
 
     ElsUnlock();
 
+    if (ret == 0) {
+        ELS_COUNT(wc_ElsPkc_RngOffloadCount);
+    }
+
     ForceZero(tail, sizeof(tail));
 
     return ret;
@@ -3635,6 +3741,10 @@ static int ElsRandom(byte* out, word32 sz)
  * caller's Cmac and the lock is held per call. */
 
 #if defined(WOLFSSL_CMAC) && !defined(NO_AES)
+
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+unsigned long wc_ElsPkc_CmacOffloadCount = 0;
+#endif
 
 #define ELS_CMAC_BLOCK MCUXCLELS_CIPHER_BLOCK_SIZE_AES
 #define ELS_CMAC_STATE MCUXCLELS_CMAC_OUT_SIZE
@@ -3924,6 +4034,7 @@ static int ElsCmacFinal(Cmac* cmac, byte* out, word32* outSz)
     ret = ElsCmacChunk(cmac, cmac->buffer, buffered, 1);
     if (ret == 0) {
         XMEMCPY(out, cmac->digest, *outSz);
+        ELS_COUNT(wc_ElsPkc_CmacOffloadCount);
     }
 
     /* The key is not needed again, and wc_CmacFinalNoFree() leaves the object

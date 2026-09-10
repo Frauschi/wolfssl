@@ -179,6 +179,47 @@ WOLFSSL_API int wc_ElsPkc_CmacUseSlot(Cmac* cmac, const wc_ElsPkc_KeyRef* ref,
                                       void* heap, int devId);
 #endif
 
+/* Instrumentation, so a test can assert the offload ran rather than only that
+ * its result agrees with software. Off by default: it exists for bring-up and
+ * costs a counter per operation. Incremented without atomics and some outside
+ * the lock, so best-effort under concurrency. */
+#ifdef WOLFSSL_ELS_PKC_COUNTERS
+WOLFSSL_API extern unsigned long wc_ElsPkc_IrqWaitCount;
+WOLFSSL_API extern unsigned long wc_ElsPkc_SpinHitCount;
+WOLFSSL_API extern unsigned long wc_ElsPkc_PollWaitCount;
+WOLFSSL_API extern unsigned long wc_ElsPkc_TimeoutCount;
+#if !defined(NO_SHA256) || defined(WOLFSSL_SHA384) || defined(WOLFSSL_SHA512)
+WOLFSSL_API extern unsigned long wc_ElsPkc_HashOffloadCount;
+#endif
+#ifndef NO_AES
+WOLFSSL_API extern unsigned long wc_ElsPkc_AesOffloadCount;
+#endif
+#if defined(HAVE_AESGCM) && !defined(NO_AES)
+WOLFSSL_API extern unsigned long wc_ElsPkc_GcmOffloadCount;
+#endif
+#if defined(WOLFSSL_CMAC) && !defined(NO_AES)
+WOLFSSL_API extern unsigned long wc_ElsPkc_CmacOffloadCount;
+#endif
+#ifndef WC_NO_RNG
+WOLFSSL_API extern unsigned long wc_ElsPkc_RngOffloadCount;
+#endif
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+WOLFSSL_API extern unsigned long wc_ElsPkc_KeyStoreOffloadCount;
+#endif
+#ifdef HAVE_ECC
+WOLFSSL_API extern unsigned long wc_ElsPkc_EccOffloadCount;
+#endif
+#if defined(HAVE_ECC) && (defined(HAVE_ECC_SIGN) || defined(HAVE_ECC_VERIFY))
+WOLFSSL_API extern unsigned long wc_ElsPkc_EccPkcOffloadCount;
+#endif
+#ifndef NO_RSA
+WOLFSSL_API extern unsigned long wc_ElsPkc_RsaOffloadCount;
+#endif
+#ifdef HAVE_CURVE25519
+WOLFSSL_API extern unsigned long wc_ElsPkc_X25519OffloadCount;
+#endif
+#endif /* WOLFSSL_ELS_PKC_COUNTERS */
+
 /* Bring the EdgeLock subsystem up and register the crypto callback.
  * wolfCrypt_Init() already does this; call it directly only to re-register
  * after a wolfCrypt_Cleanup(). Safe to call more than once. */
