@@ -56,7 +56,9 @@ extern "C" {
 
 /* Network stack */
 /* Default is POSIX sockets */
-//#define WOLFSSL_USER_IO /* Use the SetIO callbacks, not the internal wolfio.c socket code */
+#if defined(CONFIG_WOLFSSL_USER_IO)
+    #define WOLFSSL_USER_IO /* Use the SetIO callbacks, not the internal wolfio.c socket code */
+#endif
 //#define WOLFSSL_LWIP
 //#define WOLFSSL_LWIP_NATIVE
 //#define FREERTOS_TCP
@@ -498,10 +500,16 @@ extern "C" {
 /* Optional Features */
 #define WOLFSSL_BASE64_ENCODE /* Enable Base64 encoding */
 //#define WC_NO_CACHE_RESISTANT /* systems with cache should enable this for AES, ECC, RSA and DH */
-//#define WOLFSSL_CERT_GEN
 //#define WOLFSSL_CERT_REQ
-//#define WOLFSSL_CERT_EXT
 //#define NO_PWDBASED
+
+/* Certificate generation */
+#if defined(CONFIG_WOLFSSL_CERT_GEN)
+    #define WOLFSSL_CERT_GEN
+#endif
+#if defined(CONFIG_WOLFSSL_CERT_EXT)
+    #define WOLFSSL_CERT_EXT
+#endif
 
 
 /* Disable Algorithms */
@@ -749,6 +757,14 @@ extern "C" {
 #endif
 
 #endif /* WOLFSSL_SETTINGS_FILE */
+
+/* The port is silent when its define is missing: els_pkc_port.c compiles to
+ * nothing and no crypto callback is ever registered. */
+#if defined(CONFIG_WOLFSSL_ELS_PKC) && \
+    (!defined(WOLFSSL_ELS_PKC) || !defined(WOLF_CRYPTO_CB) || \
+     !defined(WOLF_CRYPTO_CB_KEYSTORE))
+#error "CONFIG_WOLFSSL_ELS_PKC=y needs the settings file to define WOLFSSL_ELS_PKC, WOLF_CRYPTO_CB and WOLF_CRYPTO_CB_KEYSTORE"
+#endif
 
 #endif /* CONFIG_WOLFSSL */
 
