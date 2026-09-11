@@ -1304,6 +1304,32 @@ static int ElsEccCurveOk(const ecc_key* key)
             key->dp->id == ECC_SECP256R1);
 }
 
+#if defined(HAVE_ECC_SIGN) || defined(HAVE_ECC_VERIFY)
+/* ELS takes a fixed 32-byte digest; a 256-bit order makes the ECDSA
+ * conversion a plain truncate-or-zero-extend (FIPS 186-4 6.4). */
+static void ElsEccDigest(const byte* in, word32 inlen, byte* out)
+{
+    if (inlen >= ELS_ECC_COORD_SZ) {
+        XMEMCPY(out, in, ELS_ECC_COORD_SZ);
+    }
+    else {
+        XMEMSET(out, 0, ELS_ECC_COORD_SZ - inlen);
+        XMEMCPY(out + ELS_ECC_COORD_SZ - inlen, in, inlen);
+    }
+}
+
+/* A key that arrived as a bare id has no curve, and an ELS ECC reference names
+ * a slot the hardware only ever fills with P-256. */
+static int ElsEccPinCurve(ecc_key* key)
+{
+    if (key->dp != NULL) {
+        return 0;
+    }
+
+    return wc_ecc_set_curve(key, ELS_ECC_COORD_SZ, ECC_SECP256R1);
+}
+#endif /* HAVE_ECC_SIGN || HAVE_ECC_VERIFY */
+
 int wc_ElsPkc_EccUseSlot(ecc_key* key, const wc_ElsPkc_KeyRef* ref,
                          void* heap, int devId)
 {
@@ -1525,16 +1551,16 @@ static int ElsEccSign(const byte* in, word32 inlen, byte* out, word32* outlen,
     if (ret != 0) {
         return ret;
     }
-    if (!ElsEccCurveOk(key) || ref.keyClass != WC_ELSPKC_KEY_ECC_SIGN) {
+    if (ref.keyClass != WC_ELSPKC_KEY_ECC_SIGN) {
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
-    /* ELS consumes a full 32-byte digest. Rather than guess whether a caller
-     * wants left-padding or truncation, decline. */
-    if (inlen != ELS_ECC_COORD_SZ) {
+    /* A curve-table miss declines like every other rejection here, so the PKC
+     * and software paths still get their turn. */
+    if (ElsEccPinCurve(key) != 0 || !ElsEccCurveOk(key)) {
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
 
-    XMEMCPY(hash, in, ELS_ECC_COORD_SZ);
+    ElsEccDigest(in, inlen, hash);
 
     opt.word.value    = 0u;
     opt.bits.echashchl = MCUXCLELS_ECC_HASHED;
@@ -1542,7 +1568,7 @@ static int ElsEccSign(const byte* in, word32 inlen, byte* out, word32* outlen,
 
     ret = ElsLock();
     if (ret != 0) {
-        return ret;
+        goto out;
     }
 
     ret = ElsCheckSlot(&ref, WC_ELSPKC_KEY_ECC_SIGN);
@@ -1559,6 +1585,7 @@ static int ElsEccSign(const byte* in, word32 inlen, byte* out, word32* outlen,
                                    sig + ELS_ECC_COORD_SZ, ELS_ECC_COORD_SZ);
     }
 
+out:
     ForceZero(hash, sizeof(hash));
     ForceZero(sig, sizeof(sig));
 
@@ -1585,7 +1612,7 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
     if (sig == NULL || hashIn == NULL || res == NULL) {
         return WC_NO_ERR_TRACE(BAD_FUNC_ARG);
     }
-    if (!ElsEccCurveOk(key) || hashlen != ELS_ECC_COORD_SZ) {
+    if (!ElsEccCurveOk(key)) {
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
 
@@ -1613,14 +1640,14 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
         return WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
     }
     XMEMCPY(sigAndPub + ELS_ECC_SIG_SZ, x963 + 1, ELS_ECC_PUB_SZ);
-    XMEMCPY(hash, hashIn, ELS_ECC_COORD_SZ);
+    ElsEccDigest(hashIn, hashlen, hash);
 
     opt.word.value     = 0u;
     opt.bits.echashchl = MCUXCLELS_ECC_HASHED;
 
     ret = ElsLock();
     if (ret != 0) {
-        return ret;
+        goto out;
     }
 
     MCUX_CSSL_FP_FUNCTION_CALL_BEGIN(r, t, mcuxClEls_EccVerify_Async(
@@ -1628,7 +1655,8 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
     if ((MCUX_CSSL_FP_FUNCTION_CALLED(mcuxClEls_EccVerify_Async) != t) ||
         (MCUXCLELS_STATUS_OK_WAIT != r)) {
         ElsUnlock();
-        return WC_NO_ERR_TRACE(WC_HW_E);
+        ret = WC_NO_ERR_TRACE(WC_HW_E);
+        goto out;
     }
     MCUX_CSSL_FP_FUNCTION_CALL_END();
 
@@ -1643,6 +1671,7 @@ static int ElsEccVerify(const byte* sig, word32 siglen, const byte* hashIn,
         *res = (wc_ConstantCompare(rCalc, sigAndPub, ELS_ECC_COORD_SZ) == 0);
     }
 
+out:
     ForceZero(hash, sizeof(hash));
     ForceZero(rCalc, sizeof(rCalc));
 
