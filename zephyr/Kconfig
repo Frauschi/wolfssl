@@ -142,7 +142,7 @@ config WOLFSSL_SYS_INIT
 
 config WOLFSSL_ELS_PKC
 	bool "NXP EdgeLock (ELS) hardware offload"
-	depends on WOLFSSL_BUILTIN && !WOLFSSL_HAS_SETTINGS_FILE
+	depends on WOLFSSL_BUILTIN
 	depends on !BUILD_WITH_TFM
 	depends on SOC_SERIES_RW6XX
 	select MCUX_ELS_PKC
@@ -154,10 +154,11 @@ config WOLFSSL_ELS_PKC
 
 	  Selects MCUX_ELS_PKC, which is what puts the vendor headers on the
 	  include path, and WOLFSSL_SYS_INIT, which brings the subsystem up at
-	  boot. A settings-file build turns the port on by defining
-	  WOLFSSL_ELS_PKC itself, since these options only write the module's
-	  user_settings.h, and has to set CONFIG_MCUX_ELS_PKC=y and
-	  CONFIG_WOLFSSL_SYS_INIT=y by hand.
+	  boot. Neither is expressible in a settings file, so this option stays
+	  available there; what it will not do is write WOLFSSL_ELS_PKC,
+	  WOLF_CRYPTO_CB and WOLF_CRYPTO_CB_KEYSTORE into a build whose settings
+	  file is authoritative. Those three go in the settings file, and
+	  user_settings.h fails the build if they are missing.
 
 	  Not selectable in a TF-M build, where els_pkc does not create its
 	  McuxElsPkc CMake target.
@@ -481,6 +482,31 @@ config WOLFSSL_OPENSSL_EXTRA_X509_SMALL
     Define OPENSSL_EXTRA_X509_SMALL. Exposes a small subset of X509
     helpers (wolfSSL_X509_free, wolfSSL_get_verify_result, ...) without
     the rest of OPENSSL_EXTRA.
+
+config WOLFSSL_USER_IO
+  bool "wolfSSL transport supplied by the application"
+  depends on !WOLFSSL_HAS_SETTINGS_FILE
+  help
+    Define WOLFSSL_USER_IO. Leaves the built-in socket send/receive
+    callbacks out of the build, for an application that installs its own
+    with wolfSSL_CTX_SetIOSend()/SetIORecv(). Without a transport of its
+    own such a build cannot do TLS at all; with one it needs no network
+    stack, so CONFIG_NETWORKING can stay off.
+
+config WOLFSSL_CERT_GEN
+  bool "wolfSSL certificate generation"
+  depends on !WOLFSSL_HAS_SETTINGS_FILE
+  help
+    Define WOLFSSL_CERT_GEN. Builds wc_InitCert(), wc_MakeCert() and
+    wc_SignCert(), so the application can issue X.509 certificates.
+
+config WOLFSSL_CERT_EXT
+  bool "wolfSSL certificate extensions"
+  depends on WOLFSSL_CERT_GEN
+  help
+    Define WOLFSSL_CERT_EXT. Adds the v3 extension setters -
+    wc_SetKeyUsage(), wc_SetExtKeyUsage(), wc_SetSubjectKeyId...() and
+    wc_SetAuthKeyId...() - to certificate generation.
 
 config WOLFCRYPT_ASM
 	bool "wolfCrypt assembly optimisations"
