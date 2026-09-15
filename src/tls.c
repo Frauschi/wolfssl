@@ -3458,6 +3458,30 @@ int TLSX_UseTruncatedHMAC(TLSX** extensions, void* heap)
 /* Certificate Status Request                                                 */
 /******************************************************************************/
 
+#if defined(HAVE_CRL) && (defined(HAVE_CERTIFICATE_STATUS_REQUEST) || \
+                          defined(HAVE_CERTIFICATE_STATUS_REQUEST_V2))
+/* Apply the leaf CRL verdict taken while the DecodedCert was alive. */
+static int TLSX_CSR_LeafCrlCheck(WOLFSSL* ssl, int ocspRet)
+{
+    int ret = ocspRet;
+
+    /* Only a revocation overrides what OCSP said or failed to say: RFC 5280
+     * 6.3.3 leaves an absent or expired CRL undetermined, not good. */
+    if (SSL_CM(ssl)->crlEnabled && ssl->deferredCrlDone &&
+            ssl->deferredCrlRet == WC_NO_ERR_TRACE(CRL_CERT_REVOKED)) {
+        ret = ssl->deferredCrlRet;
+        WOLFSSL_ERROR_VERBOSE(ret);
+        WOLFSSL_MSG("\tCRL check not ok");
+#if defined(OPENSSL_EXTRA) || defined(OPENSSL_EXTRA_X509_SMALL)
+        if (ssl->peerVerifyRet == 0)
+            ssl->peerVerifyRet = WOLFSSL_X509_V_ERR_CERT_REVOKED;
+#endif
+    }
+
+    return ret;
+}
+#endif
+
 #ifdef HAVE_CERTIFICATE_STATUS_REQUEST
 
 static void TLSX_CSR_Free(CertificateStatusRequest* csr, void* heap)
@@ -3853,6 +3877,12 @@ static int TLSX_CSR_Parse(WOLFSSL* ssl, const byte* input, word16 length,
                 if (offset + resp_length != length)
                     ret = BUFFER_ERROR;
             }
+            /* RFC 8446 4.4.2.1 defines OCSPResponse<1..2^24-1>, so an empty
+             * response is not a staple the peer may claim to have sent. */
+            if (ret == 0 && resp_length == 0) {
+                ret = BAD_CERTIFICATE_STATUS_ERROR;
+                WOLFSSL_ERROR_VERBOSE(ret);
+            }
             if (ret == 0) {
                 if (ssl->response_idx < (1 + MAX_CHAIN_DEPTH))
                     csr->responses[ssl->response_idx].buffer =
@@ -3883,6 +3913,11 @@ static int TLSX_CSR_Parse(WOLFSSL* ssl, const byte* input, word16 length,
     }
     else {
 #ifndef NO_WOLFSSL_SERVER
+        /* A server's CertificateRequest reaches this branch too, where it
+         * would replace the client's options and set status_request. */
+        if (ssl->options.side == WOLFSSL_CLIENT_END)
+            return 0;
+
         if (length == 0)
             return 0;
 
@@ -4017,17 +4052,19 @@ void* TLSX_CSR_GetRequest(TLSX* extensions)
     return TLSX_CSR_GetRequest_ex(extensions, 0);
 }
 
+/* The leaf revocation lookups were skipped in favour of the stapled response.
+ * Called when no CertificateStatus arrived: do them now. */
 int TLSX_CSR_ForceRequest(WOLFSSL* ssl)
 {
     TLSX* extension = TLSX_Find(ssl->extensions, TLSX_STATUS_REQUEST);
     CertificateStatusRequest* csr = extension ?
                               (CertificateStatusRequest*)extension->data : NULL;
+    int ret = 0;
 
     if (csr) {
         switch (csr->status_type) {
             case WOLFSSL_CSR_OCSP:
                 if (SSL_CM(ssl)->ocspEnabled) {
-                    int ret;
                     ret = CheckOcspRequest(SSL_CM(ssl)->ocsp,
                                            &csr->request.ocsp[0], NULL, ssl);
                     /* This is the client's fallback leaf lookup on the
@@ -4036,16 +4073,19 @@ int TLSX_CSR_ForceRequest(WOLFSSL* ssl)
                      * best-effort; FAIL_IF_NOT_SUPPORTED makes it fail closed. */
                     if (ret == WC_NO_ERR_TRACE(OCSP_NO_URL))
                         ret = OcspNoUrlPolicy(SSL_CM(ssl));
-                    return ret;
                 }
                 else {
                     WOLFSSL_ERROR_VERBOSE(OCSP_LOOKUP_FAIL);
-                    return OCSP_LOOKUP_FAIL;
+                    ret = OCSP_LOOKUP_FAIL;
                 }
+            #ifdef HAVE_CRL
+                ret = TLSX_CSR_LeafCrlCheck(ssl, ret);
+            #endif
+                break;
         }
     }
 
-    return 0;
+    return ret;
 }
 
 int TLSX_UseCertificateStatusRequest(TLSX** extensions, byte status_type,
@@ -4566,11 +4606,14 @@ void* TLSX_CSR2_GetRequest(TLSX* extensions, byte status_type, byte idx)
     return NULL;
 }
 
+/* The leaf revocation lookups were skipped in favour of the stapled response.
+ * Called when no CertificateStatus arrived: do them now. */
 int TLSX_CSR2_ForceRequest(WOLFSSL* ssl)
 {
     TLSX* extension = TLSX_Find(ssl->extensions, TLSX_STATUS_REQUEST_V2);
     CertificateStatusRequestItemV2* csr2 = extension ?
                         (CertificateStatusRequestItemV2*)extension->data : NULL;
+    int ret = 0;
 
     /* forces only the first one */
     if (csr2) {
@@ -4580,7 +4623,6 @@ int TLSX_CSR2_ForceRequest(WOLFSSL* ssl)
 
             case WOLFSSL_CSR2_OCSP_MULTI:
                 if (SSL_CM(ssl)->ocspEnabled && csr2->requests >= 1) {
-                    int ret;
                     ret = CheckOcspRequest(SSL_CM(ssl)->ocsp,
                                           &csr2->request.ocsp[csr2->requests-1],
                                           NULL, ssl);
@@ -4590,16 +4632,19 @@ int TLSX_CSR2_ForceRequest(WOLFSSL* ssl)
                      * best-effort; FAIL_IF_NOT_SUPPORTED makes it fail closed. */
                     if (ret == WC_NO_ERR_TRACE(OCSP_NO_URL))
                         ret = OcspNoUrlPolicy(SSL_CM(ssl));
-                    return ret;
                 }
                 else {
                     WOLFSSL_ERROR_VERBOSE(OCSP_LOOKUP_FAIL);
-                    return OCSP_LOOKUP_FAIL;
+                    ret = OCSP_LOOKUP_FAIL;
                 }
+            #ifdef HAVE_CRL
+                ret = TLSX_CSR_LeafCrlCheck(ssl, ret);
+            #endif
+                break;
         }
     }
 
-    return 0;
+    return ret;
 }
 
 int TLSX_UseCertificateStatusRequestV2(TLSX** extensions, byte status_type,
