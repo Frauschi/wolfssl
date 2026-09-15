@@ -3503,11 +3503,13 @@ int mlkem_hash512(wc_Sha3* hash, const byte* data1, word32 data1Len,
 
 /* Initialize SHAKE-256 object.
  *
- * @param  [in, out]  prf  SHAKE-256 object.
+ * @param  [in, out]  prf    SHAKE-256 object.
+ * @param  [in]       heap   Dynamic memory allocator hint.
+ * @param  [in]       devId  Device id.
  */
-void mlkem_prf_init(wc_Shake* prf)
+void mlkem_prf_init(wc_Shake* prf, void* heap, int devId)
 {
-    wc_InitShake256(prf, NULL, 0);
+    (void)wc_InitShake256(prf, heap, devId);
 }
 
 /* New/Initialize SHAKE-256 object.
@@ -5611,7 +5613,7 @@ static int mlkem_get_noise_i(MLKEM_PRF_T* prf, int k, sword16* vec2,
 
     /* Initialize the PRF (generating matrix A leaves it in uninitialized
      * state). */
-    mlkem_prf_init(prf);
+    mlkem_prf_init(prf, prf->heap, MLKEM_PRF_DEVID(prf));
 
     /* Set index of polynomial of second vector into seed. */
     seed[WC_ML_KEM_SYM_SZ] = WC_OCTET(k + i);

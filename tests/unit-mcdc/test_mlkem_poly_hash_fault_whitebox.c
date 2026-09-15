@@ -166,7 +166,7 @@ static void wb_get_noise_rows(void)
     byte    seed[WC_ML_KEM_SYM_SZ + 4];
     long    n;
 
-    mlkem_prf_init(&prf);
+    mlkem_prf_init(&prf, NULL, INVALID_DEVID);
 
     /* Disarmed: the all-true row for every decision below. */
     XMEMSET(seed, 0x37, sizeof(seed));
@@ -222,7 +222,7 @@ static void wb_gen_matrix_c_rows(void)
     byte           seed[WC_ML_KEM_SYM_SZ + 2];
     long           n;
 
-    mlkem_prf_init(&prf);
+    mlkem_prf_init(&prf, NULL, INVALID_DEVID);
     XMEMSET(seed, 0x5c, sizeof(seed));
 
     mcdc_fh_disarm();
@@ -269,7 +269,7 @@ static void wb_gen_matrix_i_rows(void)
     byte           seed[WC_ML_KEM_SYM_SZ + 2];
     long           n;
 
-    mlkem_prf_init(&prf);
+    mlkem_prf_init(&prf, NULL, INVALID_DEVID);
     XMEMSET(seed, 0x5c, sizeof(seed));
 
     mcdc_fh_disarm();

@@ -361,6 +361,16 @@ enum {
 /* The data type of the pseudo-random function. */
 #define MLKEM_PRF_T     wc_Shake
 
+/* Device id held by an ML-KEM key or PRF object, INVALID_DEVID when crypto
+ * callbacks are compiled out and the field does not exist. */
+#ifdef WOLF_CRYPTO_CB
+    #define MLKEM_KEY_DEVID(key)    ((key)->devId)
+    #define MLKEM_PRF_DEVID(prf)    ((prf)->devId)
+#else
+    #define MLKEM_KEY_DEVID(key)    INVALID_DEVID
+    #define MLKEM_PRF_DEVID(prf)    INVALID_DEVID
+#endif
+
 /* ML-KEM key. */
 struct MlKemKey {
     /* Type of key: WC_ML_KEM_512, WC_ML_KEM_768, WC_ML_KEM_1024 */
@@ -545,7 +555,7 @@ int mlkem_derive_secret(MLKEM_PRF_T* prf, const byte* z, const byte* ct,
     word32 ctSz, byte* ss);
 
 WOLFSSL_LOCAL
-void mlkem_prf_init(MLKEM_PRF_T* prf);
+void mlkem_prf_init(MLKEM_PRF_T* prf, void* heap, int devId);
 WOLFSSL_LOCAL
 int mlkem_prf_new(MLKEM_PRF_T* prf, void* heap, int devId);
 WOLFSSL_LOCAL

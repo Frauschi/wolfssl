@@ -79673,6 +79673,9 @@ typedef struct {
 #if defined(WC_RSA_PSS) && defined(WOLF_CRYPTO_CB_RSA_PAD)
     int rsaPssVerifyCount; /* RSA-PSS verify callback invocations */
 #endif
+#if defined(WOLFSSL_SHAKE128) || defined(WOLFSSL_SHAKE256)
+    int shakeCount;       /* SHAKE callback invocations */
+#endif
 } myCryptoDevCtx;
 
 #ifdef WOLF_CRYPTO_CB_ONLY_RSA
@@ -82408,6 +82411,8 @@ static int myCryptoDevCb(int devIdArg, wc_CryptoInfo* info, void* ctx)
             if (info->hash.sha3 == NULL)
                 return NOT_COMPILED_IN;
 
+            myCtx->shakeCount++;
+
             /* set devId to invalid, so software is used */
             info->hash.sha3->devId = INVALID_DEVID;
 
@@ -82432,6 +82437,8 @@ static int myCryptoDevCb(int devIdArg, wc_CryptoInfo* info, void* ctx)
         else if (info->hash.type == WC_HASH_TYPE_SHAKE256) {
             if (info->hash.sha3 == NULL)
                 return NOT_COMPILED_IN;
+
+            myCtx->shakeCount++;
 
             /* set devId to invalid, so software is used */
             info->hash.sha3->devId = INVALID_DEVID;
@@ -84195,6 +84202,109 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t cryptocb_test(void)
         WC_FREE_VAR_EX(ed448Key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
     }
 #endif /* HAVE_ED448 */
+
+#if defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) && \
+    !defined(WC_NO_RNG) && defined(WOLFSSL_SHAKE256)
+    /* ML-KEM must pass the key's device id down to the SHAKE-256 PRF it
+     * derives noise with, otherwise a device never sees that hashing. */
+    if (ret == 0) {
+        WC_RNG mlkemRng;
+        int    mlkemRngInit = 0;
+    #if defined(WOLFSSL_WC_ML_KEM_512)
+        int    mlkemLevel = WC_ML_KEM_512;
+    #elif defined(WOLFSSL_WC_ML_KEM_768)
+        int    mlkemLevel = WC_ML_KEM_768;
+    #else
+        int    mlkemLevel = WC_ML_KEM_1024;
+    #endif
+        WC_DECLARE_VAR(mlkemKey, MlKemKey, 1, HEAP_HINT);
+
+        WC_ALLOC_VAR_EX(mlkemKey, MlKemKey, 1, HEAP_HINT,
+            DYNAMIC_TYPE_TMP_BUFFER, ret = WC_TEST_RET_ENC_EC(MEMORY_E));
+
+        myCtx.shakeCount = 0;
+
+        if (ret == 0) {
+            ret = wc_InitRng_ex(&mlkemRng, HEAP_HINT, INVALID_DEVID);
+            if (ret == 0)
+                mlkemRngInit = 1;
+            else
+                ret = WC_TEST_RET_ENC_EC(ret);
+        }
+        if (ret == 0) {
+            ret = wc_MlKemKey_Init(mlkemKey, mlkemLevel, HEAP_HINT, devId);
+            if (ret != 0)
+                ret = WC_TEST_RET_ENC_EC(ret);
+        }
+        if (ret == 0) {
+            ret = wc_MlKemKey_MakeKey(mlkemKey, &mlkemRng);
+            if (ret != 0)
+                ret = WC_TEST_RET_ENC_EC(ret);
+        }
+        if (ret == 0 && myCtx.shakeCount == 0)
+            ret = WC_TEST_RET_ENC_NC;
+
+        if (WC_VAR_OK(mlkemKey))
+            wc_MlKemKey_Free(mlkemKey);
+        if (mlkemRngInit)
+            wc_FreeRng(&mlkemRng);
+        WC_FREE_VAR_EX(mlkemKey, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    }
+#endif /* WOLFSSL_HAVE_MLKEM */
+
+#if defined(WOLFSSL_HAVE_MLDSA) && !defined(WOLFSSL_MLDSA_NO_MAKE_KEY) && \
+    !defined(WC_NO_RNG) && defined(WOLFSSL_SHAKE256)
+    /* Same for ML-DSA, whose SHAKE-256 object is bound in wc_MlDsaKey_Init
+     * and must keep that binding across every internal reset. */
+    if (ret == 0) {
+        WC_RNG mldsaRng;
+        int    mldsaRngInit = 0;
+    #if !defined(WOLFSSL_NO_ML_DSA_44)
+        int    mldsaLevel = WC_ML_DSA_44;
+    #elif !defined(WOLFSSL_NO_ML_DSA_65)
+        int    mldsaLevel = WC_ML_DSA_65;
+    #else
+        int    mldsaLevel = WC_ML_DSA_87;
+    #endif
+        WC_DECLARE_VAR(mldsaKey, wc_MlDsaKey, 1, HEAP_HINT);
+
+        WC_ALLOC_VAR_EX(mldsaKey, wc_MlDsaKey, 1, HEAP_HINT,
+            DYNAMIC_TYPE_TMP_BUFFER, ret = WC_TEST_RET_ENC_EC(MEMORY_E));
+
+        myCtx.shakeCount = 0;
+
+        if (ret == 0) {
+            ret = wc_InitRng_ex(&mldsaRng, HEAP_HINT, INVALID_DEVID);
+            if (ret == 0)
+                mldsaRngInit = 1;
+            else
+                ret = WC_TEST_RET_ENC_EC(ret);
+        }
+        if (ret == 0) {
+            ret = wc_MlDsaKey_Init(mldsaKey, HEAP_HINT, devId);
+            if (ret != 0)
+                ret = WC_TEST_RET_ENC_EC(ret);
+        }
+        if (ret == 0) {
+            ret = wc_MlDsaKey_SetParams(mldsaKey, (byte)mldsaLevel);
+            if (ret != 0)
+                ret = WC_TEST_RET_ENC_EC(ret);
+        }
+        if (ret == 0) {
+            ret = wc_MlDsaKey_MakeKey(mldsaKey, &mldsaRng);
+            if (ret != 0)
+                ret = WC_TEST_RET_ENC_EC(ret);
+        }
+        if (ret == 0 && myCtx.shakeCount == 0)
+            ret = WC_TEST_RET_ENC_NC;
+
+        if (WC_VAR_OK(mldsaKey))
+            wc_MlDsaKey_Free(mldsaKey);
+        if (mldsaRngInit)
+            wc_FreeRng(&mldsaRng);
+        WC_FREE_VAR_EX(mldsaKey, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    }
+#endif /* WOLFSSL_HAVE_MLDSA */
 
 #if defined(WOLFSSL_CMAC) && defined(WOLF_CRYPTO_CB_FREE) && \
     !defined(NO_AES) && defined(WOLFSSL_AES_DIRECT)

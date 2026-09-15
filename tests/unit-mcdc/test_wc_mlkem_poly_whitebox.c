@@ -425,7 +425,7 @@ static void wb_get_noise_c_vec2_null(void)
     XMEMSET(poly, 0, sizeof(poly));
     XMEMSET(seed, 0x37, sizeof(seed));
 
-    mlkem_prf_init(&prf);
+    mlkem_prf_init(&prf, NULL, INVALID_DEVID);
     /* vec2 != NULL True side (also poly != NULL True side). */
     ret = mlkem_get_noise_c(&prf, k, vec1, MLKEM_CBD_ETA2, vec2,
         MLKEM_CBD_ETA2, poly, seed);
@@ -769,7 +769,7 @@ static void wb_leaf_sha3_rows(void)
 #endif
 
     XMEMSET(key, 0x5a, sizeof(key));
-    mlkem_prf_init(&prf);
+    mlkem_prf_init(&prf, NULL, INVALID_DEVID);
 
     for (i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
         wb_set_flags(rows[i].clear);

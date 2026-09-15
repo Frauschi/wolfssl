@@ -172,6 +172,20 @@
 
 ## Fixes
 
+* **Fix (ML-KEM and ML-DSA dropped the key's device id on internal hashing)**:
+  both algorithms hash with SHAKE objects held inside the key, and neither
+  object kept the device id the key was created with, so a registered crypto
+  callback never saw any of that hashing.  `mlkem_prf_init()` re-initialised
+  the PRF with a hardcoded heap of `NULL` and device id of `0`, discarding what
+  `mlkem_prf_new()` had stored, and it runs at the top of key generation and
+  encapsulation.  ML-DSA never bound its SHAKE object at all and re-initialised
+  it with `INVALID_DEVID` at every internal reset.  `mlkem_prf_init()` now
+  takes the heap and device id to restore, `wc_MlDsaKey_Init()` binds
+  `key->shake` to the key's heap and device id, and every internal ML-DSA reset
+  preserves that binding.  Affects any port that registers a hash crypto
+  callback and expects to accelerate post-quantum hashing; software-only builds
+  are unchanged.
+
 * **Fix (certificate manager left pointing at a released store)**:
   `wolfSSL_CTX_set_cert_store()` pairs the store handed to it with the
   context's certificate manager, which keeps a pointer back to that store.
