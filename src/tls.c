@@ -4613,9 +4613,9 @@ int TLSX_CSR2_ForceRequest(WOLFSSL* ssl)
     TLSX* extension = TLSX_Find(ssl->extensions, TLSX_STATUS_REQUEST_V2);
     CertificateStatusRequestItemV2* csr2 = extension ?
                         (CertificateStatusRequestItemV2*)extension->data : NULL;
+    CertificateStatusRequestItemV2* multi = TLSX_CSR2_GetMulti(ssl->extensions);
     int ret = 0;
 
-    /* forces only the first one */
     if (csr2) {
         switch (csr2->status_type) {
             case WOLFSSL_CSR2_OCSP:
@@ -4640,6 +4640,16 @@ int TLSX_CSR2_ForceRequest(WOLFSSL* ssl)
             #ifdef HAVE_CRL
                 ret = TLSX_CSR_LeafCrlCheck(ssl, ret);
             #endif
+                if (ret == 0 && multi != NULL) {
+                    int i;
+                    /* The chain certificates' own lookups were skipped in
+                     * favour of staples that never arrived. */
+                    for (i = (int)multi->requests - 2; ret == 0 && i >= 0; i--) {
+                        ret = CsrDoChainFallbackLookup(ssl,
+                                &multi->request.ocsp[i],
+                                (int)multi->requests - 1 - i);
+                    }
+                }
                 break;
         }
     }
