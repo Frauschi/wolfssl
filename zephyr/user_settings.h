@@ -216,6 +216,9 @@ extern "C" {
 #if defined(CONFIG_WOLFSSL_OCSP_STAPLING)
     #define HAVE_CERTIFICATE_STATUS_REQUEST
 #endif
+#if defined(CONFIG_WOLFSSL_OCSP_SCREEN_RESPONDER)
+    #define WOLFSSL_OCSP_SCREEN_RESPONDER
+#endif
 
 /* Session Cache */
 #if defined(CONFIG_WOLFSSL_SESSION_CACHE)

@@ -404,6 +404,17 @@ config WOLFSSL_OCSP_STAPLING
     (HAVE_CERTIFICATE_STATUS_REQUEST), with which a client asks the server
     to staple an OCSP response for its own certificate to the handshake.
 
+config WOLFSSL_OCSP_SCREEN_RESPONDER
+  bool "wolfSSL OCSP responder destination screening"
+  depends on WOLFSSL_OCSP
+  help
+    Define WOLFSSL_OCSP_SCREEN_RESPONDER. Resolves an OCSP responder host
+    before connecting and refuses loopback, private and link-local
+    addresses, so a certificate-supplied AIA URL cannot steer the request
+    at an internal address. Leave this off when the responder legitimately
+    lives on loopback or an internal network; an operator-configured
+    override responder is screened the same way.
+
 config WOLFSSL_SESSION_TICKET
   bool "wolfSSL TLS session tickets"
   depends on !WOLFSSL_HAS_SETTINGS_FILE
