@@ -595,6 +595,11 @@
     #endif /* HAVE_SOCKADDR */
 
     #if defined(WOLFSSL_ZEPHYR)
+        /* Zephyr resolves names only through zsock_getaddrinfo(); it has no
+         * gethostbyname(), so the fallback in wolfIO_TcpConnect cannot build. */
+        #ifndef HAVE_GETADDRINFO
+            #define HAVE_GETADDRINFO
+        #endif
         typedef struct zsock_addrinfo   ADDRINFO;
         #define getaddrinfo             zsock_getaddrinfo
         #define freeaddrinfo            zsock_freeaddrinfo
