@@ -90,16 +90,16 @@
 #endif
 #if defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_MLKEM_NO_ASN1) && \
     !defined(NO_AES) && defined(HAVE_AES_KEYWRAP) && \
-    !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) && \
-    !defined(WOLFSSL_MLKEM_NO_DECAPSULATE) && \
     defined(HAVE_HKDF) && !defined(NO_HMAC)
     #include <wolfssl/wolfcrypt/wc_mlkem.h>
     #include <wolfssl/wolfcrypt/hmac.h>
-    /* gates RFC 9629 KEMRecipientInfo with ML-KEM. A KEM recipient needs both
-     * directions of the KEM, an AES key wrap for the content-encryption key,
-     * and HKDF to derive the key-encryption key, so all are required
-     * together. KMAC is an additional KDF choice, not a requirement. */
-    #define WC_PKCS7_HAVE_MLKEM
+    /* RFC 9629 KEMRecipientInfo: encapsulate to encode, decapsulate to decode */
+    #ifndef WOLFSSL_MLKEM_NO_ENCAPSULATE
+        #define WC_PKCS7_MLKEM_ENCODE
+    #endif
+    #ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
+        #define WC_PKCS7_MLKEM_DECODE
+    #endif
 #endif
 #ifdef HAVE_LIBZ
     #include <wolfssl/wolfcrypt/compress.h>
@@ -10846,7 +10846,7 @@ int wc_PKCS7_PadData(byte* in, word32 inSz, byte* out, word32 outSz,
 }
 
 
-#ifdef WC_PKCS7_HAVE_MLKEM
+#if defined(WC_PKCS7_MLKEM_ENCODE) || defined(WC_PKCS7_MLKEM_DECODE)
 
 /* id-ori-kem, RFC 9629: 1.2.840.113549.1.9.16.13.3 */
 static const byte oriKemOid[] =
@@ -10985,6 +10985,7 @@ static int wc_PKCS7_WrapIsPadded(int wrapOID)
     return 0;
 }
 
+#ifdef WC_PKCS7_MLKEM_ENCODE
 /* Wrap cek under kek with the algorithm named by wrapOID. Returns the wrapped
  * length or a negative error code. */
 static int wc_PKCS7_WrapKey(int wrapOID, const byte* kek, word32 kekSz,
@@ -11000,7 +11001,9 @@ static int wc_PKCS7_WrapKey(int wrapOID, const byte* kek, word32 kekSz,
     }
     return wc_AesKeyWrap(kek, kekSz, cek, cekSz, out, outSz, NULL);
 }
+#endif /* WC_PKCS7_MLKEM_ENCODE */
 
+#ifdef WC_PKCS7_MLKEM_DECODE
 /* Unwrap in under kek with the algorithm named by wrapOID. Returns the
  * recovered length or a negative error code. */
 static int wc_PKCS7_UnwrapKey(int wrapOID, const byte* kek, word32 kekSz,
@@ -11016,6 +11019,7 @@ static int wc_PKCS7_UnwrapKey(int wrapOID, const byte* kek, word32 kekSz,
     }
     return wc_AesKeyUnWrap(kek, kekSz, in, inSz, out, outSz, NULL);
 }
+#endif /* WC_PKCS7_MLKEM_DECODE */
 
 /* Encode CMSORIforKEMOtherInfo, RFC 9629 Section 5:
  *
@@ -11140,6 +11144,7 @@ static int wc_PKCS7_MlKemType(int oidSum, int* type)
     return ret;
 }
 
+#ifdef WC_PKCS7_MLKEM_ENCODE
 /* Load the recipient's ML-KEM public key out of a parsed certificate.
  * Return 0 on success, negative upon error */
 static int wc_PKCS7_KemriPubKeyFromCert(DecodedCert* decoded, MlKemKey* key,
@@ -11558,8 +11563,10 @@ out:
 
     return ret;
 }
+#endif /* WC_PKCS7_MLKEM_ENCODE */
 
 
+#ifdef WC_PKCS7_MLKEM_DECODE
 /* Recover the content-encryption key from a KEMRecipientInfo, RFC 9629.
  *
  * in/inSz is the oriValue, that is the KEMRecipientInfo SEQUENCE itself.
@@ -11772,8 +11779,9 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
 
     return ret;
 }
+#endif /* WC_PKCS7_MLKEM_DECODE */
 
-#endif /* WC_PKCS7_HAVE_MLKEM */
+#endif /* WC_PKCS7_MLKEM_ENCODE || WC_PKCS7_MLKEM_DECODE */
 
 /* Encode and add CMS EnvelopedData ORI (OtherRecipientInfo) RecipientInfo
  * to CMS/PKCS#7 EnvelopedData structure.
@@ -14260,7 +14268,7 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
     word32 oriValueSz, tmpIdx;
     byte* oriValue;
     byte oriOID[MAX_OID_SZ];
-#ifdef WC_PKCS7_HAVE_MLKEM
+#ifdef WC_PKCS7_MLKEM_DECODE
     word32 keyCap;
 #endif
 
@@ -14318,7 +14326,7 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
 
             *idx += oriValueSz;
 
-        #ifdef WC_PKCS7_HAVE_MLKEM
+        #ifdef WC_PKCS7_MLKEM_DECODE
             keyCap = *decryptedKeySz;
         #endif
             if (pkcs7->oriDecryptCb != NULL) {
@@ -14334,7 +14342,7 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
                 ret = PKCS7_RECIP_E;
             }
 
-        #ifdef WC_PKCS7_HAVE_MLKEM
+        #ifdef WC_PKCS7_MLKEM_DECODE
             /* id-ori-kem is built in; a registered callback goes first */
             if ((ret != 0) && (ret != WC_NO_ERR_TRACE(MEMORY_E)) &&
                     ((word32)oriOIDSz == (word32)sizeof(oriKemOid)) &&

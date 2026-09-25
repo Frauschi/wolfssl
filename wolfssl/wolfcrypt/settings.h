@@ -3754,6 +3754,16 @@
 #endif /* HAVE_ED448 */
 
 
+/* the legacy names, resolved here so guards outside wc_mlkem.h see them */
+#if defined(WOLFSSL_KYBER_NO_ENCAPSULATE) && \
+    !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE)
+    #define WOLFSSL_MLKEM_NO_ENCAPSULATE
+#endif
+#if defined(WOLFSSL_KYBER_NO_DECAPSULATE) && \
+    !defined(WOLFSSL_MLKEM_NO_DECAPSULATE)
+    #define WOLFSSL_MLKEM_NO_DECAPSULATE
+#endif
+
 /* Derived here rather than in wc_mlkem.h, which is included from inside the
  * guard that tests this. Names the ASN.1 backend inputs rather than
  * WOLFSSL_ASN_TEMPLATE, which has no default until several hundred lines down

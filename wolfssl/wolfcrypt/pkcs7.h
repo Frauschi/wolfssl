@@ -556,7 +556,6 @@ WOLFSSL_API int  wc_PKCS7_SetOriDecryptCb(wc_PKCS7* pkcs7, CallbackOriDecrypt cb
 #if defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_MLKEM_NO_ASN1) && \
     !defined(NO_AES) && defined(HAVE_AES_KEYWRAP) && \
     !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) && \
-    !defined(WOLFSSL_MLKEM_NO_DECAPSULATE) && \
     defined(HAVE_HKDF) && !defined(NO_HMAC)
 WOLFSSL_API int  wc_PKCS7_AddRecipient_KEMRI(wc_PKCS7* pkcs7, const byte* cert,
                                         word32 certSz, int kdfOID, int wrapOID,
