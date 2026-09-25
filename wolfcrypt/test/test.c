@@ -77715,6 +77715,41 @@ static int mlkemOriOtherTypeCb(wc_PKCS7* pkcs7, byte* oriType,
     return -1;
 }
 
+#if !defined(NO_PKCS7_STREAM) && defined(ASN_BER_TO_DER)
+/* Rewrite the ContentInfo, [0] and outer SEQUENCE headers of a DER bundle to
+ * indefinite length, the way a streaming encoder emits them. */
+static int pkcs7_mlkem_indef_outer(const byte* in, word32 inSz, byte* out,
+                                   word32 outSz)
+{
+    word32 i = 0;
+    word32 o = 0;
+    int h;
+
+    for (h = 0; h < 3; h++) {
+        if (h == 1) {
+            /* the contentType OID between the first two headers */
+            if (i + 2 > inSz || i + 2 + in[i + 1] > inSz || o + 2 +
+                    in[i + 1] > outSz)
+                return -1;
+            XMEMCPY(out + o, in + i, 2 + (word32)in[i + 1]);
+            o += 2 + (word32)in[i + 1];
+            i += 2 + (word32)in[i + 1];
+        }
+        if (i + 2 > inSz || o + 2 > outSz)
+            return -1;
+        out[o++] = in[i++];
+        out[o++] = 0x80;
+        i += (in[i] & 0x80) ? 1 + (word32)(in[i] & 0x7F) : 1;
+    }
+    if (i > inSz || o + (inSz - i) + 6 > outSz)
+        return -1;
+    XMEMCPY(out + o, in + i, inSz - i);
+    o += inSz - i;
+    XMEMSET(out + o, 0, 6);
+    return (int)(o + 6);
+}
+#endif
+
 /* Round trip a CMS EnvelopedData and AuthEnvelopedData whose recipient is an
  * RFC 9629 KEMRecipientInfo built from an ML-KEM certificate. */
 static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
@@ -77725,6 +77760,10 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
     byte* key = NULL;
     byte* out = NULL;
     byte* decoded = NULL;
+    byte* indef = NULL;
+#if !defined(NO_PKCS7_STREAM) && defined(ASN_BER_TO_DER)
+    int indefSz, fed, n;
+#endif
     word32 certSz, keySz;
     int i, testSz, encodedSz, cbCalls;
     XFILE f = XBADFILE;
@@ -77852,7 +77891,9 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
     key  = (byte*)XMALLOC(FOURK_BUF * 4, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
     out  = (byte*)XMALLOC(FOURK_BUF * 4, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
     decoded = (byte*)XMALLOC(FOURK_BUF, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
-    if (cert == NULL || key == NULL || out == NULL || decoded == NULL) {
+    indef = (byte*)XMALLOC(FOURK_BUF * 4, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    if (cert == NULL || key == NULL || out == NULL || decoded == NULL ||
+            indef == NULL) {
         ret = WC_TEST_RET_ENC_ERRNO;
         goto out_free;
     }
@@ -77977,6 +78018,44 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
             goto out_free;
         }
 
+    #if !defined(NO_PKCS7_STREAM) && defined(ASN_BER_TO_DER)
+        /* indefinite length, in chunks: the built-in decoder reads the set to
+         * its end, which empties the stream buffer */
+        indefSz = pkcs7_mlkem_indef_outer(out, (word32)encodedSz, indef,
+            FOURK_BUF * 4);
+        if (indefSz <= 0) {
+            ret = WC_TEST_RET_ENC_NC;
+            goto out_free;
+        }
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+        if (pkcs7 == NULL) {
+            ret = WC_TEST_RET_ENC_ERRNO;
+            goto out_free;
+        }
+        pkcs7->privateKey   = key;
+        pkcs7->privateKeySz = keySz;
+        XMEMSET(decoded, 0, FOURK_BUF);
+        ret = WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E);
+        for (fed = 0; fed < indefSz &&
+                ret == WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E); fed += n) {
+            n = ((indefSz - fed) < 100) ? (indefSz - fed) : 100;
+            if (vectors[i].authEnv) {
+                ret = wc_PKCS7_DecodeAuthEnvelopedData(pkcs7, indef + fed,
+                    (word32)n, decoded, FOURK_BUF);
+            }
+            else {
+                ret = wc_PKCS7_DecodeEnvelopedData(pkcs7, indef + fed,
+                    (word32)n, decoded, FOURK_BUF);
+            }
+        }
+        if ((word32)ret != (word32)sizeof(content) ||
+                XMEMCMP(decoded, content, sizeof(content)) != 0) {
+            ret = WC_TEST_RET_ENC_NC;
+            goto out_free;
+        }
+    #endif
+
         /* the private key belongs to the caller, do not let Free release it */
         pkcs7->privateKey = NULL;
         pkcs7->privateKeySz = 0;
@@ -77995,6 +78074,7 @@ out_free:
     XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
     XFREE(out, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
     XFREE(decoded, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(indef, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
 
     return ret;
 }

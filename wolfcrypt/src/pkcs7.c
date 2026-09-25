@@ -15893,6 +15893,10 @@ int wc_PKCS7_DecodeEnvelopedData(wc_PKCS7* pkcs7, byte* in,
                 }
             }
 
+            /* a handler that emptied the buffer left idx in its coordinates */
+            if (pkcs7->stream->length == 0) {
+                idx = pkcs7->stream->idx;
+            }
             tmpIdx               = idx;
             pkcs7->stream->aadSz = decryptedKeySz;
             pkcs7->stream->expected = MAX_LENGTH_SZ + MAX_VERSION_SZ +
@@ -17377,6 +17381,10 @@ int wc_PKCS7_DecodeAuthEnvelopedData(wc_PKCS7* pkcs7, byte* in,
                 }
             }
 
+            /* a handler that emptied the buffer left idx in its coordinates */
+            if (pkcs7->stream->length == 0) {
+                idx = pkcs7->stream->idx;
+            }
             tmpIdx = idx;
             pkcs7->stream->expected = MAX_SEQ_SZ;
         #else
