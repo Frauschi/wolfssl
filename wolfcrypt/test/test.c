@@ -78258,6 +78258,89 @@ static wc_test_ret_t pkcs7enveloped_mlkem_multi_test(void)
     }
     ret = 0;
 
+    /* With the second recipient's certificate but the first one's key nothing
+     * may open: the rid alone decides which recipient is decapsulated. */
+    for (j = 0; j < 2; j++) {
+        int opt = (j == 0) ? CMS_ISSUER_AND_SERIAL_NUMBER : CMS_SKID;
+
+        pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+        if (pkcs7 == NULL) {
+            ret = WC_TEST_RET_ENC_ERRNO;
+            goto out_multi;
+        }
+        if (wc_PKCS7_Init(pkcs7, HEAP_HINT, devId) != 0) {
+            ret = WC_TEST_RET_ENC_NC;
+            goto out_multi;
+        }
+        pkcs7->content    = (byte*)content;
+        pkcs7->contentSz  = (word32)sizeof(content);
+        pkcs7->contentOID = DATA;
+        pkcs7->encryptOID = MLKEM_TEST_CONTENT_ALG;
+        for (i = 0; i < 2; i++) {
+            f = XFOPEN(certFiles[i], "rb");
+            if (f == XBADFILE) {
+                ret = WC_TEST_RET_ENC_ERRNO;
+                goto out_multi;
+            }
+            certSz = (word32)XFREAD(cert, 1, FOURK_BUF * 4, f);
+            XFCLOSE(f);
+            f = XBADFILE;
+            if ((certSz == 0) || (wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert,
+                    certSz, MLKEM_TEST_KDF, AES256_WRAP, NULL, 0, opt) < 0)) {
+                ret = WC_TEST_RET_ENC_NC;
+                goto out_multi;
+            }
+        }
+        encodedSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, out, FOURK_BUF * 8);
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = NULL;
+        if (encodedSz <= 0) {
+            ret = WC_TEST_RET_ENC_EC(encodedSz);
+            goto out_multi;
+        }
+
+        /* cert still holds the second recipient's certificate */
+        for (i = 0; i < 2; i++) {
+            f = XFOPEN(keyFiles[(i == 0) ? 1 : 0], "rb");
+            if (f == XBADFILE) {
+                ret = WC_TEST_RET_ENC_ERRNO;
+                goto out_multi;
+            }
+            keySz = (word32)XFREAD(key, 1, FOURK_BUF * 4, f);
+            XFCLOSE(f);
+            f = XBADFILE;
+
+            pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+            if (pkcs7 == NULL) {
+                ret = WC_TEST_RET_ENC_ERRNO;
+                goto out_multi;
+            }
+            if (wc_PKCS7_InitWithCert(pkcs7, cert, certSz) != 0) {
+                ret = WC_TEST_RET_ENC_NC;
+                goto out_multi;
+            }
+            pkcs7->privateKey   = key;
+            pkcs7->privateKeySz = keySz;
+            XMEMSET(decoded, 0, FOURK_BUF);
+            decSz = wc_PKCS7_DecodeEnvelopedData(pkcs7, out,
+                    (word32)encodedSz, decoded, FOURK_BUF);
+            pkcs7->privateKey = NULL;
+            pkcs7->privateKeySz = 0;
+            wc_PKCS7_Free(pkcs7);
+            pkcs7 = NULL;
+
+            if ((i == 0) && ((decSz != (int)sizeof(content)) ||
+                    (XMEMCMP(decoded, content, sizeof(content)) != 0))) {
+                ret = WC_TEST_RET_ENC_I(decSz);
+                goto out_multi;
+            }
+            if ((i == 1) && (decSz != WC_NO_ERR_TRACE(PKCS7_RECIP_E))) {
+                ret = WC_TEST_RET_ENC_I(decSz);
+                goto out_multi;
+            }
+        }
+    }
+
 #ifndef NO_PKCS7_STREAM
     /* Two recipients, matching one second, fed in small chunks. A decode that
      * has to wait for input re-enters through the state dispatch rather than

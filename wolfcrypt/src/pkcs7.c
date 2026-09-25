@@ -11567,6 +11567,21 @@ out:
 
 
 #ifdef WC_PKCS7_MLKEM_DECODE
+/* Serial numbers equal as integers; a leading zero octet is sign padding. */
+static int wc_PKCS7_SerialMatch(const byte* a, word32 aSz, const byte* b,
+                                word32 bSz)
+{
+    while (aSz > 1 && a[0] == 0) {
+        a++;
+        aSz--;
+    }
+    while (bSz > 1 && b[0] == 0) {
+        b++;
+        bSz--;
+    }
+    return (aSz == bSz) && (XMEMCMP(a, b, aSz) == 0);
+}
+
 /* Recover the content-encryption key from a KEMRecipientInfo, RFC 9629.
  *
  * in/inSz is the oriValue, that is the KEMRecipientInfo SEQUENCE itself.
@@ -11588,6 +11603,9 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     word32 keyIdx = 0;
     int length = 0, version = 0, kekLen = 0, level = 0;
     int kemInited = 0;
+    int ridMatch = 0;
+    word32 ridEnd, nameStart, nameSz, snSz;
+    byte tag;
     int ret;
 
     if (pkcs7 == NULL || in == NULL || decryptedKey == NULL ||
@@ -11619,25 +11637,46 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
         return ASN_VERSION_E;
     }
 
-    /* rid, either an IssuerAndSerialNumber SEQUENCE or a [0] key identifier.
-     * The reader holds only a private key, so there is nothing to match it
-     * against here; a wrong guess shows up as a key unwrap failure and the
-     * caller moves on to the next recipient. */
+    /* rid: IssuerAndSerialNumber or [0] SubjectKeyIdentifier. Without a
+     * certificate there is nothing to match, and a wrong key fails the unwrap */
     if (idx >= inSz)
         return ASN_PARSE_E;
     if (in[idx] == (ASN_CONSTRUCTED | ASN_SEQUENCE)) {
         if (GetSequence(in, &idx, &length, inSz) < 0)
             return ASN_PARSE_E;
-        idx += (word32)length;
+        ridEnd = idx + (word32)length;
+        if (GetSequence(in, &idx, &length, ridEnd) < 0)
+            return ASN_PARSE_E;
+        nameStart = idx;
+        nameSz = (word32)length;
+        idx += nameSz;
+        if (GetASNTag(in, &idx, &tag, ridEnd) < 0 || tag != ASN_INTEGER ||
+                GetLength(in, &idx, &length, ridEnd) < 0)
+            return ASN_PARSE_E;
+        snSz = (word32)length;
+        ridMatch = (pkcs7->issuer != NULL) &&
+            (pkcs7->issuerSz == nameSz) &&
+            (XMEMCMP(in + nameStart, pkcs7->issuer, nameSz) == 0) &&
+            wc_PKCS7_SerialMatch(in + idx, snSz, pkcs7->issuerSn,
+                                 pkcs7->issuerSnSz);
+        idx = ridEnd;
     }
     else if (in[idx] == ASN_CONTEXT_SPECIFIC) {
         idx++;
         if (GetLength(in, &idx, &length, inSz) < 0)
             return ASN_PARSE_E;
+        /* extSubjKeyId holds a hash unless the SKI is KEYID_SIZE bytes, so
+         * a key identifier of any other length is left to the key */
+        ridMatch = (length != KEYID_SIZE) ||
+            (XMEMCMP(in + idx, pkcs7->issuerSubjKeyId, KEYID_SIZE) == 0);
         idx += (word32)length;
     }
     else {
         return ASN_PARSE_E;
+    }
+    if ((pkcs7->singleCert != NULL) && !ridMatch) {
+        WOLFSSL_MSG("KEMRecipientInfo rid is not the reader's certificate");
+        return PKCS7_RECIP_E;
     }
 
     /* kem, the ML-KEM AlgorithmIdentifier */
