@@ -88986,20 +88986,19 @@ static wc_test_ret_t pkcs7enveloped_run_vectors(byte* rsaCert, word32 rsaCertSz,
 }
 
 
-/* Mirrors WC_PKCS7_HAVE_MLKEM in pkcs7.c; keep the two in step. */
-#if defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_MLKEM_NO_ASN1) && \
-    !defined(NO_AES) && defined(HAVE_AES_KEYWRAP) && \
-    !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) && \
-    !defined(WOLFSSL_MLKEM_NO_DECAPSULATE) && \
-    defined(HAVE_HKDF) && !defined(NO_HMAC)
-#define PKCS7_MLKEM_TEST_API
+#ifdef WC_PKCS7_MLKEM_DECODE
+#define PKCS7_MLKEM_TEST_DECODE
+#ifdef WC_PKCS7_MLKEM_ENCODE
+#define PKCS7_MLKEM_TEST_ROUNDTRIP
+#endif
 #endif
 
-/* The published vector is ML-KEM-512 with HKDF-SHA-256 and AES-128 key wrap,
- * so it only builds where those three are compiled in. */
-#if defined(PKCS7_MLKEM_TEST_API) && defined(WOLFSSL_WC_ML_KEM_512) && \
+/* ML-KEM-512, HKDF-SHA-256 and AES-128 key wrap, with a seed-only key that
+ * takes ML-KEM key generation to expand. */
+#if defined(PKCS7_MLKEM_TEST_DECODE) && defined(WOLFSSL_WC_ML_KEM_512) && \
     !defined(WOLFSSL_NO_ML_KEM) && !defined(NO_SHA256) && \
-    defined(WOLFSSL_AES_128) && defined(HAVE_AESGCM)
+    defined(WOLFSSL_AES_128) && defined(HAVE_AESGCM) && \
+    !defined(WOLFSSL_MLKEM_NO_MAKE_KEY)
 #define PKCS7_MLKEM_TEST_INTEROP
 
 /* RFC 9936 Appendix C: an ML-KEM-512 AuthEnvelopedData from another
@@ -89154,7 +89153,7 @@ out_interop:
 
 /* The round-trip tests also need AES-256 for the wrap and the certificate
  * files. */
-#if defined(PKCS7_MLKEM_TEST_API) && \
+#if defined(PKCS7_MLKEM_TEST_ROUNDTRIP) && \
     (defined(HAVE_AES_CBC) || defined(HAVE_AESGCM)) && \
     defined(WOLFSSL_AES_256) && !defined(NO_FILESYSTEM)
 
@@ -90621,7 +90620,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t pkcs7enveloped_test(void)
     if (ret >= 0)
         ret = pkcs7_mlkem_rfc9936_interop_test();
 #endif
-#if defined(PKCS7_MLKEM_TEST_API) && \
+#if defined(PKCS7_MLKEM_TEST_ROUNDTRIP) && \
     (defined(HAVE_AES_CBC) || defined(HAVE_AESGCM)) && \
     defined(WOLFSSL_AES_256) && !defined(NO_FILESYSTEM)
     if (ret >= 0)

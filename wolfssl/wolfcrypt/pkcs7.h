@@ -43,6 +43,18 @@
 #endif
 #include <wolfssl/wolfcrypt/wc_encrypt.h>
 
+/* RFC 9629 KEMRecipientInfo: encapsulate to encode, decapsulate to decode */
+#if defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_MLKEM_NO_ASN1) && \
+    !defined(NO_AES) && defined(HAVE_AES_KEYWRAP) && \
+    defined(HAVE_HKDF) && !defined(NO_HMAC)
+    #ifndef WOLFSSL_MLKEM_NO_ENCAPSULATE
+        #define WC_PKCS7_MLKEM_ENCODE
+    #endif
+    #ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
+        #define WC_PKCS7_MLKEM_DECODE
+    #endif
+#endif
+
 #ifdef __cplusplus
     extern "C" {
 #endif
@@ -554,11 +566,7 @@ WOLFSSL_API int  wc_PKCS7_AddRecipient_PWRI(wc_PKCS7* pkcs7, byte* passwd,
 WOLFSSL_API int  wc_PKCS7_SetOriEncryptCtx(wc_PKCS7* pkcs7, void* ctx);
 WOLFSSL_API int  wc_PKCS7_SetOriDecryptCtx(wc_PKCS7* pkcs7, void* ctx);
 WOLFSSL_API int  wc_PKCS7_SetOriDecryptCb(wc_PKCS7* pkcs7, CallbackOriDecrypt cb);
-#if defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_MLKEM_NO_ASN1) && \
-    !defined(NO_AES) && defined(HAVE_AES_KEYWRAP) && \
-    !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) && \
-    !defined(WOLFSSL_MLKEM_NO_DECAPSULATE) && \
-    defined(HAVE_HKDF) && !defined(NO_HMAC)
+#ifdef WC_PKCS7_MLKEM_ENCODE
 WOLFSSL_API int  wc_PKCS7_AddRecipient_KEMRI(wc_PKCS7* pkcs7, const byte* cert,
                                         word32 certSz, int kdfOID, int wrapOID,
                                         const byte* ukm, word32 ukmSz,

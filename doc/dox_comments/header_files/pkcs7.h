@@ -2004,6 +2004,11 @@ int wc_PKCS7_SetOriDecryptCb(wc_PKCS7* pkcs7, CallbackOriDecrypt cb);
     order. The decoder walks past the recipients that are not the reader's,
     bounded by the length of the RecipientInfo set, and tries each in turn.
 
+    An ML-KEM certificate given to wc_PKCS7_InitWithCert() becomes a
+    KEMRecipientInfo at encode time with the RFC 9936 mandatory algorithms:
+    HKDF_SHA256_OID, and AES128_WRAP for ML-KEM-512 or AES256_WRAP otherwise.
+    It uses pkcs7->ukm when set. Any other KDF or wrap needs this function.
+
     \return size of the encoded RecipientInfo on success
     \return negative on error
 
