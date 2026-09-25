@@ -1097,10 +1097,18 @@ enum {
         #include <string.h>
     #endif
 
-    #define XMEMCPY(d,s,l)    memcpy((d),(s),(l))
-    #define XMEMSET(b,c,l)    memset((b),(c),(l))
-    #define XMEMCMP(s1,s2,n)  memcmp((s1),(s2),(n))
-    #define XMEMMOVE(d,s,l)   memmove((d),(s),(l))
+    #ifndef XMEMCPY
+        #define XMEMCPY(d,s,l)    memcpy((d),(s),(l))
+    #endif
+    #ifndef XMEMSET
+        #define XMEMSET(b,c,l)    memset((b),(c),(l))
+    #endif
+    #ifndef XMEMCMP
+        #define XMEMCMP(s1,s2,n)  memcmp((s1),(s2),(n))
+    #endif
+    #ifndef XMEMMOVE
+        #define XMEMMOVE(d,s,l)   memmove((d),(s),(l))
+    #endif
 
     #define XSTRLEN(s1)       strlen((s1))
     #define XSTRNCPY(s1,s2,n) strncpy((s1),(s2),(n))
