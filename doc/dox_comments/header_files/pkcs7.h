@@ -1910,9 +1910,10 @@ int wc_PKCS7_SetOriDecryptCtx(wc_PKCS7* pkcs7, void* ctx);
     the application unchanged.
 
     A callback is consulted for every oriType. RFC 9629 KEMRecipientInfo
-    (id-ori-kem) is handled internally when no callback is registered, so
-    ML-KEM recipients need none; registering one takes priority for every
-    oriType, that one included.
+    (id-ori-kem) is also handled internally, so ML-KEM recipients need no
+    callback. When one is registered it is tried first, and if it returns an
+    error other than MEMORY_E for an id-ori-kem recipient, the built-in
+    decoder is tried with pkcs7->privateKey.
 
     \return 0 on success
     \return negative on error

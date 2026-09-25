@@ -77699,6 +77699,22 @@ typedef struct {
     #define MLKEM_TEST_CONTENT_ALG AES256GCMb
 #endif
 
+/* An application's handler for some other oriType, declining this one. */
+static int mlkemOriOtherTypeCb(wc_PKCS7* pkcs7, byte* oriType,
+        word32 oriTypeSz, byte* oriValue, word32 oriValueSz,
+        byte* decryptedKey, word32* decryptedKeySz, void* ctx)
+{
+    (*(int*)ctx)++;
+    (void)pkcs7;
+    (void)oriType;
+    (void)oriTypeSz;
+    (void)oriValue;
+    (void)oriValueSz;
+    (void)decryptedKey;
+    (void)decryptedKeySz;
+    return -1;
+}
+
 /* Round trip a CMS EnvelopedData and AuthEnvelopedData whose recipient is an
  * RFC 9629 KEMRecipientInfo built from an ML-KEM certificate. */
 static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
@@ -77710,7 +77726,7 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
     byte* out = NULL;
     byte* decoded = NULL;
     word32 certSz, keySz;
-    int i, testSz, encodedSz;
+    int i, testSz, encodedSz, cbCalls;
     XFILE f = XBADFILE;
 
     WOLFSSL_SMALL_STACK_STATIC const byte content[] = {
@@ -77923,6 +77939,40 @@ static wc_test_ret_t pkcs7enveloped_mlkem_test(void)
 
         if ((word32)ret != (word32)sizeof(content) ||
                 XMEMCMP(decoded, content, sizeof(content)) != 0) {
+            ret = WC_TEST_RET_ENC_NC;
+            goto out_free;
+        }
+
+        /* a callback registered for another oriType must not hide the
+         * built-in KEMRecipientInfo decoder */
+        pkcs7->privateKey = NULL;
+        pkcs7->privateKeySz = 0;
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = wc_PKCS7_New(HEAP_HINT, devId);
+        if (pkcs7 == NULL) {
+            ret = WC_TEST_RET_ENC_ERRNO;
+            goto out_free;
+        }
+        pkcs7->privateKey   = key;
+        pkcs7->privateKeySz = keySz;
+        cbCalls = 0;
+        if (wc_PKCS7_SetOriDecryptCb(pkcs7, mlkemOriOtherTypeCb) != 0 ||
+                wc_PKCS7_SetOriDecryptCtx(pkcs7, &cbCalls) != 0) {
+            ret = WC_TEST_RET_ENC_NC;
+            goto out_free;
+        }
+        XMEMSET(decoded, 0, FOURK_BUF);
+        if (vectors[i].authEnv) {
+            ret = wc_PKCS7_DecodeAuthEnvelopedData(pkcs7, out,
+                (word32)encodedSz, decoded, FOURK_BUF);
+        }
+        else {
+            ret = wc_PKCS7_DecodeEnvelopedData(pkcs7, out, (word32)encodedSz,
+                decoded, FOURK_BUF);
+        }
+        if ((word32)ret != (word32)sizeof(content) ||
+                XMEMCMP(decoded, content, sizeof(content)) != 0 ||
+                cbCalls != 1) {
             ret = WC_TEST_RET_ENC_NC;
             goto out_free;
         }

@@ -14260,6 +14260,9 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
     word32 oriValueSz, tmpIdx;
     byte* oriValue;
     byte oriOID[MAX_OID_SZ];
+#ifdef WC_PKCS7_HAVE_MLKEM
+    word32 keyCap;
+#endif
 
     byte* pkiMsg    = in;
     word32 pkiMsgSz = inSz;
@@ -14316,25 +14319,9 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
             *idx += oriValueSz;
 
         #ifdef WC_PKCS7_HAVE_MLKEM
-            /* RFC 9629 carries a KEMRecipientInfo in an OtherRecipientInfo, so
-             * id-ori-kem is handled here rather than in a user callback. An
-             * application that registered its own callback keeps priority, so
-             * this never takes over an oriType it was already handling. */
-            if ((pkcs7->oriDecryptCb == NULL) &&
-                    ((word32)oriOIDSz == (word32)sizeof(oriKemOid)) &&
-                    (XMEMCMP(oriOID, oriKemOid, (word32)oriOIDSz) == 0)) {
-                ret = wc_PKCS7_DecryptKemri(pkcs7, oriValue, oriValueSz,
-                                            decryptedKey, decryptedKeySz);
-            }
-            else
-        #endif /* WC_PKCS7_HAVE_MLKEM */
-            if (pkcs7->oriDecryptCb == NULL) {
-                /* says nothing about the other RecipientInfos; walk on */
-                WOLFSSL_MSG("You must register an ORI Decrypt callback");
-                *recipFound = 0;
-                return PKCS7_RECIP_E;
-            }
-            else {
+            keyCap = *decryptedKeySz;
+        #endif
+            if (pkcs7->oriDecryptCb != NULL) {
                 /* pass oriOID and oriValue to user callback, expect back
                    decryptedKey and size */
                 ret = pkcs7->oriDecryptCb(pkcs7, oriOID, (word32)oriOIDSz,
@@ -14342,6 +14329,21 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
                                           decryptedKeySz,
                                           pkcs7->oriDecryptCtx);
             }
+            else {
+                WOLFSSL_MSG("No ORI Decrypt callback registered");
+                ret = PKCS7_RECIP_E;
+            }
+
+        #ifdef WC_PKCS7_HAVE_MLKEM
+            /* id-ori-kem is built in; a registered callback goes first */
+            if ((ret != 0) && (ret != WC_NO_ERR_TRACE(MEMORY_E)) &&
+                    ((word32)oriOIDSz == (word32)sizeof(oriKemOid)) &&
+                    (XMEMCMP(oriOID, oriKemOid, (word32)oriOIDSz) == 0)) {
+                *decryptedKeySz = keyCap;
+                ret = wc_PKCS7_DecryptKemri(pkcs7, oriValue, oriValueSz,
+                                            decryptedKey, decryptedKeySz);
+            }
+        #endif
 
             /* Only MEMORY_E says nothing about this recipient; any other
              * failure, BAD_FUNC_ARG included, just means "not this one". */
