@@ -1019,7 +1019,7 @@ int wc_AsyncThreadCreate_ex(pthread_t *thread,
     }
 
     /* Set priority based on value in threadAttr */
-    memset(&param, 0, sizeof(param));
+    XMEMSET(&param, 0, sizeof(param));
     param.sched_priority = priority;
     if (policy != SCHED_OTHER) {
         status = pthread_attr_setschedparam(&attr, &param);
@@ -1213,7 +1213,7 @@ int wc_AsyncThreadSetPolicyAndPriority(pthread_t *thread, word32 policy,
         return BAD_FUNC_ARG;
     }
 
-    memset(&param, 0, sizeof(param));
+    XMEMSET(&param, 0, sizeof(param));
 
     status = pthread_getschedparam(*thread, &policy1, &param);
     if (status != 0) {
