@@ -2993,7 +2993,7 @@ int wc_local_InitMutexOnce(wolfSSL_Mutex* m, wc_MutexOnceFlag* flag)
                 return MEMORY_E;
             }
 
-            memset(key_ptr, 0, sizeof(int));
+            XMEMSET(key_ptr, 0, sizeof(int));
 
             if (pthread_setspecific(key_own_hw_mutex, key_ptr)) {
                 return THREAD_STORE_SET_E;

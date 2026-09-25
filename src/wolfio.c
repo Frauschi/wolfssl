@@ -544,7 +544,7 @@ STATIC INT32 nucyassl_recvfrom(INT sd, CHAR *buf, UINT16 sz, INT16 flags,
 {
     int recvd;
 
-    memset(peer, 0, sizeof(struct addr_struct));
+    XMEMSET(peer, 0, sizeof(struct addr_struct));
 
     recvd = NU_Recv_From(sd, buf, sz, flags, (struct addr_struct *) peer,
                             (INT16*) peersz);
