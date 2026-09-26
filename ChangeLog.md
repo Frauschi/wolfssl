@@ -320,6 +320,21 @@
   private key in a default build, which previously kept the old secret
   polynomials in the structure after reporting the key gone.
 
+* Added `--enable-falcon=smallest-mem` (`WOLFSSL_FALCON_SIGN_SMALLEST_MEM`), a
+  Falcon signer that works in a 20*n byte area, after T. Pornin, "A
+  RAM-Efficient Implementation of Falcon" (IACR ePrint 2026/1915).  It implies
+  small-mem.  Peak heap per signature falls from 46KB to 12KB at Falcon-512
+  and from 92KB to 22KB at Falcon-1024: the secret basis is decoded from the
+  encoded key where it is needed and the hashed point is squeezed again from
+  the absorbed nonce and message, so neither is held.  With the default
+  integer fpr backend it also signs about twice as fast as small-mem
+  (Falcon-512 2.15ms to 1.03ms on one arm64 host); with a native double FPU it
+  is about 1.5 times slower.
+  It returns the same signatures as the other signers except in about one
+  signature in several thousand, where rounding differs, and checks every
+  signature against the recomputed public key before returning it.  Key
+  generation and verification are unchanged.
+
 * **Fix (timing side channel in `wc_falcon_check_key()`)**: the consistency
   loop stopped at the first coefficient where `h*f != g (mod q)`, and the
   values it compares are the NTT images of the secret `f` and `g`.  A
