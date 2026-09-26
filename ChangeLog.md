@@ -335,6 +335,14 @@
   signature against the recomputed public key before returning it.  Key
   generation and verification are unchanged.
 
+* Reduced the peak heap of Falcon key generation by about 20%, from 21KB to
+  17KB at Falcon-512 and from 42KB to 33KB at Falcon-1024, with the generated
+  keys unchanged.  The public key is now computed with the verifier's
+  precomputed NTT tables in the key generator's own scratch, which is idle at
+  that point, instead of in a separate allocation holding tables built at run
+  time, and `wc_falcon_make_key()` no longer keeps h while the NTRU equation is
+  solved.  The inversion of f modulo q in that step is now constant time.
+
 * **Fix (timing side channel in `wc_falcon_check_key()`)**: the consistency
   loop stopped at the first coefficient where `h*f != g (mod q)`, and the
   values it compares are the NTT images of the secret `f` and `g`.  A
