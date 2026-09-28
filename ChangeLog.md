@@ -9,6 +9,7 @@
 * Added `--enable-falcon=smallest-mem`, a Falcon signer working in 20*n bytes (12KB peak heap at Falcon-512, 22KB at Falcon-1024). by @Frauschi
 * Reduced the ML-KEM small memory heap footprint: key generation and encapsulation now generate matrix A a polynomial at a time and multiply each one in as it is generated, and decapsulation compares the re-encapsulated cipher text a block at a time. by @Frauschi
 * Allowed `WOLFSSL_MLKEM_CACHE_A` to be used with the ML-KEM small memory options, which previously refused to build together. by @Frauschi
+* Reduced ML-DSA small memory heap use and added `WOLFSSL_MLDSA_SIGN_SMALLEST_MEM`, which roughly halves the signing peak. by @Frauschi
 
 # wolfSSL Release 5.9.4 (Sep 25, 2026)
 
