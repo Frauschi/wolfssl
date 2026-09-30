@@ -19,6 +19,7 @@
 * Sped up ML-DSA small memory signing by transforming each polynomial of y once; `WOLFSSL_MLDSA_SMALL_MEM_POLY64` no longer affects signing. by @Frauschi
 * Fixed `--enable-mldsa=<level>` building no ML-DSA operations. by @Frauschi
 * Fixed ML-DSA small memory key generation keeping the caches (`WC_MLDSA_CACHE_*`) of the key it replaced, which broke its signatures. by @Frauschi
+* Sped up SLH-DSA SHA2 hashing by compressing directly from the cached PK.seed midstate, and reused one WOTS+ chain buffer per signature and key generation, so a SHAKE-128s signature under `WOLFSSL_SMALL_STACK` makes about 220 allocations instead of about 3800. by @Frauschi
 
 ## Build System and Portability
 
