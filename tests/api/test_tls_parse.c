@@ -2165,10 +2165,8 @@ int test_TLSX_SupportedGroups_parse(void)
         extensions = NULL;
 
 #ifdef WOLFSSL_TEST_STATIC_BUILD
-        /* Offered group matches the local restriction, but recording it
-         * in the intersection list is forced to fail: a non-zero ret
-         * reaches the "no common curve" check below without commonCurves
-         * ever becoming non-NULL through the normal path. */
+        /* Offered group matches the local restriction: the intersection
+         * is done in place, so it succeeds without allocating. */
         {
             wolfSSL_Malloc_cb prevM = NULL;
             wolfSSL_Free_cb prevF = NULL;
@@ -2185,8 +2183,8 @@ int test_TLSX_SupportedGroups_parse(void)
             tls_parse_fail_after = 0;
 
             ExpectIntEQ(TLSX_SupportedCurve_Parse(ssl, goodBody,
-                        (word16)sizeof(goodBody), 1, &extensions),
-                        WC_NO_ERR_TRACE(MEMORY_E));
+                        (word16)sizeof(goodBody), 1, &extensions), 0);
+            ExpectIntEQ(tls_parse_alloc_seen, 0);
 
             tls_parse_fail_after = -1;
             (void)wolfSSL_SetAllocators(prevM, prevF, prevR);
