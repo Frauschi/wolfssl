@@ -56,8 +56,6 @@ static void test_tls_msgtype_free_sni(void* p, void* heap)
     while (sni != NULL) {
         SNI* next = sni->next;
 
-        if (sni->type == WOLFSSL_SNI_HOST_NAME)
-            XFREE(sni->data.host_name, heap, DYNAMIC_TYPE_TLSX);
         XFREE(sni, heap, DYNAMIC_TYPE_TLSX);
         sni = next;
     }
