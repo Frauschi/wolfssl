@@ -1976,6 +1976,38 @@ int wc_PKCS7_SetRsaSignRawDigestCb(wc_PKCS7* pkcs7,
 
 /*!
     \ingroup PKCS7
+    \brief Names the private key by a device key id instead of DER bytes.
+    SignedData signing (RSA, ECDSA, ML-DSA) and EnvelopedData decryption
+    (KTRI with RSA, KARI with ECC) then init the key with the matching
+    wc_*_init_id call under pkcs7->devId, so the crypto callback registered
+    for that devId performs the private-key operation. The public key comes
+    from the certificate given to wc_PKCS7_InitWithCert, which also clears
+    the id, so call this function afterwards. Needs WOLF_PRIVATE_KEY_ID.
+
+    \return 0 on success
+    \return BAD_FUNC_ARG if pkcs7 is NULL, idSz is negative or larger than
+    WC_PKCS7_MAX_ID_LEN, id is NULL with a non-zero idSz, or an id is set
+    while pkcs7->devId is INVALID_DEVID
+
+    \param pkcs7 PKCS7 structure, initialized with a devId
+    \param id device key id, opaque to wolfSSL
+    \param idSz size of id in bytes; 0 clears the id
+
+    _Example_
+    \code
+    wc_PKCS7_Init(&pkcs7, NULL, MY_DEVID);
+    wc_PKCS7_InitWithCert(&pkcs7, signerCert, signerCertSz);
+    ret = wc_PKCS7_SetPrivateKeyId(&pkcs7, keyId, keyIdSz);
+    \endcode
+
+    \sa wc_PKCS7_InitWithCert
+    \sa wc_InitRsaKey_Id
+    \sa wc_ecc_init_id
+*/
+int wc_PKCS7_SetPrivateKeyId(wc_PKCS7* pkcs7, const byte* id, int idSz);
+
+/*!
+    \ingroup PKCS7
     \brief Encodes authenticated enveloped data.
 
     \return Size of encoded data on success

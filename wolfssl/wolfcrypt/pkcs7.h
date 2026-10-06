@@ -80,6 +80,9 @@
     #define MAX_AUTH_ATTRIBS_SZ 7
 #endif
 
+/* Matches RSA_MAX_ID_LEN, ECC_MAX_ID_LEN and MLDSA_MAX_ID_LEN. */
+#define WC_PKCS7_MAX_ID_LEN 32
+
 #ifndef MAX_UNAUTH_ATTRIBS_SZ
     #define MAX_UNAUTH_ATTRIBS_SZ 7
 #endif
@@ -423,6 +426,11 @@ struct wc_PKCS7 {
     byte pssParamsPresent;
 #endif
 
+#ifdef WOLF_PRIVATE_KEY_ID
+    byte privateKeyId[WC_PKCS7_MAX_ID_LEN]; /* device key id, set by     */
+    int  privateKeyIdLen;                   /* wc_PKCS7_SetPrivateKeyId */
+#endif
+
     /* !! NEW DATA MEMBERS MUST BE ADDED AT END !! */
 };
 
@@ -556,6 +564,10 @@ WOLFSSL_API int  wc_PKCS7_SetAESKeyWrapUnwrapCb(wc_PKCS7* pkcs7,
 #if defined(HAVE_PKCS7_RSA_RAW_SIGN_CALLBACK) && !defined(NO_RSA)
 WOLFSSL_API int  wc_PKCS7_SetRsaSignRawDigestCb(wc_PKCS7* pkcs7,
         CallbackRsaSignRawDigest cb);
+#endif
+#ifdef WOLF_PRIVATE_KEY_ID
+WOLFSSL_API int  wc_PKCS7_SetPrivateKeyId(wc_PKCS7* pkcs7, const byte* id,
+        int idSz);
 #endif
 
 #if defined(HAVE_PKCS7_ECC_RAW_SIGN_CALLBACK) && defined(HAVE_ECC)

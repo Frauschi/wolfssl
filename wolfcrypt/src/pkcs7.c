@@ -2141,6 +2141,42 @@ static int FlattenAttributes(wc_PKCS7* pkcs7, byte* output, EncodedAttrib* ea,
 }
 
 
+#ifdef WOLF_PRIVATE_KEY_ID
+    #define PKCS7_KEY_ID_SET(p) ((p)->privateKeyIdLen > 0)
+#else
+    #define PKCS7_KEY_ID_SET(p) 0
+#endif
+
+#ifndef NO_RSA
+/* Init the RsaKey for the private-key operation, by id when one is set. */
+static int wc_PKCS7_InitRsaPrivKey(wc_PKCS7* pkcs7, RsaKey* key)
+{
+#ifdef WOLF_PRIVATE_KEY_ID
+    if (pkcs7->privateKeyIdLen > 0) {
+        return wc_InitRsaKey_Id(key, pkcs7->privateKeyId,
+                                pkcs7->privateKeyIdLen, pkcs7->heap,
+                                pkcs7->devId);
+    }
+#endif
+    return wc_InitRsaKey_ex(key, pkcs7->heap, pkcs7->devId);
+}
+#endif /* !NO_RSA */
+
+#ifdef HAVE_ECC
+/* Init the ecc_key for the private-key operation, by id when one is set. */
+static int wc_PKCS7_InitEccPrivKey(wc_PKCS7* pkcs7, ecc_key* key)
+{
+#ifdef WOLF_PRIVATE_KEY_ID
+    if (pkcs7->privateKeyIdLen > 0) {
+        return wc_ecc_init_id(key, pkcs7->privateKeyId,
+                              pkcs7->privateKeyIdLen, pkcs7->heap,
+                              pkcs7->devId);
+    }
+#endif
+    return wc_ecc_init_ex(key, pkcs7->heap, pkcs7->devId);
+}
+#endif /* HAVE_ECC */
+
 #ifndef NO_RSA
 
 static int wc_PKCS7_ImportRSA(wc_PKCS7* pkcs7, RsaKey* privKey)
@@ -2148,9 +2184,17 @@ static int wc_PKCS7_ImportRSA(wc_PKCS7* pkcs7, RsaKey* privKey)
     int ret;
     word32 idx;
 
-    ret = wc_InitRsaKey_ex(privKey, pkcs7->heap, pkcs7->devId);
+    ret = wc_PKCS7_InitRsaPrivKey(pkcs7, privKey);
     if (ret == 0) {
-        if (pkcs7->privateKey != NULL && pkcs7->privateKeySz > 0) {
+        if (PKCS7_KEY_ID_SET(pkcs7)) {
+            /* The device holds the key; the certificate gives its size. */
+            if (pkcs7->publicKeySz > 0) {
+                idx = 0;
+                ret = wc_RsaPublicKeyDecode(pkcs7->publicKey, &idx, privKey,
+                                            pkcs7->publicKeySz);
+            }
+        }
+        else if (pkcs7->privateKey != NULL && pkcs7->privateKeySz > 0) {
             idx = 0;
             ret = wc_RsaPrivateKeyDecode(pkcs7->privateKey, &idx, privKey,
                                          pkcs7->privateKeySz);
@@ -2242,9 +2286,17 @@ static int wc_PKCS7_ImportECC(wc_PKCS7* pkcs7, ecc_key* privKey)
     int ret;
     word32 idx;
 
-    ret = wc_ecc_init_ex(privKey, pkcs7->heap, pkcs7->devId);
+    ret = wc_PKCS7_InitEccPrivKey(pkcs7, privKey);
     if (ret == 0) {
-        if (pkcs7->privateKey != NULL && pkcs7->privateKeySz > 0) {
+        if (PKCS7_KEY_ID_SET(pkcs7)) {
+            /* The device holds the key; the certificate gives the curve. */
+            if (pkcs7->publicKeySz > 0) {
+                idx = 0;
+                ret = wc_EccPublicKeyDecode(pkcs7->publicKey, &idx, privKey,
+                                            pkcs7->publicKeySz);
+            }
+        }
+        else if (pkcs7->privateKey != NULL && pkcs7->privateKeySz > 0) {
             idx = 0;
             ret = wc_EccPrivateKeyDecode(pkcs7->privateKey, &idx, privKey,
                                          pkcs7->privateKeySz);
@@ -3095,10 +3147,20 @@ static int wc_PKCS7_MlDsaSign(wc_PKCS7* pkcs7, const byte* msg, word32 msgSz,
         return MEMORY_E;
     }
 
-    ret = wc_MlDsaKey_Init(key, pkcs7->heap, pkcs7->devId);
+#ifdef WOLF_PRIVATE_KEY_ID
+    if (pkcs7->privateKeyIdLen > 0) {
+        ret = wc_MlDsaKey_InitId(key, pkcs7->privateKeyId,
+                                 pkcs7->privateKeyIdLen, pkcs7->heap,
+                                 pkcs7->devId);
+    }
+    else
+#endif
+    {
+        ret = wc_MlDsaKey_Init(key, pkcs7->heap, pkcs7->devId);
+    }
     if (ret == 0) {
         ret = wc_MlDsaKey_SetParams(key, level);
-        if (ret == 0) {
+        if (ret == 0 && !PKCS7_KEY_ID_SET(pkcs7)) {
             /* FIPS locks ML-DSA private-key reads by default; unlock only for
              * the decode of the caller-provided key, then re-lock. */
             PRIVATE_KEY_UNLOCK();
@@ -5059,6 +5121,27 @@ int wc_PKCS7_SetRsaSignRawDigestCb(wc_PKCS7* pkcs7, CallbackRsaSignRawDigest cb)
     return 0;
 }
 #endif
+
+#ifdef WOLF_PRIVATE_KEY_ID
+/* Sign or decrypt with the private key that pkcs7's devId holds under id,
+ * instead of with pkcs7->privateKey. wc_PKCS7_InitWithCert clears it, so set
+ * it afterwards; idSz 0 clears it. Returns 0 or BAD_FUNC_ARG. */
+int wc_PKCS7_SetPrivateKeyId(wc_PKCS7* pkcs7, const byte* id, int idSz)
+{
+    if (pkcs7 == NULL || idSz < 0 || idSz > WC_PKCS7_MAX_ID_LEN ||
+            (id == NULL && idSz > 0) ||
+            (idSz > 0 && pkcs7->devId == INVALID_DEVID)) {
+        return BAD_FUNC_ARG;
+    }
+
+    if (idSz > 0) {
+        XMEMCPY(pkcs7->privateKeyId, id, (size_t)idSz);
+    }
+    pkcs7->privateKeyIdLen = idSz;
+
+    return 0;
+}
+#endif /* WOLF_PRIVATE_KEY_ID */
 
 #endif /* NO_RSA */
 
@@ -8664,6 +8747,10 @@ typedef struct WC_PKCS7_KARI {
     WC_BITFIELD decodedInit:1;     /* indicates decoded was initialized */
     WC_BITFIELD recipKeyInit:1;    /* indicates recipKey was initialized */
     WC_BITFIELD senderKeyInit:1;   /* indicates senderKey was initialized */
+#ifdef WOLF_PRIVATE_KEY_ID
+    byte*    recipKeyId;           /* device id of recip private key */
+    int      recipKeyIdLen;
+#endif
 } WC_PKCS7_KARI;
 
 
@@ -8727,6 +8814,14 @@ static WC_PKCS7_KARI* wc_PKCS7_KariNew(wc_PKCS7* pkcs7, byte direction)
 
     kari->heap = pkcs7->heap;
     kari->devId = pkcs7->devId;
+#ifdef WOLF_PRIVATE_KEY_ID
+    kari->recipKeyId = NULL;
+    kari->recipKeyIdLen = 0;
+    if (direction == WC_PKCS7_DECODE && pkcs7->privateKeyIdLen > 0) {
+        kari->recipKeyId = pkcs7->privateKeyId;
+        kari->recipKeyIdLen = pkcs7->privateKeyIdLen;
+    }
+#endif
 
     return kari;
 }
@@ -8818,7 +8913,16 @@ static int wc_PKCS7_KariParseRecipCert(WC_PKCS7_KARI* kari, const byte* cert,
             return BAD_FUNC_ARG;
         }
     }
-    ret = wc_ecc_init_ex(kari->recipKey, kari->heap, kari->devId);
+#ifdef WOLF_PRIVATE_KEY_ID
+    if (kari->recipKeyIdLen > 0) {
+        ret = wc_ecc_init_id(kari->recipKey, kari->recipKeyId,
+                             kari->recipKeyIdLen, kari->heap, kari->devId);
+    }
+    else
+#endif
+    {
+        ret = wc_ecc_init_ex(kari->recipKey, kari->heap, kari->devId);
+    }
     if (ret != 0)
         return ret;
 
@@ -8839,6 +8943,20 @@ static int wc_PKCS7_KariParseRecipCert(WC_PKCS7_KARI* kari, const byte* cert,
     }
     /* get recip private key */
     else if (kari->direction == WC_PKCS7_DECODE) {
+    #ifdef WOLF_PRIVATE_KEY_ID
+        if (kari->recipKeyIdLen > 0) {
+            /* The device holds the key; the certificate gives the curve. */
+            if (cert == NULL) {
+                WOLFSSL_MSG("A recipient key id needs the recipient cert");
+                return BAD_FUNC_ARG;
+            }
+            idx = 0;
+            ret = wc_EccPublicKeyDecode(kari->decoded->publicKey, &idx,
+                                        kari->recipKey,
+                                        kari->decoded->pubKeySize);
+        }
+        else
+    #endif
         if (key != NULL && keySz > 0) {
             idx = 0;
             ret = wc_EccPrivateKeyDecode(key, &idx, kari->recipKey, keySz);
@@ -12404,7 +12522,7 @@ static int wc_PKCS7_DecryptKtri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
             }
         #endif
 
-            ret = wc_InitRsaKey_ex(privKey, pkcs7->heap, pkcs7->devId);
+            ret = wc_PKCS7_InitRsaPrivKey(pkcs7, privKey);
             if (ret != 0) {
                 XFREE(encryptedKey, pkcs7->heap, DYNAMIC_TYPE_WOLF_BIGINT);
                 WC_FREE_VAR_EX(privKey, pkcs7->heap,
@@ -12412,7 +12530,14 @@ static int wc_PKCS7_DecryptKtri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
                 return ret;
             }
 
-            if (pkcs7->privateKey != NULL && pkcs7->privateKeySz > 0) {
+            if (PKCS7_KEY_ID_SET(pkcs7)) {
+                if (pkcs7->publicKeySz > 0) {
+                    keyIdx = 0;
+                    ret = wc_RsaPublicKeyDecode(pkcs7->publicKey, &keyIdx,
+                            privKey, pkcs7->publicKeySz);
+                }
+            }
+            else if (pkcs7->privateKey != NULL && pkcs7->privateKeySz > 0) {
                 keyIdx = 0;
                 ret = wc_RsaPrivateKeyDecode(pkcs7->privateKey, &keyIdx,
                         privKey, pkcs7->privateKeySz);

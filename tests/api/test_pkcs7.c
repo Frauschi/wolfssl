@@ -29,6 +29,9 @@
 #endif
 
 #include <wolfssl/wolfcrypt/pkcs7.h>
+#ifdef WOLF_CRYPTO_CB
+    #include <wolfssl/wolfcrypt/cryptocb.h>
+#endif
 #include <wolfssl/wolfcrypt/asn.h>
 #ifdef HAVE_LIBZ
     #include <wolfssl/wolfcrypt/compress.h>
@@ -9027,3 +9030,279 @@ int test_wc_PKCS7_VerifySignedData_NoDigestParams(void)
 #endif /* HAVE_PKCS7 && !NO_RSA && !NO_SHA256 && USE_CERT_BUFFERS_2048 */
     return EXPECT_RESULT();
 }
+
+#if defined(HAVE_PKCS7) && defined(WOLF_CRYPTO_CB) && \
+    defined(WOLF_PRIVATE_KEY_ID) && !defined(NO_FILESYSTEM) && \
+    !defined(NO_SHA256) && !defined(NO_AES) && defined(HAVE_AES_CBC) && \
+    defined(WOLFSSL_AES_256) && \
+    (!defined(NO_RSA) || (defined(HAVE_ECC) && defined(HAVE_ECC_SIGN)))
+#define PKCS7_KEYID_DEVID 0x504B
+
+static const byte pkcs7KeyIdRsa[] = { 'r', 's', 'a', '-', 'k', 'e', 'y' };
+static const byte pkcs7KeyIdEcc[] = { 'e', 'c', 'c', '-', 'k', 'e', 'y' };
+
+/* Device that holds the client keys under the ids above. */
+typedef struct {
+#ifndef NO_RSA
+    RsaKey  rsa;
+#endif
+#ifdef HAVE_ECC
+    ecc_key ecc;
+#endif
+    WC_RNG  rng;
+    int     privOps;
+} Pkcs7KeyIdDev;
+
+static int pkcs7_keyid_match(const byte* id, int idLen, const byte* want,
+                             int wantLen)
+{
+    return idLen == wantLen && XMEMCMP(id, want, (size_t)wantLen) == 0;
+}
+
+static int pkcs7_keyid_cb(int devId, wc_CryptoInfo* info, void* ctx)
+{
+    Pkcs7KeyIdDev* dev = (Pkcs7KeyIdDev*)ctx;
+    int ret = WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE);
+
+    (void)devId;
+    if (info->algo_type != WC_ALGO_TYPE_PK)
+        return ret;
+
+#ifndef NO_RSA
+    if (info->pk.type == WC_PK_TYPE_RSA &&
+            pkcs7_keyid_match(info->pk.rsa.key->id, info->pk.rsa.key->idLen,
+                              pkcs7KeyIdRsa, (int)sizeof(pkcs7KeyIdRsa))) {
+        ret = wc_RsaFunction(info->pk.rsa.in, info->pk.rsa.inLen,
+                             info->pk.rsa.out, info->pk.rsa.outLen,
+                             info->pk.rsa.type, &dev->rsa, &dev->rng);
+        if (ret == 0 && (info->pk.rsa.type == RSA_PRIVATE_ENCRYPT ||
+                         info->pk.rsa.type == RSA_PRIVATE_DECRYPT))
+            dev->privOps++;
+    }
+#endif
+#if defined(HAVE_ECC) && defined(HAVE_ECC_SIGN)
+    if (info->pk.type == WC_PK_TYPE_ECDSA_SIGN &&
+            pkcs7_keyid_match(info->pk.eccsign.key->id,
+                              info->pk.eccsign.key->idLen, pkcs7KeyIdEcc,
+                              (int)sizeof(pkcs7KeyIdEcc))) {
+        ret = wc_ecc_sign_hash(info->pk.eccsign.in, info->pk.eccsign.inlen,
+                               info->pk.eccsign.out, info->pk.eccsign.outlen,
+                               &dev->rng, &dev->ecc);
+        if (ret == 0)
+            dev->privOps++;
+    }
+#endif
+#if defined(HAVE_ECC) && defined(HAVE_ECC_DHE)
+    if (info->pk.type == WC_PK_TYPE_ECDH &&
+            pkcs7_keyid_match(info->pk.ecdh.private_key->id,
+                              info->pk.ecdh.private_key->idLen, pkcs7KeyIdEcc,
+                              (int)sizeof(pkcs7KeyIdEcc))) {
+        ret = wc_ecc_shared_secret(&dev->ecc, info->pk.ecdh.public_key,
+                                   info->pk.ecdh.out, info->pk.ecdh.outlen);
+        if (ret == 0)
+            dev->privOps++;
+    }
+#endif
+
+    return ret;
+}
+
+static int pkcs7_keyid_read(const char* path, byte* buf, word32* sz)
+{
+    XFILE f = XFOPEN(path, "rb");
+    size_t n;
+
+    if (f == XBADFILE)
+        return -1;
+    n = XFREAD(buf, 1, *sz, f);
+    XFCLOSE(f);
+    *sz = (word32)n;
+    return n > 0 ? 0 : -1;
+}
+
+/* SignedData with the signer key named by id, verified in software. */
+static int pkcs7_keyid_sign(Pkcs7KeyIdDev* dev, byte* cert, word32 certSz,
+                            int encryptOID, const byte* id, int idSz)
+{
+    EXPECT_DECLS;
+    wc_PKCS7* pkcs7 = NULL;
+    byte      data[] = "PKCS7 SignedData with a device-held key.";
+    byte      out[FOURK_BUF];
+    int       outSz = 0;
+    int       ops = dev->privOps;
+
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, PKCS7_KEYID_DEVID));
+    ExpectIntEQ(wc_PKCS7_InitWithCert(pkcs7, cert, certSz), 0);
+    ExpectIntEQ(wc_PKCS7_SetPrivateKeyId(pkcs7, id, idSz), 0);
+    if (pkcs7 != NULL) {
+        pkcs7->content    = data;
+        pkcs7->contentSz  = (word32)sizeof(data);
+        pkcs7->contentOID = DATA;
+        pkcs7->hashOID    = SHA256h;
+        pkcs7->encryptOID = encryptOID;
+        pkcs7->rng        = &dev->rng;
+    }
+    ExpectIntGT(outSz = wc_PKCS7_EncodeSignedData(pkcs7, out, sizeof(out)),
+                0);
+    ExpectIntGT(dev->privOps, ops);
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, INVALID_DEVID));
+    ExpectIntEQ(wc_PKCS7_InitWithCert(pkcs7, NULL, 0), 0);
+    if (outSz > 0)
+        ExpectIntEQ(wc_PKCS7_VerifySignedData(pkcs7, out, (word32)outSz), 0);
+    wc_PKCS7_Free(pkcs7);
+
+    return EXPECT_RESULT();
+}
+
+/* EnvelopedData to cert in software, decrypted with the key named by id. */
+static int pkcs7_keyid_envelope(Pkcs7KeyIdDev* dev, byte* cert, word32 certSz,
+                                const byte* id, int idSz, int kari)
+{
+    EXPECT_DECLS;
+    wc_PKCS7* pkcs7 = NULL;
+    byte      data[] = "PKCS7 EnvelopedData for a device-held key.";
+    byte      enc[FOURK_BUF];
+    byte      dec[FOURK_BUF];
+    int       encSz = 0;
+    int       decSz = 0;
+    int       ops = dev->privOps;
+
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, INVALID_DEVID));
+    ExpectIntEQ(wc_PKCS7_InitWithCert(pkcs7, cert, certSz), 0);
+    if (pkcs7 != NULL) {
+        pkcs7->content    = data;
+        pkcs7->contentSz  = (word32)sizeof(data);
+        pkcs7->contentOID = DATA;
+        pkcs7->encryptOID = AES256CBCb;
+        pkcs7->rng        = &dev->rng;
+#if defined(HAVE_ECC) && defined(HAVE_X963_KDF) && defined(HAVE_AES_KEYWRAP)
+        if (kari) {
+            pkcs7->keyWrapOID  = AES256_WRAP;
+            pkcs7->keyAgreeOID = dhSinglePass_stdDH_sha256kdf_scheme;
+        }
+#endif
+    }
+    (void)kari;
+    ExpectIntGT(encSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, enc, sizeof(enc)),
+                0);
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, PKCS7_KEYID_DEVID));
+    ExpectIntEQ(wc_PKCS7_InitWithCert(pkcs7, cert, certSz), 0);
+    ExpectIntEQ(wc_PKCS7_SetPrivateKeyId(pkcs7, id, idSz), 0);
+    if (pkcs7 != NULL)
+        pkcs7->rng = &dev->rng;
+    if (encSz > 0)
+        ExpectIntEQ(decSz = wc_PKCS7_DecodeEnvelopedData(pkcs7, enc,
+                        (word32)encSz, dec, sizeof(dec)), (int)sizeof(data));
+    if (decSz == (int)sizeof(data))
+        ExpectIntEQ(XMEMCMP(dec, data, sizeof(data)), 0);
+    ExpectIntGT(dev->privOps, ops);
+    wc_PKCS7_Free(pkcs7);
+
+    return EXPECT_RESULT();
+}
+#endif
+
+/*
+ * Testing wc_PKCS7_SetPrivateKeyId(): signing and decryption with a private
+ * key that a crypto callback device holds under an id.
+ */
+int test_wc_PKCS7_SetPrivateKeyId(void)
+{
+    EXPECT_DECLS;
+#if defined(HAVE_PKCS7) && defined(WOLF_CRYPTO_CB) && \
+    defined(WOLF_PRIVATE_KEY_ID) && !defined(NO_FILESYSTEM) && \
+    !defined(NO_SHA256) && !defined(NO_AES) && defined(HAVE_AES_CBC) && \
+    defined(WOLFSSL_AES_256) && \
+    (!defined(NO_RSA) || (defined(HAVE_ECC) && defined(HAVE_ECC_SIGN)))
+    Pkcs7KeyIdDev dev;
+    wc_PKCS7*     pkcs7 = NULL;
+    byte          cert[FOURK_BUF];
+    byte          key[FOURK_BUF];
+    byte          longId[WC_PKCS7_MAX_ID_LEN + 1];
+    word32        certSz;
+    word32        keySz;
+    word32        idx;
+
+    XMEMSET(&dev, 0, sizeof(dev));
+    XMEMSET(longId, 0, sizeof(longId));
+    ExpectIntEQ(wc_InitRng(&dev.rng), 0);
+    ExpectIntEQ(wc_CryptoCb_RegisterDevice(PKCS7_KEYID_DEVID, pkcs7_keyid_cb,
+                                           &dev), 0);
+
+    /* Argument checks. */
+    ExpectIntEQ(wc_PKCS7_SetPrivateKeyId(NULL, pkcs7KeyIdRsa, 1),
+                WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, PKCS7_KEYID_DEVID));
+    ExpectIntEQ(wc_PKCS7_SetPrivateKeyId(pkcs7, NULL, 1),
+                WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_PKCS7_SetPrivateKeyId(pkcs7, longId, (int)sizeof(longId)),
+                WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_PKCS7_SetPrivateKeyId(pkcs7, NULL, 0), 0);
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, INVALID_DEVID));
+    ExpectIntEQ(wc_PKCS7_SetPrivateKeyId(pkcs7, pkcs7KeyIdRsa,
+                    (int)sizeof(pkcs7KeyIdRsa)), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+
+#ifndef NO_RSA
+    keySz = sizeof(key);
+    ExpectIntEQ(pkcs7_keyid_read("./certs/client-key.der", key, &keySz), 0);
+    ExpectIntEQ(wc_InitRsaKey(&dev.rsa, HEAP_HINT), 0);
+    idx = 0;
+    ExpectIntEQ(wc_RsaPrivateKeyDecode(key, &idx, &dev.rsa, keySz), 0);
+    certSz = sizeof(cert);
+    ExpectIntEQ(pkcs7_keyid_read("./certs/client-cert.der", cert, &certSz), 0);
+
+    ExpectIntEQ(pkcs7_keyid_sign(&dev, cert, certSz, RSAk, pkcs7KeyIdRsa,
+                                 (int)sizeof(pkcs7KeyIdRsa)), TEST_SUCCESS);
+    ExpectIntEQ(pkcs7_keyid_envelope(&dev, cert, certSz, pkcs7KeyIdRsa,
+                                     (int)sizeof(pkcs7KeyIdRsa), 0),
+                TEST_SUCCESS);
+
+    /* wc_PKCS7_InitWithCert clears the id, so no key is left to sign with. */
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, PKCS7_KEYID_DEVID));
+    ExpectIntEQ(wc_PKCS7_SetPrivateKeyId(pkcs7, pkcs7KeyIdRsa,
+                    (int)sizeof(pkcs7KeyIdRsa)), 0);
+    ExpectIntEQ(wc_PKCS7_InitWithCert(pkcs7, cert, certSz), 0);
+    if (pkcs7 != NULL)
+        ExpectIntEQ(pkcs7->privateKeyIdLen, 0);
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+    wc_FreeRsaKey(&dev.rsa);
+#endif
+
+#if defined(HAVE_ECC) && defined(HAVE_ECC_SIGN)
+    keySz = sizeof(key);
+    ExpectIntEQ(pkcs7_keyid_read("./certs/ecc-client-key.der", key, &keySz), 0);
+    ExpectIntEQ(wc_ecc_init(&dev.ecc), 0);
+    idx = 0;
+    ExpectIntEQ(wc_EccPrivateKeyDecode(key, &idx, &dev.ecc, keySz), 0);
+    ExpectIntEQ(wc_ecc_set_rng(&dev.ecc, &dev.rng), 0);
+    certSz = sizeof(cert);
+    ExpectIntEQ(pkcs7_keyid_read("./certs/client-ecc-cert.der", cert,
+                                 &certSz), 0);
+
+    ExpectIntEQ(pkcs7_keyid_sign(&dev, cert, certSz, ECDSAk, pkcs7KeyIdEcc,
+                                 (int)sizeof(pkcs7KeyIdEcc)), TEST_SUCCESS);
+#if defined(HAVE_ECC_DHE) && defined(HAVE_X963_KDF) && \
+    defined(HAVE_AES_KEYWRAP)
+    ExpectIntEQ(pkcs7_keyid_envelope(&dev, cert, certSz, pkcs7KeyIdEcc,
+                                     (int)sizeof(pkcs7KeyIdEcc), 1),
+                TEST_SUCCESS);
+#endif
+    wc_ecc_free(&dev.ecc);
+#endif
+
+    wc_CryptoCb_UnRegisterDevice(PKCS7_KEYID_DEVID);
+    wc_FreeRng(&dev.rng);
+#endif
+    return EXPECT_RESULT();
+} /* END test_wc_PKCS7_SetPrivateKeyId */
