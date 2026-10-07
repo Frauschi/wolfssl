@@ -200,17 +200,24 @@ jobs:
           ELS_PKC="$RUNNER_TEMP/els_pkc"
           MCUX_SDK="$RUNNER_TEMP/hal_nxp/mcux/mcux-sdk-ng"
 
-          # m33mu maps the PKC RAM at 0x22040000/4K, not the silicon's
-          # 0x5015A000.
+          # -DNO_THREAD_LS: wolfCrypt_Init() guards recursion with a __thread
+          # variable, and bare-metal startup never sets the thread pointer, so
+          # without this it returns DEADLOCK_AVERTED_E before doing anything.
+          # -DWOLFSSL_ELS_PKC_COUNTERS: main.c asserts on the offload
+          # counters, which the port header declares only under it.
+          #
+          # The PKC RAM window is the silicon's, at 0x5015A000; m33mu models
+          # that RAM at 0x22040000/4K instead, and the cleanup wipe faults
+          # without this.
           ./configure --host=arm-none-eabi --disable-shared --enable-static \
             --enable-cryptonly --enable-cryptocb \
-            --enable-cryptocbutils=copy,free,keystore \
+            --enable-cryptocbutils=copy,free,keystore --enable-elspkckeyblob \
             --enable-ecc --enable-aesgcm --enable-cmac \
             --with-els-pkc="$ELS_PKC" --with-mcux-sdk="$MCUX_SDK" \
             --disable-filesystem --enable-singlethreaded \
             --disable-examples --disable-crypttests \
             CFLAGS="-mcpu=cortex-m33+nodsp -mthumb -Os -ffreestanding --specs=nosys.specs" \
-            CPPFLAGS="-DWOLFSSL_NO_SOCK -DWOLFSSL_USER_IO -DNO_WRITEV -DNO_DEV_RANDOM -DNO_THREAD_LS -DWOLFSSL_NO_GETPID -DWOLFSSL_ELS_PKC_RAM_ADDR=0x22040000u -DWOLFSSL_ELS_PKC_RAM_SIZE=0x1000u"
+            CPPFLAGS="-DWOLFSSL_NO_SOCK -DWOLFSSL_USER_IO -DNO_WRITEV -DNO_DEV_RANDOM -DNO_THREAD_LS -DWOLFSSL_NO_GETPID -DWOLFSSL_ELS_PKC_COUNTERS -DWOLFSSL_ELS_PKC_RAM_ADDR=0x22040000u -DWOLFSSL_ELS_PKC_RAM_SIZE=0x1000u"
           make -j"$(nproc)"
 
           make -C IDE/m33mu-rw612-port ELS_PKC="$ELS_PKC" MCUX_SDK="$MCUX_SDK"

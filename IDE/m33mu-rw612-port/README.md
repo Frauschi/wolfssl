@@ -11,7 +11,9 @@ So the offload paths stay hardware-validated on a frdm_rw612. What this firmware
 | Check | BKPT on failure |
 | --- | --- |
 | Key reference codec: round trip, size query, and rejection of a bad magic, an unknown version, an out-of-range slot, an unassigned class, undefined flags, non-zero reserved bytes, bind bytes without the bind flag and a truncated blob | `0x71` |
+| Wrapped-key container: round trip, a wrong KEK rejected, and byte-for-byte equivalence with a plain `wc_AesKeyWrap` of `props \|\| pad \|\| key` | `0x72` |
 | The port fails closed: with the hardware failing, an operation on the port's devId returns an error rather than a wrong answer | `0x73` |
+| Nothing ran behind our back: engine counters for algorithms never issued are still zero | `0x74` |
 | The software path is undisturbed while the port is registered: SHA-256, CMAC and AES-GCM KATs on the default devId | `0x75` |
 | Slot keys: `wc_ElsPkc_AesUseSlot()` refuses a non-AES class, and an AES-GCM IV the hardware cannot take fails with `BAD_FUNC_ARG` | `0x77` |
 | `wc_InitRng()` seeds from the ELS DRBG | `0x79` |
@@ -19,7 +21,7 @@ So the offload paths stay hardware-validated on a frdm_rw612. What this firmware
 
 `0x7f` means everything passed; `0x70` means setup failed.
 
-The key reference codec check is a real test of real code, and worth running on a target rather than a host: it is the parser a malformed blob reaches first, and bare metal is where an alignment or endianness assumption shows up.
+The first two are real tests of real code, and both are worth running on a target rather than a host: they are the parsers a malformed blob reaches first, and bare metal is where an alignment or endianness assumption shows up.
 
 `els_stubs.c` supplies every CLNS symbol the port references, each returning a failure status. They are not a simulation and compute nothing; they exist so the firmware can link, and so the failure behaviour above can be tested at all. One stub deliberately succeeds - `ELS_PowerDownWakeupInit` - because `wc_ElsPkc_Init()` returns before registering the callback if bring-up fails, and then there would be no port to test.
 
@@ -31,7 +33,7 @@ Cross-build wolfSSL first, from the repository root:
 ./autogen.sh
 ./configure --host=arm-none-eabi --disable-shared --enable-static \
     --enable-cryptonly --enable-cryptocb \
-    --enable-cryptocbutils=copy,free,keystore \
+    --enable-cryptocbutils=copy,free,keystore --enable-elspkckeyblob \
     --enable-ecc --enable-aesgcm --enable-cmac \
     --with-els-pkc=/path/to/els_pkc --with-mcux-sdk=/path/to/mcux-sdk-ng \
     --disable-filesystem --enable-singlethreaded \

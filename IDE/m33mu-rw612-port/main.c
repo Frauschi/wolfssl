@@ -19,8 +19,19 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
  */
 
-/* Bare-metal checks for the EdgeLock port under m33mu. BKPT 0x7f is a pass;
- * README.md lists the other immediates. */
+/* Bare-metal checks for the EdgeLock port, run under m33mu --cpu rw612. The
+ * CLNS stubs make every hardware call fail, so this covers the software
+ * surface and the fallback contract only; see README.md.
+ *
+ * Result is signalled by BKPT immediate:
+ *   0x7f  every check passed
+ *   0x70  setup failed
+ *   0x71  key reference codec
+ *   0x72  wrapped-key container
+ *   0x73  the port did not fail closed when the hardware failed
+ *   0x74  an engine counter moved for something we never asked for
+ *   0x75  the software path was disturbed by the port being registered
+ */
 
 #include <wolfssl/wolfcrypt/settings.h>
 #include <wolfssl/wolfcrypt/types.h>
@@ -31,6 +42,9 @@
 #include <wolfssl/wolfcrypt/ecc.h>
 #include <wolfssl/wolfcrypt/random.h>
 #include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
+#ifdef WOLFSSL_ELS_PKC_KEYBLOB
+    #include <wolfssl/wolfcrypt/port/nxp/els_pkc_keyblob.h>
+#endif
 
 #include <string.h>
 #include <stdint.h>
@@ -46,6 +60,10 @@ static void spin_forever(void)
 static int failures = 0;
 
 #define CHECK(cond) do { if (!(cond)) { failures++; return -1; } } while (0)
+
+/* ---------------------------------------------------------------------------
+ * 1. Key reference codec
+ * ------------------------------------------------------------------------ */
 
 /* The blob is attacker-reachable in the wolfPSA flow, so every malformed shape
  * must be rejected as content before anything treats the slot as real. */
@@ -218,6 +236,82 @@ static int check_rng_seed(void)
 }
 #endif
 
+/* ---------------------------------------------------------------------------
+ * 2. Wrapped-key container
+ * ------------------------------------------------------------------------ */
+
+/* The design rests on the container being exactly an AES key wrap of
+ * props||pad||key, so a provisioning tool needs no vendor code. */
+static int check_keyblob(void)
+{
+#ifdef WOLFSSL_ELS_PKC_KEYBLOB
+    static const byte kek[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F
+    };
+    static const byte key[16] = {
+        0xF0,0xE1,0xD2,0xC3,0xB4,0xA5,0x96,0x87,
+        0x78,0x69,0x5A,0x4B,0x3C,0x2D,0x1E,0x0F
+    };
+    const word32 props = 0x00000021u;
+    byte blob[64];
+    byte recovered[32];
+    byte wrongKek[16];
+    word32 gotProps = 0;
+    word32 gotSz = 0;
+    int blobSz;
+
+    blobSz = wc_ElsPkc_BuildWrappedBlob(kek, sizeof(kek), props,
+                                        key, sizeof(key),
+                                        blob, sizeof(blob));
+    CHECK(blobSz > 0);
+
+    CHECK(wc_ElsPkc_ParseWrappedBlob(kek, sizeof(kek), blob, (word32)blobSz,
+                                     &gotProps, recovered, sizeof(recovered),
+                                     &gotSz) > 0);
+    CHECK(gotProps == props);
+    CHECK(gotSz == sizeof(key));
+    CHECK(XMEMCMP(recovered, key, sizeof(key)) == 0);
+
+    /* a wrong KEK must fail the key wrap integrity check, not return garbage */
+    XMEMCPY(wrongKek, kek, sizeof(kek));
+    wrongKek[0] ^= 0x01;
+    CHECK(wc_ElsPkc_ParseWrappedBlob(wrongKek, sizeof(wrongKek), blob,
+                                     (word32)blobSz, &gotProps, recovered,
+                                     sizeof(recovered), &gotSz) < 0);
+
+#ifdef HAVE_AES_KEYWRAP
+    {
+        /* The equivalence the design depends on: the same plaintext built by
+         * hand and wrapped with plain wc_AesKeyWrap must give the same bytes. */
+        const word32 prefixSz = 8;
+        byte plain[8 + 32];
+        byte reference[64];
+        int refSz;
+
+        XMEMSET(plain, 0, sizeof(plain));
+        plain[0] = (byte)(props >> 24);
+        plain[1] = (byte)(props >> 16);
+        plain[2] = (byte)(props >> 8);
+        plain[3] = (byte)(props);
+        XMEMCPY(plain + prefixSz, key, sizeof(key));
+
+        refSz = wc_AesKeyWrap(kek, sizeof(kek), plain,
+                              prefixSz + (word32)sizeof(key),
+                              reference, sizeof(reference), NULL);
+        CHECK(refSz == blobSz);
+        CHECK(XMEMCMP(reference, blob, (size_t)blobSz) == 0);
+    }
+#endif
+
+#endif /* WOLFSSL_ELS_PKC_KEYBLOB */
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. The port fails closed, and leaves the software path alone
+ * ------------------------------------------------------------------------ */
+
 /* With every CLNS call failing, the port's devId must return an error while
  * the default devId still computes the right answer. */
 
@@ -327,6 +421,36 @@ static int check_software_path(void)
     return 0;
 }
 
+/* ---------------------------------------------------------------------------
+ * 4. Nothing ran behind our back
+ * ------------------------------------------------------------------------ */
+
+/* Only SHA-256 was issued through the port, so every other counter must still
+ * read zero. The hash counter is excluded: it advances when an update is
+ * accepted, and a sub-block update is only buffered. */
+static int check_nothing_else_ran(void)
+{
+    CHECK(wc_ElsPkc_TimeoutCount == 0);
+#ifndef NO_AES
+    CHECK(wc_ElsPkc_AesOffloadCount == 0);
+#ifdef HAVE_AESGCM
+    CHECK(wc_ElsPkc_GcmOffloadCount == 0);
+#endif
+#ifdef WOLFSSL_CMAC
+    CHECK(wc_ElsPkc_CmacOffloadCount == 0);
+#endif
+#endif
+#ifdef HAVE_ECC
+    CHECK(wc_ElsPkc_EccOffloadCount == 0);
+    CHECK(wc_ElsPkc_EccPkcOffloadCount == 0);
+#endif
+    CHECK(wc_ElsPkc_RngOffloadCount == 0);
+#ifdef WOLF_CRYPTO_CB_KEYSTORE
+    CHECK(wc_ElsPkc_KeyStoreOffloadCount == 0);
+#endif
+    return 0;
+}
+
 int main(void)
 {
     if (wolfCrypt_Init() != 0) {
@@ -343,6 +467,10 @@ int main(void)
 
     if (check_keyref() != 0) {
         BKPT(0x71);
+        spin_forever();
+    }
+    if (check_keyblob() != 0) {
+        BKPT(0x72);
         spin_forever();
     }
     if (check_fails_closed() != 0) {
@@ -365,6 +493,11 @@ int main(void)
 #endif
     if (check_registration() != 0) {
         BKPT(0x7b);
+        spin_forever();
+    }
+
+    if (check_nothing_else_ran() != 0) {
+        BKPT(0x74);
         spin_forever();
     }
 
