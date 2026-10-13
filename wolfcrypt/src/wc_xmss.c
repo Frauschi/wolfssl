@@ -74,7 +74,7 @@ static int wc_xmss_digest_init(XmssState* state)
 
 #ifdef WC_XMSS_SHA256
     if (hash == WC_HASH_TYPE_SHA256) {
-        ret = wc_InitSha256(&state->digest.sha256);
+        ret = wc_InitSha256_Sw(&state->digest.sha256);
     }
     else
 #endif

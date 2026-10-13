@@ -149,9 +149,9 @@ static int wc_lmskey_state_init(LmsState* state, const LmsParams* params)
 #endif
 
     /* Initialize the two hash algorithms. */
-    ret = wc_InitSha256(LMS_STATE_HASH(state));
+    ret = wc_InitSha256_Sw(LMS_STATE_HASH(state));
     if (ret == 0) {
-        ret = wc_InitSha256(LMS_STATE_HASH_K(state));
+        ret = wc_InitSha256_Sw(LMS_STATE_HASH_K(state));
         if (ret != 0) {
             wc_Sha256Free(LMS_STATE_HASH(state));
         }

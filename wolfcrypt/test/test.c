@@ -6868,7 +6868,11 @@ static wc_test_ret_t sha256_lms_test(wc_Sha256* sha)
         "\x23\xB0\x03\x61\xA3\x96\x17\x7A\x9C\xB4\x10\xFF\x61\xF2\x00"
         "\x15\xAD";
 
+#ifdef WC_SHA256_STM32_SW
+    ret = wc_InitSha256_Sw(sha);
+#else
     ret = wc_InitSha256_ex(sha, HEAP_HINT, devId);
+#endif
     if (ret != 0)
         return WC_TEST_RET_ENC_EC(ret);
 
@@ -6884,6 +6888,71 @@ exit:
     return ret;
 }
 #endif /* WOLFSSL_HAVE_LMS && !WOLFSSL_LMS_FULL_HASH */
+
+#ifdef WC_SHA256_STM32_SW
+/* Engine and software objects interleaved, as LMS, XMSS and SLH-DSA run. */
+static wc_test_ret_t sha256_stm32_sw_test(wc_Sha256* sha, wc_Sha256* shaSw)
+{
+    byte      hash[WC_SHA256_DIGEST_SIZE];
+    byte      hashSw[WC_SHA256_DIGEST_SIZE];
+#if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_FULL_HASH)
+    byte      block[WC_SHA256_BLOCK_SIZE];
+#endif
+    wc_test_ret_t ret = 0;
+    const char* input =
+        "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    const char* output =
+        "\x24\x8D\x6A\x61\xD2\x06\x38\xB8\xE5\xC0\x26\x93\x0C\x3E\x60"
+        "\x39\xA3\x3C\xE4\x59\x64\xFF\x21\x67\xF6\xEC\xED\xD4\x19\xDB"
+        "\x06\xC1";
+    word32 len = (word32)XSTRLEN(input);
+    word32 half = len / 2;
+
+    ret = wc_InitSha256_ex(sha, HEAP_HINT, devId);
+    if (ret != 0)
+        return WC_TEST_RET_ENC_EC(ret);
+    ret = wc_InitSha256_Sw(shaSw);
+    if (ret != 0) {
+        wc_Sha256Free(sha);
+        return WC_TEST_RET_ENC_EC(ret);
+    }
+
+    ret = wc_Sha256Update(sha, (const byte*)input, half);
+    if (ret == 0)
+        ret = wc_Sha256Update(shaSw, (const byte*)input, half);
+    if (ret == 0)
+        ret = wc_Sha256Update(sha, (const byte*)input + half, len - half);
+    if (ret == 0)
+        ret = wc_Sha256Update(shaSw, (const byte*)input + half, len - half);
+    if (ret == 0)
+        ret = wc_Sha256Final(sha, hash);
+    if (ret == 0)
+        ret = wc_Sha256Final(shaSw, hashSw);
+    if (ret != 0)
+        ERROR_OUT(WC_TEST_RET_ENC_EC(ret), exit);
+    if ((XMEMCMP(hash, output, WC_SHA256_DIGEST_SIZE) != 0) ||
+            (XMEMCMP(hashSw, output, WC_SHA256_DIGEST_SIZE) != 0)) {
+        ERROR_OUT(WC_TEST_RET_ENC_NC, exit);
+    }
+
+#if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_FULL_HASH)
+    XMEMSET(block, 0, sizeof(block));
+    ret = wc_Sha256HashBlock(sha, block, hash);
+    if (ret != WC_NO_ERR_TRACE(BAD_STATE_E))
+        ERROR_OUT(WC_TEST_RET_ENC_EC(ret), exit);
+    ret = wc_Sha256Reset(shaSw);
+    if (ret == 0)
+        ret = wc_Sha256HashBlock(shaSw, block, hash);
+    if (ret != 0)
+        ERROR_OUT(WC_TEST_RET_ENC_EC(ret), exit);
+#endif
+
+exit:
+    wc_Sha256Free(sha);
+    wc_Sha256Free(shaSw);
+    return ret;
+}
+#endif /* WC_SHA256_STM32_SW */
 
 #if !defined(HAVE_SELFTEST) && (!defined(HAVE_FIPS) || FIPS_VERSION_GE(7, 0))
 static wc_test_ret_t sha256_copy_test(wc_Sha256* sha, wc_Sha256* shaCopy)
@@ -7061,6 +7130,10 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t sha256_test(void)
 #if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_FULL_HASH) && \
     !defined(WOLF_CRYPTO_CB_ONLY_SHA256)
     if ((ret = sha256_lms_test(&sha)) != 0)
+        return ret;
+#endif
+#ifdef WC_SHA256_STM32_SW
+    if ((ret = sha256_stm32_sw_test(&sha, &shaCopy)) != 0)
         return ret;
 #endif
 #if !defined(HAVE_SELFTEST) && (!defined(HAVE_FIPS) || FIPS_VERSION_GE(7, 0))

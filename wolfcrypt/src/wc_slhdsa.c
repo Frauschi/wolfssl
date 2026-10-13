@@ -774,7 +774,7 @@ static int slhdsakey_precompute_sha2_midstates(SlhDsaKey* key)
         wc_Sha256Free(&key->hash.sha2.sha256_mid);
         key->hash.sha2.sha256_mid_inited = 0;
     }
-    ret = wc_InitSha256(&key->hash.sha2.sha256_mid);
+    ret = wc_InitSha256_Sw(&key->hash.sha2.sha256_mid);
     if (ret == 0) {
         key->hash.sha2.sha256_mid_inited = 1;
         ret = wc_Sha256Update(&key->hash.sha2.sha256_mid, block,
@@ -1236,7 +1236,7 @@ static int slhdsakey_mgf1_sha2(SlhDsaKey* key, const byte* seed,
                 left : WC_SHA256_DIGEST_SIZE;
 
             if (! key->hash.sha2.sha256_2_inited) {
-                ret = wc_InitSha256(&key->hash.sha2.sha256_2);
+                ret = wc_InitSha256_Sw(&key->hash.sha2.sha256_2);
                 if (ret == 0)
                     key->hash.sha2.sha256_2_inited = 1;
             }
@@ -1383,7 +1383,7 @@ static int slhdsakey_h_msg_sha2(SlhDsaKey* key, const byte* r,
 
         /* Step 1: innerHash = SHA-256(R || PK.seed || PK.root || M). */
         if (! key->hash.sha2.sha256_2_inited) {
-            ret = wc_InitSha256(&key->hash.sha2.sha256_2);
+            ret = wc_InitSha256_Sw(&key->hash.sha2.sha256_2);
             if (ret == 0)
                 key->hash.sha2.sha256_2_inited = 1;
         }
@@ -8620,7 +8620,7 @@ int wc_SlhDsaKey_Init(SlhDsaKey* key, enum SlhDsaParam param, void* heap,
 #ifdef WOLFSSL_SLHDSA_SHA2
         if (SLHDSA_IS_SHA2(param)) {
             /* Initialize SHA2 hash objects. */
-            ret = wc_InitSha256(&key->hash.sha2.sha256);
+            ret = wc_InitSha256_Sw(&key->hash.sha2.sha256);
             if (ret == 0)
                 key->hash.sha2.sha256_inited = 1;
             if ((ret == 0) && (key->params->n > 16)) {
