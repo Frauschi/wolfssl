@@ -93,11 +93,8 @@
  * skip stub. main() always returns 0.
  */
 
-/* wc_SlhDsaKey_Init()'s hash-object init checks take their ret from
- * wc_InitSha256() (and, with a category 3/5 SHA2 set compiled in, feed
- * `(ret == 0) && (key->params->n > 16)`), so the SHA context-init family
- * has to be interposed too. It is opt-in, and armed only inside
- * wb_init_rows(); every other sweep here builds its keys while disarmed. */
+/* wc_SlhDsaKey_Init() takes its ret from wc_InitSha256_ex(), so the SHA init
+ * family is interposed too, armed only inside wb_init_rows(). */
 #define MCDC_FH_WITH_SHA_INIT
 
 #include "mcdc_fault_hash.h"

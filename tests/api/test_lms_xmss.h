@@ -43,6 +43,8 @@ int test_wc_XmssKey_keygen_sign_declined(void);
 int test_wc_XmssKey_id_sigsleft(void);
 int test_wc_XmssKey_id_verify(void);
 int test_wc_XmssKey_cb_only_no_device(void);
+int test_wc_LmsKey_hash_sw(void);
+int test_wc_XmssKey_hash_sw(void);
 int test_rfc9802_lms_x509_verify(void);
 int test_rfc9802_xmss_x509_verify(void);
 int test_rfc9802_lms_x509_gen(void);
@@ -75,6 +77,8 @@ int test_wc_XmssKey_make_key_id_dev(void);
     TEST_DECL_GROUP("xmss", test_wc_XmssKey_id_sigsleft),               \
     TEST_DECL_GROUP("xmss", test_wc_XmssKey_id_verify),                 \
     TEST_DECL_GROUP("xmss", test_wc_XmssKey_cb_only_no_device),         \
+    TEST_DECL_GROUP("lms", test_wc_LmsKey_hash_sw),                     \
+    TEST_DECL_GROUP("xmss", test_wc_XmssKey_hash_sw),                   \
     TEST_DECL_GROUP("lms", test_rfc9802_lms_x509_verify),               \
     TEST_DECL_GROUP("xmss", test_rfc9802_xmss_x509_verify),             \
     TEST_DECL_GROUP("lms", test_rfc9802_lms_x509_gen),                  \

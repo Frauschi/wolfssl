@@ -30,10 +30,11 @@
     \return ALREADY_E if devId is already registered. A devId must be
     un-registered with wc_CryptoCb_UnRegisterDevice before it can be
     registered again; re-registering an active devId is not an in-place update.
-    \return BAD_FUNC_ARG if devId is INVALID_DEVID (-2)
+    \return BAD_FUNC_ARG if devId is INVALID_DEVID (-2) or WC_SW_DEVID, which
+    is -3 with WOLF_CRYPTO_CB_FIND and never passed to the find callback
     \return negative value for failure
 
-    \param devId any unique value, not -2 (INVALID_DEVID)
+    \param devId any unique value, not -2 (INVALID_DEVID) or WC_SW_DEVID
     \param cb a callback function with prototype:
     typedef int (*CryptoDevCallbackFunc)(int devId, wc_CryptoInfo* info, void* ctx);
     \param ctx user context handed back to the callback on every invocation.

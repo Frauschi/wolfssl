@@ -74,6 +74,22 @@
     extern "C" {
 #endif
 
+/* Device ids for hash objects kept in software; CB_ONLY builds have no
+ * software hash and use the default device. */
+#ifdef WOLF_CRYPTO_CB_ONLY_SHA256
+    #define WC_SHA256_SW_DEVID  wc_CryptoCb_DefaultDevID()
+#else
+    #define WC_SHA256_SW_DEVID  WC_SW_DEVID
+#endif
+#ifdef WOLF_CRYPTO_CB_ONLY_SHA512
+    #define WC_SHA512_SW_DEVID  wc_CryptoCb_DefaultDevID()
+#else
+    #define WC_SHA512_SW_DEVID  WC_SW_DEVID
+#endif
+#if defined(WOLF_CRYPTO_CB_ONLY_SHA256) || defined(WOLF_CRYPTO_CB_ONLY_SHA512)
+WOLFSSL_API int wc_CryptoCb_DefaultDevID(void);
+#endif
+
 #if !defined(HAVE_FIPS) && !defined(NO_OLD_WC_NAMES)
     #define MAX_DIGEST_SIZE WC_MAX_DIGEST_SIZE
 #endif
