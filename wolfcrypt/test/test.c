@@ -6846,7 +6846,7 @@ exit:
 #endif /* NO_LARGE_HASH_TEST */
 
 #if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_FULL_HASH) && \
-    !defined(WOLF_CRYPTO_CB_ONLY_SHA256)
+    !defined(WOLFSSL_NO_HASH_RAW)
 static wc_test_ret_t sha256_lms_test(wc_Sha256* sha)
 {
     byte      hash[WC_SHA256_DIGEST_SIZE];
@@ -7059,7 +7059,7 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t sha256_test(void)
         return ret;
 #endif
 #if defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_FULL_HASH) && \
-    !defined(WOLF_CRYPTO_CB_ONLY_SHA256)
+    !defined(WOLFSSL_NO_HASH_RAW)
     if ((ret = sha256_lms_test(&sha)) != 0)
         return ret;
 #endif

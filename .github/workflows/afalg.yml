@@ -26,7 +26,7 @@ jobs:
   # to the kernel crypto API over AF_ALG sockets. Note that Docker's default
   # seccomp profile blocks socket(AF_ALG).
   #
-  # Both configs build on one runner via .github/scripts/parallel-make-check.py
+  # The configs build on one runner via .github/scripts/parallel-make-check.py
   # (see os-check.yml for the full pattern): each builds in its own out-of-tree
   # ("VPATH") build directory off one checkout/autogen, on a pool of one-per-CPU
   # worker threads, longest first.
@@ -166,6 +166,10 @@ jobs:
           [
           {"name": "defaults-afalg", "minutes": 2,
            "configure": ["--enable-afalg"],
+           "cflags": "-pedantic -Wdeclaration-after-statement -Wnull-dereference -Wno-overlength-strings"},
+          {"name": "hbs-afalg", "minutes": 3,
+           "configure": ["--enable-afalg", "--enable-lms", "--enable-xmss",
+            "--enable-slhdsa=yes,sha2"],
            "cflags": "-pedantic -Wdeclaration-after-statement -Wnull-dereference -Wno-overlength-strings"},
           {"name": "all-afalg", "minutes": 5,
            "configure": ["--enable-all", "--enable-testcert", "--enable-acert",
