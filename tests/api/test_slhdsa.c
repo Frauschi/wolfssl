@@ -4356,3 +4356,223 @@ int test_wc_SlhDsaKey_seed_service_indicator(void)
 #endif
     return EXPECT_RESULT();
 }
+
+#if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
+    !defined(NO_SHA256) && \
+    defined(WOLF_CRYPTO_CB) && !defined(WOLF_CRYPTO_CB_ONLY_SLHDSA) && \
+    !defined(WOLF_CRYPTO_CB_ONLY_SHA256) && \
+    !defined(WOLF_CRYPTO_CB_ONLY_SHA512)
+#define TEST_SLHDSA_HASH_DEVID 0x534C4853 /* "SLHS" */
+
+/* Number of hash operations the accelerator below was asked to do. */
+static int test_slhdsa_hash_calls;
+
+/* A hash accelerator: counts hash requests, copies and frees included, and
+ * declines all of them. */
+static int test_slhdsa_hash_cryptocb(int devIdArg, wc_CryptoInfo* info,
+    void* ctx)
+{
+    (void)devIdArg;
+    (void)ctx;
+
+    if ((info != NULL) && (info->algo_type == WC_ALGO_TYPE_HASH)) {
+        test_slhdsa_hash_calls++;
+    }
+#ifdef WOLF_CRYPTO_CB_COPY
+    if ((info != NULL) && (info->algo_type == WC_ALGO_TYPE_COPY) &&
+            (info->copy.algo == WC_ALGO_TYPE_HASH)) {
+        test_slhdsa_hash_calls++;
+    }
+#endif
+#ifdef WOLF_CRYPTO_CB_FREE
+    if ((info != NULL) && (info->algo_type == WC_ALGO_TYPE_FREE) &&
+            (info->free.algo == WC_ALGO_TYPE_HASH)) {
+        test_slhdsa_hash_calls++;
+    }
+#endif
+    return CRYPTOCB_UNAVAILABLE;
+}
+
+#ifdef WOLF_CRYPTO_CB_FIND
+#ifdef WOLFSSL_SWDEV
+    #include <tests/swdev/swdev_loader.h>
+#endif
+/* Finder that sends objects with no device to the device, as swdev does, and
+ * also claims WC_SW_DEVID, which the find path must never pass to it. */
+static int test_slhdsa_hash_find(int devIdArg, int algoType)
+{
+    (void)algoType;
+    if ((devIdArg == INVALID_DEVID) || (devIdArg == WC_SW_DEVID)) {
+        return TEST_SLHDSA_HASH_DEVID;
+    }
+    return devIdArg;
+}
+#endif
+
+static void test_slhdsa_hash_dev_stop(void)
+{
+#ifdef WOLF_CRYPTO_CB_FIND
+#ifdef WOLFSSL_SWDEV
+    wc_CryptoCb_SetDeviceFindCb(wc_SwDev_FindCb);
+#else
+    wc_CryptoCb_SetDeviceFindCb(NULL);
+#endif
+#endif
+    wc_CryptoCb_UnRegisterDevice(TEST_SLHDSA_HASH_DEVID);
+}
+#endif
+
+/* Test that SLH-DSA key generation, signing and verification hash in software,
+ * for each hash family, when the default device takes hashing. */
+int test_wc_slhdsa_hash_sw(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_SLHDSA_HASH_DEVID
+    static const enum SlhDsaParam params[] = {
+        SLHDSA_SHAKE128F,
+    #ifdef WOLFSSL_SLHDSA_SHA2
+        SLHDSA_SHA2_128F, SLHDSA_SHA2_192F,
+    #endif
+    };
+    SlhDsaKey key;
+    WC_RNG    rng;
+    wc_Sha256 sha;
+    byte      hash[WC_SHA256_DIGEST_SIZE];
+    byte      msg[64];
+    byte*     sig = NULL;
+    word32    sigLen;
+    int       ran = 0;
+    int       i;
+    int       ret;
+
+    test_slhdsa_hash_calls = 0;
+    XMEMSET(msg, 0xAA, sizeof(msg));
+    ret = wc_CryptoCb_RegisterDevice(TEST_SLHDSA_HASH_DEVID,
+        test_slhdsa_hash_cryptocb, NULL);
+    if (ret != 0) {
+        return TEST_FAIL;
+    }
+#ifdef WOLF_CRYPTO_CB_FIND
+    wc_CryptoCb_SetDeviceFindCb(test_slhdsa_hash_find);
+#endif
+    /* Skipped when a SHA-256 object does not reach the device, as with a
+     * SHA-256 hardware port. */
+#ifdef WOLF_CRYPTO_CB_FIND
+    ret = wc_InitSha256_ex(&sha, NULL, INVALID_DEVID);
+#else
+    ret = wc_InitSha256(&sha);
+#endif
+    if (ret == 0) {
+        ret = wc_Sha256Update(&sha, msg, sizeof(msg));
+        if (ret == 0) {
+            ret = wc_Sha256Final(&sha, hash);
+        }
+        wc_Sha256Free(&sha);
+    }
+    if ((ret != 0) || (test_slhdsa_hash_calls == 0)) {
+        test_slhdsa_hash_dev_stop();
+        return (ret != 0) ? TEST_FAIL : TEST_SKIPPED;
+    }
+
+    test_slhdsa_hash_calls = 0;
+    XMEMSET(&rng, 0, sizeof(rng));
+    ExpectIntEQ(wc_InitRng_ex(&rng, NULL, WC_SW_DEVID), 0);
+    for (i = 0; EXPECT_SUCCESS() && (i < (int)XELEM_CNT(params)); i++) {
+        XMEMSET(&key, 0, sizeof(key));
+        if (wc_SlhDsaKey_Init(&key, params[i], NULL, INVALID_DEVID) != 0) {
+            continue;
+        }
+        ExpectIntGT(ret = wc_SlhDsaKey_SigSizeFromParam(params[i]), 0);
+        sigLen = (word32)ret;
+        ExpectNotNull(sig = (byte*)XMALLOC(sigLen, NULL,
+            DYNAMIC_TYPE_TMP_BUFFER));
+        ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+        ExpectIntEQ(wc_SlhDsaKey_SignDeterministic(&key, NULL, 0, msg,
+            sizeof(msg), sig, &sigLen), 0);
+        ExpectIntEQ(wc_SlhDsaKey_Verify(&key, NULL, 0, msg, sizeof(msg), sig,
+            sigLen), 0);
+        XFREE(sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        sig = NULL;
+        wc_SlhDsaKey_Free(&key);
+        ExpectIntEQ(test_slhdsa_hash_calls, 0);
+        ran++;
+    }
+
+    wc_FreeRng(&rng);
+    test_slhdsa_hash_dev_stop();
+    if (EXPECT_SUCCESS() && (ran == 0)) {
+        return TEST_SKIPPED;
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
+#if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
+    defined(WOLFSSL_SLHDSA_SHA2) && defined(WOLF_CRYPTO_CB) && \
+    !defined(WOLF_CRYPTO_CB_ONLY_SLHDSA) && \
+    (defined(WOLF_CRYPTO_CB_ONLY_SHA256) || defined(WOLF_CRYPTO_CB_ONLY_SHA512))
+#define TEST_SLHDSA_DECLINE_DEVID 0x534C4844 /* "SLHD" */
+
+static int test_slhdsa_decline_cryptocb(int devIdArg, wc_CryptoInfo* info,
+    void* ctx)
+{
+    (void)devIdArg;
+    (void)info;
+    (void)ctx;
+    return CRYPTOCB_UNAVAILABLE;
+}
+#endif
+
+/* Test that software SLH-DSA SHA2 signs and verifies when SHA-256 or SHA-512
+ * exists only on the default device. */
+int test_wc_slhdsa_sha2_cb_only(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_SLHDSA_DECLINE_DEVID
+    static const enum SlhDsaParam params[] = {
+        SLHDSA_SHA2_128F, SLHDSA_SHA2_192F
+    };
+    SlhDsaKey key;
+    WC_RNG    rng;
+    byte      msg[64];
+    byte*     sig = NULL;
+    word32    sigLen;
+    int       ran = 0;
+    int       i;
+    int       ret;
+
+    XMEMSET(msg, 0x5A, sizeof(msg));
+    XMEMSET(&rng, 0, sizeof(rng));
+    ExpectIntEQ(wc_CryptoCb_RegisterDevice(TEST_SLHDSA_DECLINE_DEVID,
+        test_slhdsa_decline_cryptocb, NULL), 0);
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    for (i = 0; EXPECT_SUCCESS() && (i < (int)XELEM_CNT(params)); i++) {
+        XMEMSET(&key, 0, sizeof(key));
+        /* The key's device declines, so the library signs in software. */
+        if (wc_SlhDsaKey_Init(&key, params[i], NULL,
+                TEST_SLHDSA_DECLINE_DEVID) != 0) {
+            continue;
+        }
+        ExpectIntGT(ret = wc_SlhDsaKey_SigSizeFromParam(params[i]), 0);
+        sigLen = (word32)ret;
+        ExpectNotNull(sig = (byte*)XMALLOC(sigLen, NULL,
+            DYNAMIC_TYPE_TMP_BUFFER));
+        ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+        ExpectIntEQ(wc_SlhDsaKey_Sign(&key, NULL, 0, msg, sizeof(msg), sig,
+            &sigLen, &rng), 0);
+        ExpectIntEQ(wc_SlhDsaKey_Verify(&key, NULL, 0, msg, sizeof(msg), sig,
+            sigLen), 0);
+        XFREE(sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        sig = NULL;
+        wc_SlhDsaKey_Free(&key);
+        ran++;
+    }
+
+    wc_FreeRng(&rng);
+    wc_CryptoCb_UnRegisterDevice(TEST_SLHDSA_DECLINE_DEVID);
+    if (EXPECT_SUCCESS() && (ran == 0)) {
+        return TEST_SKIPPED;
+    }
+#endif
+    return EXPECT_RESULT();
+}

@@ -1909,6 +1909,12 @@ WOLFSSL_API word32 CheckRunTimeSettings(void);
 
 /* invalid device id */
 #define INVALID_DEVID    (-2)
+/* device id that the crypto callbacks, including the find callback, skip */
+#ifdef WOLF_CRYPTO_CB_FIND
+    #define WC_SW_DEVID  (-3)
+#else
+    #define WC_SW_DEVID  INVALID_DEVID
+#endif
 
 #if defined(HAVE_FIPS) && FIPS_VERSION_LT(5,3)
     #ifdef XASM_LINK

@@ -94,10 +94,8 @@
  * skip stub. main() always returns 0.
  */
 
-/* wc_SlhDsaKey_Init()'s `(ret == 0) && (key->params->n > 16)` takes its ret
- * from wc_InitSha256() and from nothing else, so the SHA context-init family
- * has to be interposed too. It is opt-in, and armed only inside
- * wb_init_rows(); every other sweep here builds its keys while disarmed. */
+/* wc_SlhDsaKey_Init()'s n > 16 guard takes its ret only from
+ * wc_InitSha256_ex(), so the SHA-2 inits are interposed too. */
 #define MCDC_FH_WITH_SHA_INIT
 
 #include "mcdc_fault_hash.h"

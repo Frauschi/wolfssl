@@ -479,13 +479,15 @@ static int wb_state_init(XmssState* state, const XmssParams* params)
 
 #ifdef WC_XMSS_SHA256
     if (params->hash == WC_HASH_TYPE_SHA256) {
-        ret = wc_InitSha256(&state->digest.sha256);
+        ret = wc_InitSha256_ex(&state->digest.sha256, NULL,
+            WC_SHA256_SW_DEVID);
     }
     else
 #endif
 #ifdef WC_XMSS_SHA512
     if (params->hash == WC_HASH_TYPE_SHA512) {
-        ret = wc_InitSha512(&state->digest.sha512);
+        ret = wc_InitSha512_ex(&state->digest.sha512, NULL,
+            WC_SHA512_SW_DEVID);
     }
     else
 #endif

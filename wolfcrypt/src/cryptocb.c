@@ -506,6 +506,9 @@ static CryptoCb* wc_CryptoCb_FindDevice(int devId, int algoType)
     int localDevId = devId;
 
 #ifdef WOLF_CRYPTO_CB_FIND
+    if (devId == WC_SW_DEVID) {
+        return NULL;
+    }
     if (CryptoCb_FindCb != NULL) {
         localDevId = CryptoCb_FindCb(devId, algoType);
     }
@@ -628,8 +631,8 @@ int wc_CryptoCb_RegisterDevice(int devId, CryptoDevCallbackFunc cb, void* ctx)
     int rc = 0;
     CryptoCb* dev;
 
-    /* INVALID_DEVID marks a free slot and cannot be registered as a device. */
-    if (devId == INVALID_DEVID)
+    /* INVALID_DEVID marks a free slot and WC_SW_DEVID means no device. */
+    if ((devId == INVALID_DEVID) || (devId == WC_SW_DEVID))
         return BAD_FUNC_ARG;
 
     /* Reject re-registration of an already-registered device ID. */

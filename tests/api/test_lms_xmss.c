@@ -828,6 +828,249 @@ int test_wc_XmssKey_reload_devid_verify(void)
     return EXPECT_RESULT();
 }
 
+#if defined(WOLF_CRYPTO_CB) && !defined(WOLF_CRYPTO_CB_ONLY_SHA256) && \
+    !defined(WOLF_CRYPTO_CB_ONLY_SHA512) && !defined(NO_FILESYSTEM) && \
+    !defined(NO_SHA256) && \
+    defined(WOLFSSL_HAVE_LMS) && !defined(WOLFSSL_LMS_VERIFY_ONLY) && \
+    (!defined(WOLFSSL_NO_LMS_SHA256_256) || defined(WOLFSSL_LMS_SHA256_192) || \
+     defined(WOLFSSL_LMS_SHAKE256))
+    #define TEST_LMS_HASH_SW
+#endif
+#if defined(WOLF_CRYPTO_CB) && !defined(WOLF_CRYPTO_CB_ONLY_SHA256) && \
+    !defined(WOLF_CRYPTO_CB_ONLY_SHA512) && !defined(NO_FILESYSTEM) && \
+    defined(WOLFSSL_HAVE_XMSS) && !defined(WOLFSSL_XMSS_VERIFY_ONLY) && \
+    defined(TEST_XMSS_H10_AVAILABLE)
+    #define TEST_XMSS_HASH_SW
+#endif
+
+#if defined(TEST_LMS_HASH_SW) || defined(TEST_XMSS_HASH_SW)
+/* Number of hash operations the accelerator below was asked to do. */
+static int test_lms_xmss_hash_calls;
+
+/* A hash accelerator: counts hash requests, copies and frees included, and
+ * declines all of them. */
+static int test_lms_xmss_hash_cryptocb(int devIdArg, wc_CryptoInfo* info,
+    void* ctx)
+{
+    (void)devIdArg;
+    (void)ctx;
+
+    if ((info != NULL) && (info->algo_type == WC_ALGO_TYPE_HASH)) {
+        test_lms_xmss_hash_calls++;
+    }
+#ifdef WOLF_CRYPTO_CB_COPY
+    if ((info != NULL) && (info->algo_type == WC_ALGO_TYPE_COPY) &&
+            (info->copy.algo == WC_ALGO_TYPE_HASH)) {
+        test_lms_xmss_hash_calls++;
+    }
+#endif
+#ifdef WOLF_CRYPTO_CB_FREE
+    if ((info != NULL) && (info->algo_type == WC_ALGO_TYPE_FREE) &&
+            (info->free.algo == WC_ALGO_TYPE_HASH)) {
+        test_lms_xmss_hash_calls++;
+    }
+#endif
+    return CRYPTOCB_UNAVAILABLE;
+}
+
+#ifdef WOLF_CRYPTO_CB_FIND
+#ifdef WOLFSSL_SWDEV
+    #include <tests/swdev/swdev_loader.h>
+#endif
+/* Finder that sends objects with no device to the device, as swdev does, and
+ * also claims WC_SW_DEVID, which the find path must never pass to it. */
+static int test_lms_xmss_hash_find(int devIdArg, int algoType)
+{
+    (void)algoType;
+    if ((devIdArg == INVALID_DEVID) || (devIdArg == WC_SW_DEVID)) {
+        return TEST_LMS_XMSS_CRYPTOCB_DEVID;
+    }
+    return devIdArg;
+}
+#endif
+
+static void test_lms_xmss_hash_dev_stop(void)
+{
+#ifdef WOLF_CRYPTO_CB_FIND
+#ifdef WOLFSSL_SWDEV
+    wc_CryptoCb_SetDeviceFindCb(wc_SwDev_FindCb);
+#else
+    wc_CryptoCb_SetDeviceFindCb(NULL);
+#endif
+#endif
+    wc_CryptoCb_UnRegisterDevice(TEST_LMS_XMSS_CRYPTOCB_DEVID);
+}
+
+/* Register the counting device as default and finder. Skipped when a SHA-256
+ * object does not reach it, as with a SHA-256 hardware port. */
+static int test_lms_xmss_hash_dev_start(void)
+{
+    wc_Sha256 sha;
+    byte      hash[WC_SHA256_DIGEST_SIZE];
+    byte      data[1] = { 0 };
+    int       ret;
+
+    test_lms_xmss_hash_calls = 0;
+    ret = wc_CryptoCb_RegisterDevice(TEST_LMS_XMSS_CRYPTOCB_DEVID,
+        test_lms_xmss_hash_cryptocb, NULL);
+#ifdef WOLF_CRYPTO_CB_FIND
+    if (ret == 0) {
+        wc_CryptoCb_SetDeviceFindCb(test_lms_xmss_hash_find);
+    }
+#endif
+    if (ret == 0) {
+    #ifdef WOLF_CRYPTO_CB_FIND
+        ret = wc_InitSha256_ex(&sha, NULL, INVALID_DEVID);
+    #else
+        ret = wc_InitSha256(&sha);
+    #endif
+    }
+    if (ret == 0) {
+        ret = wc_Sha256Update(&sha, data, sizeof(data));
+        if (ret == 0) {
+            ret = wc_Sha256Final(&sha, hash);
+        }
+        wc_Sha256Free(&sha);
+    }
+    if (ret != 0) {
+        test_lms_xmss_hash_dev_stop();
+        return TEST_FAIL;
+    }
+    if (test_lms_xmss_hash_calls == 0) {
+        test_lms_xmss_hash_dev_stop();
+        return TEST_SKIPPED;
+    }
+    test_lms_xmss_hash_calls = 0;
+    return TEST_SUCCESS;
+}
+#endif
+
+/* Test that LMS key generation, signing and verification hash in software, for
+ * each hash family, when the default device takes hashing. */
+int test_wc_LmsKey_hash_sw(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_LMS_HASH_SW
+    static const enum wc_LmsParm parms[] = {
+    #ifndef WOLFSSL_NO_LMS_SHA256_256
+        WC_LMS_PARM_L1_H5_W8,
+    #endif
+    #ifdef WOLFSSL_LMS_SHA256_192
+        WC_LMS_PARM_SHA256_192_L1_H5_W8,
+    #endif
+    #ifdef WOLFSSL_LMS_SHAKE256
+        WC_LMS_PARM_SHAKE_L1_H5_W8,
+    #endif
+    };
+    WC_RNG rng;
+    LmsKey key;
+    byte   msg[] = "test message for LMS signing";
+    byte   sig[2048];
+    word32 sigSz;
+    int    ran = 0;
+    int    i;
+    int    ret;
+
+    ret = test_lms_xmss_hash_dev_start();
+    if (ret != TEST_SUCCESS) {
+        return ret;
+    }
+    XMEMSET(&rng, 0, sizeof(rng));
+    ExpectIntEQ(wc_InitRng_ex(&rng, NULL, WC_SW_DEVID), 0);
+
+    for (i = 0; EXPECT_SUCCESS() && (i < (int)XELEM_CNT(parms)); i++) {
+        XMEMSET(&key, 0, sizeof(key));
+        ExpectIntEQ(wc_LmsKey_Init(&key, NULL, INVALID_DEVID), 0);
+        if (wc_LmsKey_SetLmsParm(&key, parms[i]) != 0) {
+            wc_LmsKey_Free(&key);
+            continue;
+        }
+        ExpectIntEQ(wc_LmsKey_SetWriteCb(&key, test_lms_write_key), 0);
+        ExpectIntEQ(wc_LmsKey_SetReadCb(&key, test_lms_read_key), 0);
+        ExpectIntEQ(wc_LmsKey_SetContext(&key,
+            (void*)LMS_TEST_PRIV_KEY_FILE), 0);
+        (void)remove(LMS_TEST_PRIV_KEY_FILE);
+        ExpectIntEQ(wc_LmsKey_MakeKey(&key, &rng), 0);
+        sigSz = sizeof(sig);
+        ExpectIntEQ(wc_LmsKey_Sign(&key, sig, &sigSz, msg, sizeof(msg)), 0);
+        ExpectIntEQ(wc_LmsKey_Verify(&key, sig, sigSz, msg, sizeof(msg)), 0);
+        wc_LmsKey_Free(&key);
+        ExpectIntEQ(test_lms_xmss_hash_calls, 0);
+        (void)remove(LMS_TEST_PRIV_KEY_FILE);
+        ran++;
+    }
+
+    wc_FreeRng(&rng);
+    test_lms_xmss_hash_dev_stop();
+    if (EXPECT_SUCCESS() && (ran == 0)) {
+        return TEST_SKIPPED;
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
+/* Test that XMSS key generation, signing and verification hash in software,
+ * for each hash family, when the default device takes hashing. */
+int test_wc_XmssKey_hash_sw(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_XMSS_HASH_SW
+    static const char* const parms[] = {
+        "XMSS-SHA2_10_256", "XMSS-SHA2_10_512", "XMSS-SHAKE_10_256",
+        "XMSS-SHAKE256_10_256"
+    };
+    WC_RNG  rng;
+    XmssKey key;
+    byte    msg[] = "test message for XMSS signing";
+    byte*   sig = NULL;
+    word32  sigSz;
+    int     ran = 0;
+    int     i;
+    int     ret;
+
+    ret = test_lms_xmss_hash_dev_start();
+    if (ret != TEST_SUCCESS) {
+        return ret;
+    }
+    XMEMSET(&rng, 0, sizeof(rng));
+    ExpectIntEQ(wc_InitRng_ex(&rng, NULL, WC_SW_DEVID), 0);
+
+    for (i = 0; EXPECT_SUCCESS() && (i < (int)XELEM_CNT(parms)); i++) {
+        XMEMSET(&key, 0, sizeof(key));
+        ExpectIntEQ(wc_XmssKey_Init(&key, NULL, INVALID_DEVID), 0);
+        if (wc_XmssKey_SetParamStr(&key, parms[i]) != 0) {
+            wc_XmssKey_Free(&key);
+            continue;
+        }
+        ExpectIntEQ(wc_XmssKey_SetWriteCb(&key, xmss_devid_write_key), 0);
+        ExpectIntEQ(wc_XmssKey_SetReadCb(&key, xmss_devid_read_key), 0);
+        ExpectIntEQ(wc_XmssKey_SetContext(&key,
+            (void*)XMSS_DEVID_TEST_PRIV_KEY_FILE), 0);
+        (void)remove(XMSS_DEVID_TEST_PRIV_KEY_FILE);
+        ExpectIntEQ(wc_XmssKey_MakeKey(&key, &rng), 0);
+        sigSz = 0;
+        ExpectIntEQ(wc_XmssKey_GetSigLen(&key, &sigSz), 0);
+        ExpectNotNull(sig = (byte*)XMALLOC(sigSz, NULL,
+            DYNAMIC_TYPE_TMP_BUFFER));
+        ExpectIntEQ(wc_XmssKey_Sign(&key, sig, &sigSz, msg, sizeof(msg)), 0);
+        ExpectIntEQ(wc_XmssKey_Verify(&key, sig, sigSz, msg, sizeof(msg)), 0);
+        XFREE(sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        sig = NULL;
+        wc_XmssKey_Free(&key);
+        ExpectIntEQ(test_lms_xmss_hash_calls, 0);
+        (void)remove(XMSS_DEVID_TEST_PRIV_KEY_FILE);
+        ran++;
+    }
+
+    wc_FreeRng(&rng);
+    test_lms_xmss_hash_dev_stop();
+    if (EXPECT_SUCCESS() && (ran == 0)) {
+        return TEST_SKIPPED;
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
 /*----------------------------------------------------------------------------*/
 /* RFC 9802 (HSS/LMS and XMSS/XMSS^MT in X.509) tests                         */
 /*----------------------------------------------------------------------------*/

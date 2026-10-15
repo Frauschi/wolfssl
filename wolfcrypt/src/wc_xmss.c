@@ -74,25 +74,27 @@ static int wc_xmss_digest_init(XmssState* state)
 
 #ifdef WC_XMSS_SHA256
     if (hash == WC_HASH_TYPE_SHA256) {
-        ret = wc_InitSha256(&state->digest.sha256);
+        ret = wc_InitSha256_ex(&state->digest.sha256, NULL,
+            WC_SHA256_SW_DEVID);
     }
     else
 #endif
 #ifdef WC_XMSS_SHA512
     if (hash == WC_HASH_TYPE_SHA512) {
-        ret = wc_InitSha512(&state->digest.sha512);
+        ret = wc_InitSha512_ex(&state->digest.sha512, NULL,
+            WC_SHA512_SW_DEVID);
     }
     else
 #endif
 #ifdef WC_XMSS_SHAKE128
     if (hash == WC_HASH_TYPE_SHAKE128) {
-        ret = wc_InitShake128(&state->digest.shake, NULL, INVALID_DEVID);
+        ret = wc_InitShake128(&state->digest.shake, NULL, WC_SW_DEVID);
     }
     else
 #endif
 #ifdef WC_XMSS_SHAKE256
     if (hash == WC_HASH_TYPE_SHAKE256) {
-        ret = wc_InitShake256(&state->digest.shake, NULL, INVALID_DEVID);
+        ret = wc_InitShake256(&state->digest.shake, NULL, WC_SW_DEVID);
     }
     else
 #endif

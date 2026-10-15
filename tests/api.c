@@ -37573,6 +37573,11 @@ static int test_wc_CryptoCb(void)
             WC_NO_ERR_TRACE(BAD_FUNC_ARG));
         ExpectIntEQ(wc_CryptoCb_IsDeviceRegistered(INVALID_DEVID), 0);
 
+        /* Registering with WC_SW_DEVID is rejected. */
+        ExpectIntEQ(wc_CryptoCb_RegisterDevice(WC_SW_DEVID, NULL, &getDevCtx),
+            WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+        ExpectIntEQ(wc_CryptoCb_IsDeviceRegistered(WC_SW_DEVID), 0);
+
         /* After registering, the device is reported registered. */
         ExpectIntEQ(wc_CryptoCb_RegisterDevice(getDevId, NULL, &getDevCtx), 0);
         ExpectIntEQ(wc_CryptoCb_IsDeviceRegistered(getDevId), 1);

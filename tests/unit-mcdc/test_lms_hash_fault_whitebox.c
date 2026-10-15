@@ -93,6 +93,7 @@
 
 /* wc_lms_impl.c is #included AFTER the interposers are installed. */
 #include <wolfcrypt/src/wc_lms_impl.c>
+#include <wolfssl/wolfcrypt/hash.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -254,10 +255,10 @@ static int wb_state_init(LmsState* state, const LmsParams* params)
 
 #ifdef WOLFSSL_LMS_SHAKE256
     if (LMS_IS_SHAKE(params->lmOtsType)) {
-        ret = wc_InitShake256(LMS_STATE_SHAKE(state), NULL, INVALID_DEVID);
+        ret = wc_InitShake256(LMS_STATE_SHAKE(state), NULL, WC_SW_DEVID);
         if (ret == 0) {
             ret = wc_InitShake256(LMS_STATE_SHAKE_K(state), NULL,
-                INVALID_DEVID);
+                WC_SW_DEVID);
             if (ret != 0) {
                 wc_Shake256_Free(LMS_STATE_SHAKE(state));
             }
@@ -266,9 +267,10 @@ static int wb_state_init(LmsState* state, const LmsParams* params)
     }
 #endif
 
-    ret = wc_InitSha256(LMS_STATE_HASH(state));
+    ret = wc_InitSha256_ex(LMS_STATE_HASH(state), NULL, WC_SHA256_SW_DEVID);
     if (ret == 0) {
-        ret = wc_InitSha256(LMS_STATE_HASH_K(state));
+        ret = wc_InitSha256_ex(LMS_STATE_HASH_K(state), NULL,
+            WC_SHA256_SW_DEVID);
         if (ret != 0) {
             wc_Sha256Free(LMS_STATE_HASH(state));
         }
