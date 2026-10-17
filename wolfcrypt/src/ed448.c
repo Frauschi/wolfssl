@@ -477,7 +477,24 @@ int wc_ed448_make_key(WC_RNG* rng, int keySz, ed448_key* key)
     if (ret == 0) {
         key->pubKeySet = 0;
         key->privKeySet = 0;
+    }
 
+#ifdef WOLF_CRYPTO_CB
+    #ifndef WOLF_CRYPTO_CB_FIND
+    if ((ret == 0) && (key->devId != INVALID_DEVID))
+    #else
+    if (ret == 0)
+    #endif
+    {
+        ret = wc_CryptoCb_Ed448Gen(rng, keySz, key);
+        if (ret != WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE))
+            return ret;
+        /* fall-through when unavailable */
+        ret = 0;
+    }
+#endif
+
+    if (ret == 0) {
         ret = wc_RNG_GenerateBlock(rng, key->k, ED448_KEY_SIZE);
     }
     if (ret == 0) {
