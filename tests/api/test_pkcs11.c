@@ -297,6 +297,7 @@ static int           test_pkcs11_destroy_calls = 0;
 static int           test_pkcs11_fail_pub_create = 0;
 static int           test_pkcs11_no_ecdh = 0;
 static int           test_pkcs11_fail_modulus = 0;
+static int           test_pkcs11_session_no_point = 0;
 static byte          test_pkcs11_ec_point[2 + 65];
 
 #define TEST_PKCS11_FIND_CLASS  0x01
@@ -311,6 +312,7 @@ static void test_pkcs11_reset(void)
     test_pkcs11_destroy_calls = 0;
     test_pkcs11_fail_pub_create = 0;
     test_pkcs11_fail_modulus = 0;
+    test_pkcs11_session_no_point = 0;
 }
 
 static TestPkcs11Obj* test_pkcs11_obj(CK_OBJECT_HANDLE h)
@@ -443,7 +445,8 @@ static CK_RV test_pkcs11_store_get_attr(CK_SESSION_HANDLE session,
         }
         else if (tmpl[i].type == CKA_EC_POINT) {
             val = test_pkcs11_ec_point;
-            len = sizeof(test_pkcs11_ec_point);
+            if (!test_pkcs11_session_no_point || obj->onToken)
+                len = sizeof(test_pkcs11_ec_point);
         }
         else {
             return TEST_CKR_GENERAL_ERROR;
@@ -1258,6 +1261,102 @@ int test_wc_Pkcs11_RsaKeyGenError(void)
     wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
 #endif
+    return EXPECT_RESULT();
+}
+
+int test_wc_Pkcs11_KeyGenPersistent(void)
+{
+    static const byte id[] = { 0x21, 0x22 };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    ecc_key soft;
+    ecc_key key;
+    WC_RNG rng;
+    word32 len = sizeof(test_pkcs11_ec_point) - 2;
+    TestPkcs11Obj* priv = NULL;
+    TestPkcs11Obj* pub = NULL;
+#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+    RsaKey rsa;
+#endif
+    EXPECT_DECLS;
+
+    test_pkcs11_store_setup(&token, &func);
+    XMEMSET(&soft, 0, sizeof(soft));
+    XMEMSET(&key, 0, sizeof(key));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(test_pkcs11_make_ecc(&soft, &rng, id, (int)sizeof(id)), 0);
+    test_pkcs11_ec_point[0] = ASN_OCTET_STRING;
+    test_pkcs11_ec_point[1] = (byte)len;
+    ExpectIntEQ(wc_ecc_export_x963(&soft, test_pkcs11_ec_point + 2, &len), 0);
+    ExpectIntEQ(wc_CryptoCb_RegisterDevice(TEST_PKCS11_DEVID,
+        wc_Pkcs11_CryptoDevCb, &token), 0);
+    ExpectIntEQ(wc_Pkcs11Token_SetKeyGenPersistent(NULL, 1),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+
+    /* A token that only reports the public point of token objects. */
+    test_pkcs11_session_no_point = 1;
+    ExpectIntEQ(wc_ecc_init_id(&key, (unsigned char*)id, (int)sizeof(id),
+        NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
+        WC_ECC_FLAG_DEC_SIGN), WC_NO_ERR_TRACE(WC_HW_E));
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+
+    ExpectIntEQ(wc_Pkcs11Token_SetKeyGenPersistent(&token, 1), 0);
+    ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
+        WC_ECC_FLAG_DEC_SIGN), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    ExpectNotNull(priv = test_pkcs11_obj((CK_OBJECT_HANDLE)(wc_ptr_t)
+        key.devCtx));
+    if (priv != NULL) {
+        ExpectIntEQ(priv->cls, CKO_PRIVATE_KEY);
+        ExpectIntEQ(priv->onToken, CK_TRUE);
+        ExpectIntEQ(priv->idLen, sizeof(id));
+    }
+    ExpectNotNull(pub = test_pkcs11_obj(test_pkcs11_find_obj(CKO_PUBLIC_KEY,
+        CK_TRUE)));
+    if (pub != NULL)
+        ExpectIntEQ(pub->idLen, sizeof(id));
+    wc_ecc_free(&key);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+
+    /* The id is taken now, and a key without a name cannot be found later. */
+    ExpectIntEQ(wc_ecc_init_id(&key, (unsigned char*)id, (int)sizeof(id),
+        NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
+        WC_ECC_FLAG_DEC_SIGN), WC_NO_ERR_TRACE(BAD_STATE_E));
+    wc_ecc_free(&key);
+    ExpectIntEQ(wc_ecc_init_ex(&key, NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
+        WC_ECC_FLAG_DEC_SIGN), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    wc_ecc_free(&key);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+
+#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_InitRsaKey_Id(&rsa, (unsigned char*)id, (int)sizeof(id),
+        NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_MakeRsaKey(&rsa, 2048, WC_RSA_EXPONENT, &rng), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    ExpectIntEQ(wc_FreeRsaKey(&rsa), 0);
+#endif
+
+    test_pkcs11_reset();
+    test_pkcs11_session_no_point = 0;
+    ExpectIntEQ(wc_Pkcs11Token_SetKeyGenPersistent(&token, 0), 0);
+    ExpectIntEQ(wc_ecc_init_id(&key, (unsigned char*)id, (int)sizeof(id),
+        NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
+        WC_ECC_FLAG_DEC_SIGN), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 1);
+    wc_ecc_free(&key);
+
+    wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
+    wc_ecc_free(&soft);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+
     return EXPECT_RESULT();
 }
 

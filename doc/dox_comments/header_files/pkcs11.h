@@ -33,6 +33,31 @@ void wc_Pkcs11Token_Close(Pkcs11Token* token);
 
 /*!
     \ingroup PKCS11
+
+    \brief Makes RSA, ECC and ML-DSA key generation through the PKCS#11 crypto
+    callback create token objects (CKA_TOKEN set) instead of session objects.
+    Use it for tokens that cannot make a session key persistent later with
+    wc_Pkcs11PersistKey, such as tokens that only report the public key of a
+    token object. ECC and ML-DSA keys also keep a token object for the public
+    key under the same id or label. A generated key must have an id or label
+    and fails with BAD_FUNC_ARG otherwise, and with BAD_STATE_E when the
+    token already holds a key of that type with the same id or label. Remove
+    an unwanted key with wc_Pkcs11DeleteKey. Key generation opens a
+    read/write session for this.
+
+    \return 0 on success.
+    \return BAD_FUNC_ARG when token is NULL.
+
+    \param token Token used by the crypto callback.
+    \param persistent Generate token objects when non-zero.
+
+    \sa wc_Pkcs11PersistKey
+    \sa wc_Pkcs11DeleteKey
+*/
+int wc_Pkcs11Token_SetKeyGenPersistent(Pkcs11Token* token, int persistent);
+
+/*!
+    \ingroup PKCS11
  */
 int wc_Pkcs11StoreKey(Pkcs11Token* token, int type, int clear,
     void* key);

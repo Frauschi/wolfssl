@@ -955,6 +955,7 @@ static int Pkcs11Token_Init(Pkcs11Token* token, Pkcs11Dev* dev, int slotId,
         token->userPinSz = 0;
         token->userPinLogin = 0;
         token->loggedIn = 0;
+        token->keyGenOnToken = 0;
         token->version = dev->version;
         token->heap = dev->heap;
     }
@@ -1238,6 +1239,23 @@ void wc_Pkcs11Token_Close(Pkcs11Token* token)
         token->loggedIn = 0;
         Pkcs11CloseSession(token, &session);
     }
+}
+
+/**
+ * Set whether RSA, ECC and ML-DSA key generation creates token objects.
+ *
+ * @param  [in]  token       Token object.
+ * @param  [in]  persistent  Generate token objects when non-zero.
+ * @return  BAD_FUNC_ARG when token is NULL.
+ * @return  0 on success.
+ */
+int wc_Pkcs11Token_SetKeyGenPersistent(Pkcs11Token* token, int persistent)
+{
+    if (token == NULL)
+        return BAD_FUNC_ARG;
+
+    token->keyGenOnToken = (persistent != 0);
+    return 0;
 }
 
 #if defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
@@ -2580,6 +2598,81 @@ static int Pkcs11FindKeyById(CK_OBJECT_HANDLE* key, CK_OBJECT_CLASS keyClass,
 }
 #endif
 
+#if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA)
+/**
+ * Find key objects by label, or by id when there is no label.
+ *
+ * @param  [in]   session   Session object.
+ * @param  [in]   keyClass  Key class to match. NULL matches any class.
+ * @param  [in]   keyType   Key type to match.
+ * @param  [in]   onToken   Match token objects or session objects.
+ * @param  [in]   id        Identifier of key.
+ * @param  [in]   idLen     Length of identifier.
+ * @param  [in]   label     Label of key.
+ * @param  [in]   labelLen  Length of label.
+ * @param  [out]  handle    Handle of first object found.
+ * @param  [out]  count     Number of objects found, 0 or 1.
+ * @return  WC_HW_E when a PKCS#11 library call fails.
+ * @return  0 on success.
+ */
+static int Pkcs11FindKeyObject(Pkcs11Session* session,
+    CK_OBJECT_CLASS* keyClass, CK_KEY_TYPE keyType, CK_BBOOL onToken,
+    byte* id, int idLen, char* label, int labelLen, CK_OBJECT_HANDLE* handle,
+    CK_ULONG* count)
+{
+    CK_ATTRIBUTE tmpl[] = {
+        { CKA_KEY_TYPE, &keyType, sizeof(keyType) },
+        { CKA_TOKEN,    &onToken, sizeof(onToken) },
+        { CKA_ID,       id,       (CK_ULONG)idLen },
+        { CKA_CLASS,    keyClass, sizeof(*keyClass) }
+    };
+    CK_ULONG     tmplCnt = 3;
+
+    if (labelLen > 0) {
+        tmpl[2].type       = CKA_LABEL;
+        tmpl[2].pValue     = label;
+        tmpl[2].ulValueLen = (CK_ULONG)labelLen;
+    }
+    if (keyClass != NULL)
+        tmplCnt++;
+
+    return Pkcs11FindKeyByTemplate(handle, session, tmpl, tmplCnt, count);
+}
+
+/**
+ * Check a key can be created as a new token object.
+ *
+ * @param  [in]  session   Session object.
+ * @param  [in]  keyType   Key type.
+ * @param  [in]  id        Identifier of key.
+ * @param  [in]  idLen     Length of identifier.
+ * @param  [in]  label     Label of key.
+ * @param  [in]  labelLen  Length of label.
+ * @return  BAD_FUNC_ARG when the key has neither id nor label.
+ * @return  BAD_STATE_E when the token already holds a key with the id.
+ * @return  WC_HW_E when a PKCS#11 library call fails.
+ * @return  0 on success.
+ */
+static int Pkcs11CheckNewTokenKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
+    byte* id, int idLen, char* label, int labelLen)
+{
+    int              ret = 0;
+    CK_ULONG         count = 0;
+    CK_OBJECT_HANDLE handle;
+
+    if (idLen <= 0 && labelLen <= 0)
+        ret = BAD_FUNC_ARG;
+    if (ret == 0) {
+        ret = Pkcs11FindKeyObject(session, NULL, keyType, CK_TRUE, id, idLen,
+                                  label, labelLen, &handle, &count);
+    }
+    if (ret == 0 && count != 0)
+        ret = BAD_STATE_E;
+
+    return ret;
+}
+#endif
+
 #ifndef NO_RSA
 /**
  * Find the PKCS#11 object containing the RSA public or private key data with
@@ -3295,25 +3388,32 @@ static int Pkcs11RsaKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
     CK_OBJECT_HANDLE  pubKey = NULL_PTR, privKey = NULL_PTR;
     CK_MECHANISM      mech;
     static CK_BYTE    pub_exp[] = { 0x01, 0x00, 0x01, 0x00 };
+    /* Empty entry for optional token. */
     CK_ATTRIBUTE      pubKeyTmpl[] = {
         { CKA_MODULUS_BITS,    &bits,    sizeof(bits)    },
         { CKA_ENCRYPT,         &ckTrue,  sizeof(ckTrue)  },
         { CKA_VERIFY,          &ckTrue,  sizeof(ckTrue)  },
-        { CKA_PUBLIC_EXPONENT, &pub_exp, sizeof(pub_exp) }
+        { CKA_PUBLIC_EXPONENT, &pub_exp, sizeof(pub_exp) },
+        { 0,                   NULL,     0               }
     };
-    CK_ULONG          pubTmplCnt = sizeof(pubKeyTmpl)/sizeof(*pubKeyTmpl);
-    /* Empty entries for optional label/ID. */
+    CK_ULONG          pubTmplCnt = sizeof(pubKeyTmpl)/sizeof(*pubKeyTmpl) - 1;
+    /* Empty entries for optional label/ID/token. */
     CK_ATTRIBUTE      privKeyTmpl[] = {
         { CKA_DECRYPT,  &ckTrue, sizeof(ckTrue) },
         { CKA_SIGN,     &ckTrue, sizeof(ckTrue) },
         { 0,            NULL,    0              },
+        { 0,            NULL,    0              },
         { 0,            NULL,    0              }
     };
-    /* 2 mandatory entries + 2 optional. */
+    /* 2 mandatory entries + 3 optional. */
     int               privTmplCnt = 2;
     int               i;
 
     ret = Pkcs11MechAvail(session, CKM_RSA_PKCS_KEY_PAIR_GEN, NULL);
+    if (ret == 0 && session->tokenObjects) {
+        ret = Pkcs11CheckNewTokenKey(session, CKK_RSA, key->id, key->idLen,
+                                     key->label, key->labelLen);
+    }
     if (ret == 0) {
         WOLFSSL_MSG("PKCS#11: RSA Key Generation Operation");
 
@@ -3337,6 +3437,16 @@ static int Pkcs11RsaKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
             privKeyTmpl[privTmplCnt].pValue     = key->id;
             privKeyTmpl[privTmplCnt].ulValueLen = key->idLen;
             privTmplCnt++;
+        }
+        if (session->tokenObjects) {
+            privKeyTmpl[privTmplCnt].type       = CKA_TOKEN;
+            privKeyTmpl[privTmplCnt].pValue     = &ckTrue;
+            privKeyTmpl[privTmplCnt].ulValueLen = sizeof(ckTrue);
+            privTmplCnt++;
+            pubKeyTmpl[pubTmplCnt].type       = CKA_TOKEN;
+            pubKeyTmpl[pubTmplCnt].pValue     = &ckTrue;
+            pubKeyTmpl[pubTmplCnt].ulValueLen = sizeof(ckTrue);
+            pubTmplCnt++;
         }
 
         mech.mechanism      = CKM_RSA_PKCS_KEY_PAIR_GEN;
@@ -3597,16 +3707,21 @@ static int Pkcs11EcKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
     CK_OBJECT_HANDLE  pubKey = NULL_PTR, privKey = NULL_PTR;
     CK_MECHANISM      mech;
     CK_UTF8CHAR       params[ECC_MAX_OID_LEN];
+    /* Empty entries for optional label/ID/token. */
     CK_ATTRIBUTE      pubKeyTmpl[] = {
         { CKA_EC_PARAMS,       params,   0               },
         { CKA_VERIFY,          &ckTrue,  sizeof(ckTrue)  },
+        { 0,                   NULL,     0               },
+        { 0,                   NULL,     0               },
+        { 0,                   NULL,     0               },
     };
     int               pubTmplCnt = 1;
-    /* Empty entries for optional label/ID. */
+    /* Empty entries for optional label/ID/token. */
     CK_ATTRIBUTE      privKeyAttrs[] = {
         { CKA_SIGN,    &ckTrue, sizeof(ckTrue) },
         { CKA_DECRYPT, &ckTrue, sizeof(ckTrue) },
         { CKA_DERIVE,  &ckTrue, sizeof(ckTrue) },
+        { 0,           NULL,    0              },
         { 0,           NULL,    0              },
         { 0,           NULL,    0              },
     };
@@ -3619,6 +3734,10 @@ static int Pkcs11EcKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
         WOLFSSL_MSG("PKCS#11: EC Key Generation Operation");
 
         ret = Pkcs11EccSetParams(key, pubKeyTmpl, 0);
+    }
+    if (ret == 0 && session->tokenObjects) {
+        ret = Pkcs11CheckNewTokenKey(session, CKK_EC, key->id, key->idLen,
+                                     key->label, key->labelLen);
     }
     if (ret == 0)
         ret = Pkcs11EccKeyUsage(session, key, &usage);
@@ -3645,6 +3764,28 @@ static int Pkcs11EcKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
             privKeyTmpl[privTmplCnt].ulValueLen = key->idLen;
             privTmplCnt++;
         }
+        if (session->tokenObjects) {
+            privKeyTmpl[privTmplCnt].type       = CKA_TOKEN;
+            privKeyTmpl[privTmplCnt].pValue     = &ckTrue;
+            privKeyTmpl[privTmplCnt].ulValueLen = sizeof(ckTrue);
+            privTmplCnt++;
+            if (key->labelLen != 0) {
+                pubKeyTmpl[pubTmplCnt].type       = CKA_LABEL;
+                pubKeyTmpl[pubTmplCnt].pValue     = key->label;
+                pubKeyTmpl[pubTmplCnt].ulValueLen = key->labelLen;
+                pubTmplCnt++;
+            }
+            if (key->idLen != 0) {
+                pubKeyTmpl[pubTmplCnt].type       = CKA_ID;
+                pubKeyTmpl[pubTmplCnt].pValue     = key->id;
+                pubKeyTmpl[pubTmplCnt].ulValueLen = key->idLen;
+                pubTmplCnt++;
+            }
+            pubKeyTmpl[pubTmplCnt].type       = CKA_TOKEN;
+            pubKeyTmpl[pubTmplCnt].pValue     = &ckTrue;
+            pubKeyTmpl[pubTmplCnt].ulValueLen = sizeof(ckTrue);
+            pubTmplCnt++;
+        }
 
         mech.mechanism      = CKM_EC_KEY_PAIR_GEN;
         mech.ulParameterLen = 0;
@@ -3666,7 +3807,7 @@ static int Pkcs11EcKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
     if (ret == 0)
         ret = Pkcs11GetEccPublicKey(key, session, pubKey);
 
-    if (pubKey != NULL_PTR)
+    if (pubKey != NULL_PTR && (ret != 0 || !session->tokenObjects))
         session->func->C_DestroyObject(session->handle, pubKey);
     if (ret == 0 && privKey != NULL_PTR) {
         key->devCtx = (void*)(wc_ptr_t)privKey;
@@ -5166,28 +5307,30 @@ static int Pkcs11MldsaKeyGen(Pkcs11Session* session, wc_MlDsaKey* key)
     CK_MECHANISM_INFO            mechInfo;
     CK_ML_DSA_PARAMETER_SET_TYPE param_set = 0;
 
-    /* Empty entries for optional label/ID. */
+    /* Empty entries for optional label/ID/token. */
     CK_ATTRIBUTE    pubKeyTmpl[] = {
         { CKA_CLASS,         &pubKeyClass,  sizeof(pubKeyClass)  },
         { CKA_VERIFY,        &ckTrue,       sizeof(ckTrue)       },
         { CKA_KEY_TYPE,      &mldsaKeyType, sizeof(mldsaKeyType) },
         { CKA_PARAMETER_SET, &param_set,     sizeof(param_set)   },
         { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
         { 0,                 NULL,          0                    }
     };
-    /* Mandatory entries + 2 optional. */
-    CK_ULONG        pubTmplCnt = sizeof(pubKeyTmpl)/sizeof(*pubKeyTmpl) - 2;
+    /* Mandatory entries + 3 optional. */
+    CK_ULONG        pubTmplCnt = sizeof(pubKeyTmpl)/sizeof(*pubKeyTmpl) - 3;
 
-    /* Empty entries for optional label/ID. */
+    /* Empty entries for optional label/ID/token. */
     CK_ATTRIBUTE    privKeyTmpl[] = {
         { CKA_CLASS,         &privKeyClass, sizeof(privKeyClass) },
         { CKA_SIGN,          &ckTrue,       sizeof(ckTrue)       },
         { CKA_KEY_TYPE,      &mldsaKeyType, sizeof(mldsaKeyType) },
         { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
         { 0,                 NULL,          0                    }
     };
-    /* Mandatory entries + 2 optional. */
-    CK_ULONG        privTmplCnt = sizeof(privKeyTmpl)/sizeof(*privKeyTmpl) - 2;
+    /* Mandatory entries + 3 optional. */
+    CK_ULONG        privTmplCnt = sizeof(privKeyTmpl)/sizeof(*privKeyTmpl) - 3;
 
     ret = Pkcs11MechAvail(session, CKM_ML_DSA_KEY_PAIR_GEN, &mechInfo);
     if (ret == 0) {
@@ -5209,6 +5352,10 @@ static int Pkcs11MldsaKeyGen(Pkcs11Session* session, wc_MlDsaKey* key)
         else {
             ret = WC_KEY_SIZE_E;
         }
+    }
+    if (ret == 0 && session->tokenObjects) {
+        ret = Pkcs11CheckNewTokenKey(session, CKK_ML_DSA, key->id, key->idLen,
+                                     key->label, key->labelLen);
     }
     if (ret == 0) {
         WOLFSSL_MSG("PKCS#11: ML-DSA Key Generation Operation");
@@ -5235,6 +5382,16 @@ static int Pkcs11MldsaKeyGen(Pkcs11Session* session, wc_MlDsaKey* key)
             pubKeyTmpl[pubTmplCnt].ulValueLen = key->idLen;
             pubTmplCnt++;
         }
+        if (session->tokenObjects) {
+            privKeyTmpl[privTmplCnt].type       = CKA_TOKEN;
+            privKeyTmpl[privTmplCnt].pValue     = &ckTrue;
+            privKeyTmpl[privTmplCnt].ulValueLen = sizeof(ckTrue);
+            privTmplCnt++;
+            pubKeyTmpl[pubTmplCnt].type       = CKA_TOKEN;
+            pubKeyTmpl[pubTmplCnt].pValue     = &ckTrue;
+            pubKeyTmpl[pubTmplCnt].ulValueLen = sizeof(ckTrue);
+            pubTmplCnt++;
+        }
 
         mech.mechanism      = CKM_ML_DSA_KEY_PAIR_GEN;
         mech.ulParameterLen = 0;
@@ -5256,7 +5413,7 @@ static int Pkcs11MldsaKeyGen(Pkcs11Session* session, wc_MlDsaKey* key)
     if (ret == 0)
         ret = Pkcs11GetMldsaPublicKey(key, session, pubKey);
 
-    if (pubKey != NULL_PTR)
+    if (pubKey != NULL_PTR && (ret != 0 || !session->tokenObjects))
         session->func->C_DestroyObject(session->handle, pubKey);
     if (ret == 0 && privKey != NULL_PTR) {
         key->devCtx = (void*)(wc_ptr_t)privKey;
@@ -6531,46 +6688,6 @@ exit:
 
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA)
 /**
- * Find key objects by label, or by id when there is no label.
- *
- * @param  [in]   session   Session object.
- * @param  [in]   keyClass  Key class to match. NULL matches any class.
- * @param  [in]   keyType   Key type to match.
- * @param  [in]   onToken   Match token objects or session objects.
- * @param  [in]   id        Identifier of key.
- * @param  [in]   idLen     Length of identifier.
- * @param  [in]   label     Label of key.
- * @param  [in]   labelLen  Length of label.
- * @param  [out]  handle    Handle of first object found.
- * @param  [out]  count     Number of objects found, 0 or 1.
- * @return  WC_HW_E when a PKCS#11 library call fails.
- * @return  0 on success.
- */
-static int Pkcs11FindKeyObject(Pkcs11Session* session,
-    CK_OBJECT_CLASS* keyClass, CK_KEY_TYPE keyType, CK_BBOOL onToken,
-    byte* id, int idLen, char* label, int labelLen, CK_OBJECT_HANDLE* handle,
-    CK_ULONG* count)
-{
-    CK_ATTRIBUTE tmpl[] = {
-        { CKA_KEY_TYPE, &keyType, sizeof(keyType) },
-        { CKA_TOKEN,    &onToken, sizeof(onToken) },
-        { CKA_ID,       id,       (CK_ULONG)idLen },
-        { CKA_CLASS,    keyClass, sizeof(*keyClass) }
-    };
-    CK_ULONG     tmplCnt = 3;
-
-    if (labelLen > 0) {
-        tmpl[2].type       = CKA_LABEL;
-        tmpl[2].pValue     = label;
-        tmpl[2].ulValueLen = (CK_ULONG)labelLen;
-    }
-    if (keyClass != NULL)
-        tmplCnt++;
-
-    return Pkcs11FindKeyByTemplate(handle, session, tmpl, tmplCnt, count);
-}
-
-/**
  * Copy a private key's session object to a new token object.
  *
  * @param  [in]   session   Session object.
@@ -6591,22 +6708,14 @@ static int Pkcs11PersistPrivKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
     void* devCtx, byte* id, int idLen, char* label, int labelLen,
     CK_OBJECT_HANDLE* sessKey, CK_OBJECT_HANDLE* tokenKey)
 {
-    int              ret = 0;
+    int              ret;
     CK_RV            rv;
     CK_ULONG         count = 0;
-    CK_OBJECT_HANDLE handle;
     CK_ATTRIBUTE     copyTmpl[] = {
         { CKA_TOKEN, &ckTrue, sizeof(ckTrue) }
     };
 
-    if (idLen <= 0 && labelLen <= 0)
-        ret = BAD_FUNC_ARG;
-    if (ret == 0) {
-        ret = Pkcs11FindKeyObject(session, NULL, keyType, CK_TRUE, id, idLen,
-                                  label, labelLen, &handle, &count);
-    }
-    if (ret == 0 && count != 0)
-        ret = BAD_STATE_E;
+    ret = Pkcs11CheckNewTokenKey(session, keyType, id, idLen, label, labelLen);
     if (ret == 0 && devCtx != NULL) {
         *sessKey = (CK_OBJECT_HANDLE)(wc_ptr_t)devCtx;
     }
@@ -6890,8 +6999,10 @@ int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info, void* ctx)
                     break;
         #ifdef WOLFSSL_KEY_GEN
                 case WC_PK_TYPE_RSA_KEYGEN:
-                    ret = Pkcs11OpenSession(token, &session, readWrite);
+                    ret = Pkcs11OpenSession(token, &session,
+                                            readWrite || token->keyGenOnToken);
                     if (ret == 0) {
+                        session.tokenObjects = token->keyGenOnToken;
                         ret = Pkcs11RsaKeyGen(&session, info);
                         Pkcs11CloseSession(token, &session);
                     }
@@ -6915,8 +7026,10 @@ int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info, void* ctx)
     #ifdef HAVE_ECC
         #ifndef NO_PKCS11_EC_KEYGEN
                 case WC_PK_TYPE_EC_KEYGEN:
-                    ret = Pkcs11OpenSession(token, &session, readWrite);
+                    ret = Pkcs11OpenSession(token, &session,
+                                            readWrite || token->keyGenOnToken);
                     if (ret == 0) {
+                        session.tokenObjects = token->keyGenOnToken;
                         ret = Pkcs11EcKeyGen(&session, info);
                         Pkcs11CloseSession(token, &session);
                     }
@@ -6978,8 +7091,10 @@ int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info, void* ctx)
     #endif
     #if defined(WOLFSSL_HAVE_MLDSA)
                 case WC_PK_TYPE_PQC_SIG_KEYGEN:
-                    ret = Pkcs11OpenSession(token, &session, readWrite);
+                    ret = Pkcs11OpenSession(token, &session,
+                                            readWrite || token->keyGenOnToken);
                     if (ret == 0) {
+                        session.tokenObjects = token->keyGenOnToken;
                         ret = Pkcs11PqcSigKeyGen(&session, info);
                         Pkcs11CloseSession(token, &session);
                     }
