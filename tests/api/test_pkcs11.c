@@ -296,6 +296,7 @@ static CK_ULONG      test_pkcs11_find_next;
 static int           test_pkcs11_destroy_calls = 0;
 static int           test_pkcs11_fail_pub_create = 0;
 static int           test_pkcs11_no_ecdh = 0;
+static int           test_pkcs11_fail_modulus = 0;
 static byte          test_pkcs11_ec_point[2 + 65];
 
 #define TEST_PKCS11_FIND_CLASS  0x01
@@ -309,6 +310,7 @@ static void test_pkcs11_reset(void)
     XMEMSET(test_pkcs11_objs, 0, sizeof(test_pkcs11_objs));
     test_pkcs11_destroy_calls = 0;
     test_pkcs11_fail_pub_create = 0;
+    test_pkcs11_fail_modulus = 0;
 }
 
 static TestPkcs11Obj* test_pkcs11_obj(CK_OBJECT_HANDLE h)
@@ -428,6 +430,9 @@ static CK_RV test_pkcs11_store_get_attr(CK_SESSION_HANDLE session,
             val = &obj->onToken;
             len = sizeof(obj->onToken);
         }
+        else if (tmpl[i].type == CKA_MODULUS && test_pkcs11_fail_modulus) {
+            return TEST_CKR_GENERAL_ERROR;
+        }
         else if (tmpl[i].type == CKA_MODULUS) {
             val = test_pkcs11_modulus;
             len = sizeof(test_pkcs11_modulus);
@@ -523,7 +528,8 @@ static CK_RV test_pkcs11_store_mech_info(CK_SLOT_ID slotId,
     (void)slotId;
 
     if (info == NULL || (type != CKM_ECDSA && type != CKM_RSA_X_509 &&
-            type != CKM_EC_KEY_PAIR_GEN && type != CKM_ECDH1_DERIVE) ||
+            type != CKM_EC_KEY_PAIR_GEN && type != CKM_ECDH1_DERIVE &&
+            type != CKM_RSA_PKCS_KEY_PAIR_GEN) ||
             (type == CKM_ECDH1_DERIVE && test_pkcs11_no_ecdh))
         return CKR_MECHANISM_INVALID;
 
@@ -561,17 +567,19 @@ static CK_RV test_pkcs11_store_keygen(CK_SESSION_HANDLE session,
 {
     CK_RV rv;
 
-    (void)mechanism;
+    CK_KEY_TYPE keyType = CKK_EC;
 
+    if (mechanism->mechanism == CKM_RSA_PKCS_KEY_PAIR_GEN)
+        keyType = CKK_RSA;
     rv = test_pkcs11_store_create(session, pubTmpl, pubCnt, pub);
     if (rv == CKR_OK) {
         test_pkcs11_objs[*pub - 1].cls = CKO_PUBLIC_KEY;
-        test_pkcs11_objs[*pub - 1].keyType = CKK_EC;
+        test_pkcs11_objs[*pub - 1].keyType = keyType;
         rv = test_pkcs11_store_create(session, privTmpl, privCnt, priv);
     }
     if (rv == CKR_OK) {
         test_pkcs11_objs[*priv - 1].cls = CKO_PRIVATE_KEY;
-        test_pkcs11_objs[*priv - 1].keyType = CKK_EC;
+        test_pkcs11_objs[*priv - 1].keyType = keyType;
     }
     return rv;
 }
@@ -1216,6 +1224,40 @@ int test_wc_Pkcs11_TokenPinCopy(void)
     ExpectIntEQ(wc_Pkcs11Token_Init(&token, &dev, 1, NULL, pin, -1),
         WC_NO_ERR_TRACE(BAD_FUNC_ARG));
 
+    return EXPECT_RESULT();
+}
+
+int test_wc_Pkcs11_RsaKeyGenError(void)
+{
+    EXPECT_DECLS;
+#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    RsaKey key;
+    WC_RNG rng;
+
+    test_pkcs11_store_setup(&token, &func);
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_CryptoCb_RegisterDevice(TEST_PKCS11_DEVID,
+        wc_Pkcs11_CryptoDevCb, &token), 0);
+
+    ExpectIntEQ(wc_InitRsaKey_ex(&key, NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_MakeRsaKey(&key, 2048, WC_RSA_EXPONENT, &rng), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 1);
+    ExpectIntEQ(wc_FreeRsaKey(&key), 0);
+
+    /* A failed read of the public key fails keygen and leaves no object. */
+    test_pkcs11_reset();
+    test_pkcs11_fail_modulus = 1;
+    ExpectIntEQ(wc_InitRsaKey_ex(&key, NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_MakeRsaKey(&key, 2048, WC_RSA_EXPONENT, &rng),
+        WC_NO_ERR_TRACE(WC_HW_E));
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    ExpectIntEQ(wc_FreeRsaKey(&key), 0);
+
+    wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+#endif
     return EXPECT_RESULT();
 }
 
