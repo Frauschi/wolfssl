@@ -284,6 +284,9 @@ typedef struct TestPkcs11Obj {
     CK_ULONG        labelLen;
 } TestPkcs11Obj;
 
+static const byte test_pkcs11_modulus[256] = { 0xc0, 0x01 };
+static const byte test_pkcs11_exponent[3] = { 0x01, 0x00, 0x01 };
+
 static TestPkcs11Obj test_pkcs11_objs[TEST_PKCS11_MAX_OBJS];
 static TestPkcs11Obj test_pkcs11_find;
 static CK_ULONG      test_pkcs11_find_mask;
@@ -408,10 +411,30 @@ static CK_RV test_pkcs11_store_get_attr(CK_SESSION_HANDLE session,
     if (obj == NULL)
         return TEST_CKR_GENERAL_ERROR;
     for (i = 0; i < cnt; i++) {
-        if (tmpl[i].type != CKA_TOKEN || tmpl[i].pValue == NULL)
+        const byte* val = NULL;
+        CK_ULONG    len = 0;
+
+        if (tmpl[i].type == CKA_TOKEN) {
+            val = &obj->onToken;
+            len = sizeof(obj->onToken);
+        }
+        else if (tmpl[i].type == CKA_MODULUS) {
+            val = test_pkcs11_modulus;
+            len = sizeof(test_pkcs11_modulus);
+        }
+        else if (tmpl[i].type == CKA_PUBLIC_EXPONENT) {
+            val = test_pkcs11_exponent;
+            len = sizeof(test_pkcs11_exponent);
+        }
+        else {
             return TEST_CKR_GENERAL_ERROR;
-        *(CK_BBOOL*)tmpl[i].pValue = obj->onToken;
-        tmpl[i].ulValueLen = sizeof(CK_BBOOL);
+        }
+        if (tmpl[i].pValue != NULL) {
+            if (tmpl[i].ulValueLen < len)
+                return TEST_CKR_GENERAL_ERROR;
+            XMEMCPY(tmpl[i].pValue, val, len);
+        }
+        tmpl[i].ulValueLen = len;
     }
     return CKR_OK;
 }
@@ -485,11 +508,33 @@ static CK_RV test_pkcs11_store_mech_info(CK_SLOT_ID slotId,
 {
     (void)slotId;
 
-    if (type != CKM_ECDSA || info == NULL)
+    if ((type != CKM_ECDSA && type != CKM_RSA_X_509) || info == NULL)
         return CKR_MECHANISM_INVALID;
 
     XMEMSET(info, 0, sizeof(*info));
-    info->flags = CKF_SIGN | CKF_VERIFY;
+    info->flags = CKF_SIGN | CKF_VERIFY | CKF_DECRYPT;
+    return CKR_OK;
+}
+
+static CK_RV test_pkcs11_store_decrypt_init(CK_SESSION_HANDLE session,
+    CK_MECHANISM_PTR mechanism, CK_OBJECT_HANDLE key)
+{
+    (void)session;
+    (void)mechanism;
+
+    return test_pkcs11_obj(key) != NULL ? CKR_OK : TEST_CKR_GENERAL_ERROR;
+}
+
+static CK_RV test_pkcs11_store_decrypt(CK_SESSION_HANDLE session,
+    CK_BYTE_PTR in, CK_ULONG inLen, CK_BYTE_PTR out, CK_ULONG_PTR outLen)
+{
+    (void)session;
+    (void)in;
+
+    if (*outLen < inLen)
+        return TEST_CKR_GENERAL_ERROR;
+    XMEMSET(out, 0, inLen);
+    *outLen = inLen;
     return CKR_OK;
 }
 
@@ -505,6 +550,8 @@ static void test_pkcs11_store_setup(Pkcs11Token* token, CK_FUNCTION_LIST* func)
     func->C_FindObjectsInit = test_pkcs11_store_find_init;
     func->C_FindObjects = test_pkcs11_store_find;
     func->C_FindObjectsFinal = test_pkcs11_store_find_final;
+    func->C_DecryptInit = test_pkcs11_store_decrypt_init;
+    func->C_Decrypt = test_pkcs11_store_decrypt;
     token->func = func;
     token->slotId = 1;
     token->handle = 1;
@@ -772,6 +819,109 @@ int test_wc_Pkcs11_DeleteKey(void)
     wc_ecc_free(&noId);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
 
+    return EXPECT_RESULT();
+}
+
+#if !defined(NO_RSA) && defined(HAVE_WOLF_BIGINT) && \
+    defined(USE_WOLFSSL_MEMORY) && !defined(WOLFSSL_STATIC_MEMORY) && \
+    !defined(WOLFSSL_DEBUG_MEMORY)
+static wolfSSL_Malloc_cb  test_pkcs11_mf = NULL;
+static wolfSSL_Free_cb    test_pkcs11_ff = NULL;
+static wolfSSL_Realloc_cb test_pkcs11_rf = NULL;
+static int                test_pkcs11_live = 0;
+
+static void* test_pkcs11_malloc(size_t n)
+{
+    void* p = (test_pkcs11_mf != NULL) ? test_pkcs11_mf(n) : malloc(n);
+
+    if (p != NULL)
+        test_pkcs11_live++;
+    return p;
+}
+
+static void test_pkcs11_free(void* p)
+{
+    if (p != NULL)
+        test_pkcs11_live--;
+    if (test_pkcs11_ff != NULL)
+        test_pkcs11_ff(p);
+    else
+        free(p);
+}
+
+static void* test_pkcs11_realloc(void* p, size_t n)
+{
+    void* r = (test_pkcs11_rf != NULL) ? test_pkcs11_rf(p, n) : realloc(p, n);
+
+    if (p == NULL && r != NULL)
+        test_pkcs11_live++;
+    return r;
+}
+
+static int test_pkcs11_rsa_decrypt(Pkcs11Token* token, RsaKey* key)
+{
+    byte in[sizeof(test_pkcs11_modulus)];
+    byte out[sizeof(test_pkcs11_modulus)];
+    word32 outLen = sizeof(out);
+    wc_CryptoInfo info;
+
+    XMEMSET(in, 0, sizeof(in));
+    XMEMSET(&info, 0, sizeof(info));
+    info.algo_type = WC_ALGO_TYPE_PK;
+    info.pk.type = WC_PK_TYPE_RSA;
+    info.pk.rsa.in = in;
+    info.pk.rsa.inLen = sizeof(in);
+    info.pk.rsa.out = out;
+    info.pk.rsa.outLen = &outLen;
+    info.pk.rsa.type = RSA_PRIVATE_DECRYPT;
+    info.pk.rsa.key = key;
+    return wc_Pkcs11_CryptoDevCb(1, &info, token);
+}
+#endif
+
+int test_wc_Pkcs11_RsaIdNoLeak(void)
+{
+    EXPECT_DECLS;
+#if !defined(NO_RSA) && defined(HAVE_WOLF_BIGINT) && \
+    defined(USE_WOLFSSL_MEMORY) && !defined(WOLFSSL_STATIC_MEMORY) && \
+    !defined(WOLFSSL_DEBUG_MEMORY)
+    static unsigned char id[] = { 0x05 };
+    static CK_OBJECT_CLASS privClass = CKO_PRIVATE_KEY;
+    static CK_KEY_TYPE     rsaType = CKK_RSA;
+    CK_ATTRIBUTE tmpl[] = {
+        { CKA_CLASS,    &privClass, sizeof(privClass) },
+        { CKA_KEY_TYPE, &rsaType,   sizeof(rsaType)   },
+        { CKA_ID,       id,         sizeof(id)        }
+    };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    CK_OBJECT_HANDLE obj = 0;
+    RsaKey key;
+    int haveAlloc = 0;
+
+    test_pkcs11_store_setup(&token, &func);
+    ExpectIntEQ(test_pkcs11_store_create(0, tmpl, 3, &obj), CKR_OK);
+    ExpectIntEQ(wolfSSL_GetAllocators(&test_pkcs11_mf, &test_pkcs11_ff,
+        &test_pkcs11_rf), 0);
+    if (EXPECT_SUCCESS()) {
+        test_pkcs11_live = 0;
+        ExpectIntEQ(wolfSSL_SetAllocators(test_pkcs11_malloc,
+            test_pkcs11_free, test_pkcs11_realloc), 0);
+        haveAlloc = EXPECT_SUCCESS();
+    }
+
+    ExpectIntEQ(wc_InitRsaKey_Id(&key, id, (int)sizeof(id), NULL,
+        INVALID_DEVID), 0);
+    ExpectIntEQ(test_pkcs11_rsa_decrypt(&token, &key), 0);
+    ExpectIntEQ(test_pkcs11_rsa_decrypt(&token, &key), 0);
+    ExpectIntEQ(wc_FreeRsaKey(&key), 0);
+    ExpectIntEQ(test_pkcs11_live, 0);
+
+    if (haveAlloc) {
+        (void)wolfSSL_SetAllocators(test_pkcs11_mf, test_pkcs11_ff,
+            test_pkcs11_rf);
+    }
+#endif
     return EXPECT_RESULT();
 }
 

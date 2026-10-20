@@ -2651,8 +2651,12 @@ static int Pkcs11GetRsaPublicKey(RsaKey* key, Pkcs11Session* session,
         }
         PKCS11_DUMP_TEMPLATE("RSA Public Key", tmpl, tmplCnt);
     }
-    if (ret == 0)
+    if (ret == 0) {
+        /* The decode re-initializes n and e, dropping their raw buffers. */
+        mp_free(&key->n);
+        mp_free(&key->e);
         ret = wc_RsaPublicKeyDecodeRaw(mod, modSz, exp, expSz, key);
+    }
 
     XFREE(exp, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
     XFREE(mod, key->heap, DYNAMIC_TYPE_TMP_BUFFER);
