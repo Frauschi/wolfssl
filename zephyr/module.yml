@@ -1,3 +1,8 @@
 build:
   cmake: zephyr
   kconfig: zephyr/Kconfig
+# Identifiers for west spdx; update them with each release.
+security:
+  external-references:
+    - cpe:2.3:a:wolfssl:wolfssl:5.9.4:*:*:*:*:*:*:*
+    - pkg:github/wolfssl/wolfssl@v5.9.4-stable
