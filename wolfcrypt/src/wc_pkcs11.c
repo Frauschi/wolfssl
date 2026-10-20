@@ -954,6 +954,7 @@ static int Pkcs11Token_Init(Pkcs11Token* token, Pkcs11Dev* dev, int slotId,
         token->userPin = NULL_PTR;
         token->userPinSz = 0;
         token->userPinLogin = 0;
+        token->loggedIn = 0;
         token->version = dev->version;
     }
 
@@ -1102,6 +1103,7 @@ static int Pkcs11OpenSession(Pkcs11Token* token, Pkcs11Session* session,
         ret = BAD_FUNC_ARG;
 
     if (ret == 0) {
+        session->loggedIn = 0;
         if (token->handle != NULL_PTR)
             session->handle = token->handle;
         else {
@@ -1122,7 +1124,11 @@ static int Pkcs11OpenSession(Pkcs11Token* token, Pkcs11Session* session,
                 rv = token->func->C_Login(session->handle, CKU_USER,
                                               token->userPin, token->userPinSz);
                 PKCS11_RV("C_Login", rv);
-                if (rv != CKR_OK) {
+                /* Another token in this process may have logged in already. */
+                if (rv == CKR_OK) {
+                    session->loggedIn = 1;
+                }
+                else if (rv != CKR_USER_ALREADY_LOGGED_IN) {
                     ret = WC_HW_E;
                 }
             }
@@ -1148,7 +1154,7 @@ static int Pkcs11OpenSession(Pkcs11Token* token, Pkcs11Session* session,
 static void Pkcs11CloseSession(Pkcs11Token* token, Pkcs11Session* session)
 {
     if (token != NULL && session != NULL && token->handle != session->handle) {
-        if (token->userPin != NULL)
+        if (session->loggedIn)
             session->func->C_Logout(session->handle);
         session->func->C_CloseSession(session->handle);
     }
@@ -1174,6 +1180,7 @@ int wc_Pkcs11Token_Open(Pkcs11Token* token, int readWrite)
     if (ret == 0) {
         ret = Pkcs11OpenSession(token, &session, readWrite);
         token->handle = session.handle;
+        token->loggedIn = session.loggedIn;
     }
 
     return ret;
@@ -1192,7 +1199,9 @@ void wc_Pkcs11Token_Close(Pkcs11Token* token)
     if (token != NULL) {
         session.func = token->func;
         session.handle = token->handle;
+        session.loggedIn = token->loggedIn;
         token->handle = NULL_PTR;
+        token->loggedIn = 0;
         Pkcs11CloseSession(token, &session);
     }
 }

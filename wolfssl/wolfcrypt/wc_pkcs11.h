@@ -61,6 +61,7 @@ typedef struct Pkcs11Token {
     CK_UTF8CHAR_PTR   userPin;          /* User's PIN to login with           */
     CK_ULONG          userPinSz;        /* Size of user's PIN in bytes        */
     byte              userPinLogin:1;   /* Login with User's PIN              */
+    byte              loggedIn:1;       /* Open session logged in by wolfSSL  */
     int               version;          /* Pkcs11InterfaceVersionType         */
 } Pkcs11Token;
 
@@ -70,6 +71,7 @@ typedef struct Pkcs11Session {
     CK_SESSION_HANDLE handle;           /* Handle to active session           */
     int               version;          /* Pkcs11InterfaceVersionType         */
     byte              tokenObjects:1;   /* Create keys with CKA_TOKEN set     */
+    byte              loggedIn:1;       /* C_Login done for this session      */
 } Pkcs11Session;
 
 /* Types of keys that can be stored. */
