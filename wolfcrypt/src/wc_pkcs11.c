@@ -6663,6 +6663,119 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
     return ret;
 }
 
+#if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA)
+/**
+ * Destroy all token objects of a key type with a label, or id.
+ *
+ * @param  [in]  session   Session object.
+ * @param  [in]  keyType   Key type.
+ * @param  [in]  id        Identifier of key.
+ * @param  [in]  idLen     Length of identifier.
+ * @param  [in]  label     Label of key.
+ * @param  [in]  labelLen  Length of label.
+ * @return  BAD_FUNC_ARG when the key has neither id nor label.
+ * @return  WC_HW_E when a PKCS#11 library call fails.
+ * @return  0 on success.
+ */
+static int Pkcs11DeleteTokenKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
+    byte* id, int idLen, char* label, int labelLen)
+{
+    int              ret = 0;
+    CK_RV            rv;
+    CK_ULONG         count = 1;
+    CK_OBJECT_HANDLE handle;
+
+    if (idLen <= 0 && labelLen <= 0)
+        ret = BAD_FUNC_ARG;
+    while (ret == 0 && count != 0) {
+        ret = Pkcs11FindKeyObject(session, NULL, keyType, CK_TRUE, id, idLen,
+                                  label, labelLen, &handle, &count);
+        if (ret == 0 && count != 0) {
+            rv = session->func->C_DestroyObject(session->handle, handle);
+            PKCS11_RV("C_DestroyObject", rv);
+            if (rv != CKR_OK)
+                ret = WC_HW_E;
+        }
+    }
+
+    return ret;
+}
+#endif
+
+/**
+ * Remove a key's private and public token objects from the token.
+ *
+ * @param  [in]  token  Token holding the key.
+ * @param  [in]  type   PKCS11_KEY_TYPE_RSA, _EC or _MLDSA.
+ * @param  [in]  key    Key with an id or label.
+ * @return  BAD_FUNC_ARG when token or key is NULL, or the key has neither id
+ *          nor label.
+ * @return  NOT_COMPILED_IN when the key type is not supported.
+ * @return  WC_HW_E when a PKCS#11 library call fails.
+ * @return  0 on success.
+ */
+int wc_Pkcs11DeleteKey(Pkcs11Token* token, int type, void* key)
+{
+    int           ret = 0;
+    Pkcs11Session session;
+
+    if (token == NULL || key == NULL)
+        ret = BAD_FUNC_ARG;
+    if (ret == 0)
+        ret = Pkcs11OpenSession(token, &session, 1);
+    if (ret == 0) {
+        switch (type) {
+    #ifndef NO_RSA
+            case PKCS11_KEY_TYPE_RSA: {
+                RsaKey* rsaKey = (RsaKey*)key;
+
+                ret = Pkcs11DeleteTokenKey(&session, CKK_RSA, rsaKey->id,
+                                           rsaKey->idLen, rsaKey->label,
+                                           rsaKey->labelLen);
+                break;
+            }
+    #endif
+    #ifdef HAVE_ECC
+            case PKCS11_KEY_TYPE_EC: {
+                ecc_key* eccKey = (ecc_key*)key;
+
+                if (eccKey->devCtx != NULL) {
+                    Pkcs11DestroySessionKey(&session,
+                        (CK_OBJECT_HANDLE)(wc_ptr_t)eccKey->devCtx);
+                    eccKey->devCtx = NULL;
+                }
+                ret = Pkcs11DeleteTokenKey(&session, CKK_EC, eccKey->id,
+                                           eccKey->idLen, eccKey->label,
+                                           eccKey->labelLen);
+                break;
+            }
+    #endif
+    #ifdef WOLFSSL_HAVE_MLDSA
+            case PKCS11_KEY_TYPE_MLDSA: {
+                wc_MlDsaKey* mldsaKey = (wc_MlDsaKey*)key;
+
+                if (mldsaKey->devCtx != NULL) {
+                    Pkcs11DestroySessionKey(&session,
+                        (CK_OBJECT_HANDLE)(wc_ptr_t)mldsaKey->devCtx);
+                    mldsaKey->devCtx = NULL;
+                }
+                ret = Pkcs11DeleteTokenKey(&session, CKK_ML_DSA,
+                                           mldsaKey->id, mldsaKey->idLen,
+                                           mldsaKey->label,
+                                           mldsaKey->labelLen);
+                break;
+            }
+    #endif
+            default:
+                ret = NOT_COMPILED_IN;
+                break;
+        }
+        Pkcs11CloseSession(token, &session);
+    }
+
+    return ret;
+}
+
 /**
  * Perform a cryptographic operation using PKCS#11 device.
  *

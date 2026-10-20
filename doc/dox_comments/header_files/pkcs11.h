@@ -98,6 +98,29 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key);
 
 /*!
     \ingroup PKCS11
+
+    \brief Removes a key from the token: every token object of the key type
+    with the key's label, or id when it has no label, is destroyed. For ECC
+    and ML-DSA keys a session object in devCtx is destroyed as well and
+    devCtx is cleared. Finding nothing to remove is not an error.
+
+    \return 0 on success.
+    \return BAD_FUNC_ARG when token or key is NULL, or the key has neither an
+    id nor a label.
+    \return NOT_COMPILED_IN when the key type is not supported.
+    \return WC_HW_E when a PKCS#11 call fails.
+
+    \param token Token holding the key.
+    \param type PKCS11_KEY_TYPE_RSA, PKCS11_KEY_TYPE_EC or
+    PKCS11_KEY_TYPE_MLDSA.
+    \param key RsaKey, ecc_key or wc_MlDsaKey with an id or label.
+
+    \sa wc_Pkcs11PersistKey
+*/
+int wc_Pkcs11DeleteKey(Pkcs11Token* token, int type, void* key);
+
+/*!
+    \ingroup PKCS11
  */
 int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info,
     void* ctx);

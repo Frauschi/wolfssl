@@ -713,4 +713,66 @@ int test_wc_Pkcs11_PersistKey(void)
     return EXPECT_RESULT();
 }
 
+int test_wc_Pkcs11_DeleteKey(void)
+{
+    static const byte id[] = { 0x0d, 0x0e };
+    static const byte otherId[] = { 0x0f };
+    static CK_OBJECT_CLASS privClass = CKO_PRIVATE_KEY;
+    static CK_KEY_TYPE     ecType = CKK_EC;
+    static CK_BBOOL        isToken = CK_TRUE;
+    CK_ATTRIBUTE other[] = {
+        { CKA_CLASS,    &privClass,     sizeof(privClass) },
+        { CKA_KEY_TYPE, &ecType,        sizeof(ecType)    },
+        { CKA_ID,       (void*)otherId, sizeof(otherId)   },
+        { CKA_TOKEN,    &isToken,       sizeof(isToken)   }
+    };
+    CK_ATTRIBUTE sess[] = {
+        { CKA_CLASS,    &privClass,     sizeof(privClass) },
+        { CKA_KEY_TYPE, &ecType,        sizeof(ecType)    },
+        { CKA_ID,       (void*)id,      sizeof(id)        }
+    };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    CK_OBJECT_HANDLE otherObj = 0;
+    CK_OBJECT_HANDLE sessObj = 0;
+    ecc_key key;
+    ecc_key noId;
+    WC_RNG rng;
+    EXPECT_DECLS;
+
+    test_pkcs11_store_setup(&token, &func);
+    XMEMSET(&key, 0, sizeof(key));
+    XMEMSET(&noId, 0, sizeof(noId));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(test_pkcs11_make_ecc(&key, &rng, id, (int)sizeof(id)), 0);
+    ExpectIntEQ(wc_ecc_init(&noId), 0);
+
+    ExpectIntEQ(wc_Pkcs11DeleteKey(NULL, PKCS11_KEY_TYPE_EC, &key),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_EC, &noId),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+
+    ExpectIntEQ(test_pkcs11_store_create(0, other, 4, &otherObj), CKR_OK);
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &key, 1),
+        0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 3);
+    ExpectIntEQ(test_pkcs11_store_create(0, sess, 3, &sessObj), CKR_OK);
+    key.devCtx = (void*)(wc_ptr_t)sessObj;
+
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_EC, &key), 0);
+    ExpectNull(key.devCtx);
+    ExpectNull(test_pkcs11_obj(sessObj));
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    ExpectNotNull(test_pkcs11_obj(otherObj));
+
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_EC, &key), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+
+    wc_ecc_free(&key);
+    wc_ecc_free(&noId);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+
+    return EXPECT_RESULT();
+}
+
 #endif
