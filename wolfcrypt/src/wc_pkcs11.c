@@ -1098,6 +1098,22 @@ int wc_Pkcs11Token_InitName_NoLogin(Pkcs11Token* token, Pkcs11Dev* dev,
 }
 
 /**
+ * Zeroize and free the token's copy of the user's PIN.
+ *
+ * @param  [in]  token  Token object.
+ */
+static void Pkcs11Token_ClearPin(Pkcs11Token* token)
+{
+    if (token->userPin != NULL) {
+        ForceZero(token->userPin, (word32)token->userPinSz);
+        XFREE(token->userPin, token->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        token->userPin = NULL_PTR;
+    }
+    token->userPinSz = 0;
+    token->userPinLogin = 0;
+}
+
+/**
  * Finalize token.
  * Closes all sessions on token.
  *
@@ -1109,13 +1125,8 @@ void wc_Pkcs11Token_Final(Pkcs11Token* token)
         token->func->C_CloseAllSessions(token->slotId);
         token->handle = NULL_PTR;
     }
-    if (token != NULL && token->userPin != NULL) {
-        ForceZero(token->userPin, (word32)token->userPinSz);
-        XFREE(token->userPin, token->heap, DYNAMIC_TYPE_TMP_BUFFER);
-        token->userPin = NULL_PTR;
-        token->userPinSz = 0;
-        token->userPinLogin = 0;
-    }
+    if (token != NULL)
+        Pkcs11Token_ClearPin(token);
 }
 
 /**
@@ -1197,6 +1208,7 @@ static void Pkcs11CloseSession(Pkcs11Token* token, Pkcs11Session* session)
 
 /**
  * Open a session on the token to be used for all operations.
+ * Once this session has logged in, the copy of the user's PIN is discarded.
  *
  * @param  [in]  token      Token object.
  * @param  [in]  readWrite  Boolean indicating to open session for Read/Write.
@@ -1217,6 +1229,9 @@ int wc_Pkcs11Token_Open(Pkcs11Token* token, int readWrite)
         token->handle = session.handle;
         token->loggedIn = session.loggedIn;
     }
+    /* The login lasts while this session is open. */
+    if (ret == 0 && token->loggedIn)
+        Pkcs11Token_ClearPin(token);
 
     return ret;
 }

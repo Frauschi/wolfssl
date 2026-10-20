@@ -39,6 +39,7 @@ int test_wc_Pkcs11_LoginShared(void);
 int test_wc_Pkcs11_TokenPinCopy(void);
 int test_wc_Pkcs11_RsaKeyGenError(void);
 int test_wc_Pkcs11_KeyGenPersistent(void);
+int test_wc_Pkcs11_TokenOpenDropsPin(void);
 
 #define TEST_PKCS11_DECLS                                                   \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_EcdsaSigDecode),               \
@@ -51,7 +52,8 @@ int test_wc_Pkcs11_KeyGenPersistent(void);
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_LoginShared),                  \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_TokenPinCopy),                 \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_RsaKeyGenError),               \
-    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_KeyGenPersistent)
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_KeyGenPersistent),             \
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_TokenOpenDropsPin)
 
 #else
 
