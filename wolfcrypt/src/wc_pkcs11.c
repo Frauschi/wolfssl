@@ -956,9 +956,43 @@ static int Pkcs11Token_Init(Pkcs11Token* token, Pkcs11Dev* dev, int slotId,
         token->userPinLogin = 0;
         token->loggedIn = 0;
         token->version = dev->version;
+        token->heap = dev->heap;
     }
 
     XFREE(slot, dev->heap, DYNAMIC_TYPE_TMP_BUFFER);
+
+    return ret;
+}
+
+/**
+ * Keep a copy of the user's PIN in the token for logging in.
+ *
+ * @param  [in]  token      Token object.
+ * @param  [in]  userPin    PIN to use to login as user.
+ * @param  [in]  userPinSz  Number of bytes in PIN.
+ * @return  BAD_FUNC_ARG when userPinSz is negative.
+ * @return  MEMORY_E when dynamic memory allocation fails.
+ * @return  0 on success.
+ */
+static int Pkcs11Token_SetPin(Pkcs11Token* token, const unsigned char* userPin,
+    int userPinSz)
+{
+    int ret = 0;
+
+    if (userPinSz < 0)
+        ret = BAD_FUNC_ARG;
+    if (ret == 0) {
+        /* An empty PIN still needs a pointer: NULL asks for the PIN pad. */
+        token->userPin = (CK_UTF8CHAR_PTR)XMALLOC(userPinSz > 0 ? userPinSz : 1,
+            token->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        if (token->userPin == NULL)
+            ret = MEMORY_E;
+    }
+    if (ret == 0) {
+        XMEMCPY(token->userPin, userPin, (size_t)userPinSz);
+        token->userPinSz = (CK_ULONG)userPinSz;
+        token->userPinLogin = 1;
+    }
 
     return ret;
 }
@@ -988,11 +1022,8 @@ int wc_Pkcs11Token_Init(Pkcs11Token* token, Pkcs11Dev* dev, int slotId,
         tokenNameSz = XSTRLEN(tokenName);
     }
     ret = Pkcs11Token_Init(token, dev, slotId, tokenName, tokenNameSz);
-    if (ret == 0 && userPin != NULL) {
-        token->userPin = (CK_UTF8CHAR_PTR)userPin;
-        token->userPinSz = (CK_ULONG)userPinSz;
-        token->userPinLogin = 1;
-    }
+    if (ret == 0 && userPin != NULL)
+        ret = Pkcs11Token_SetPin(token, userPin, userPinSz);
 
     return ret;
 }
@@ -1039,11 +1070,8 @@ int wc_Pkcs11Token_InitName(Pkcs11Token* token, Pkcs11Dev* dev,
     const unsigned char* userPin, int userPinSz)
 {
     int ret = Pkcs11Token_Init(token, dev, -1, tokenName, (size_t)tokenNameSz);
-    if (ret == 0 && userPin != NULL) {
-        token->userPin = (CK_UTF8CHAR_PTR)userPin;
-        token->userPinSz = (CK_ULONG)userPinSz;
-        token->userPinLogin = 1;
-    }
+    if (ret == 0 && userPin != NULL)
+        ret = Pkcs11Token_SetPin(token, userPin, userPinSz);
 
     return ret;
 }
@@ -1079,7 +1107,13 @@ void wc_Pkcs11Token_Final(Pkcs11Token* token)
     if (token != NULL && token->func != NULL) {
         token->func->C_CloseAllSessions(token->slotId);
         token->handle = NULL_PTR;
+    }
+    if (token != NULL && token->userPin != NULL) {
         ForceZero(token->userPin, (word32)token->userPinSz);
+        XFREE(token->userPin, token->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        token->userPin = NULL_PTR;
+        token->userPinSz = 0;
+        token->userPinLogin = 0;
     }
 }
 

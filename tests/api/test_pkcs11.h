@@ -36,6 +36,7 @@ int test_wc_Pkcs11_DeleteKey(void);
 int test_wc_Pkcs11_RsaIdNoLeak(void);
 int test_wc_Pkcs11_EcKeyUsage(void);
 int test_wc_Pkcs11_LoginShared(void);
+int test_wc_Pkcs11_TokenPinCopy(void);
 
 #define TEST_PKCS11_DECLS                                                   \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_EcdsaSigDecode),               \
@@ -45,7 +46,8 @@ int test_wc_Pkcs11_LoginShared(void);
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_DeleteKey),                    \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_RsaIdNoLeak),                  \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_EcKeyUsage),                   \
-    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_LoginShared)
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_LoginShared),                  \
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_TokenPinCopy)
 
 #else
 
