@@ -558,4 +558,60 @@ int test_wc_Pkcs11_FreeKeepsTokenKey(void)
     return EXPECT_RESULT();
 }
 
+static int test_pkcs11_make_ecc(ecc_key* key, WC_RNG* rng, const byte* id,
+    int idLen)
+{
+    int ret = wc_ecc_init_id(key, (unsigned char*)id, idLen, NULL,
+        INVALID_DEVID);
+    if (ret == 0)
+        ret = wc_ecc_make_key(rng, 32, key);
+#ifdef WOLFSSL_ASYNC_CRYPT
+    if (ret == WC_NO_ERR_TRACE(WC_PENDING_E))
+        ret = wc_AsyncWait(ret, &key->asyncDev, WC_ASYNC_FLAG_NONE);
+#endif
+    return ret;
+}
+
+int test_wc_Pkcs11_StoreKeyPersistent(void)
+{
+    static const byte id[] = { 0x01, 0x02, 0x03, 0x04 };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    ecc_key key;
+    WC_RNG rng;
+    int i;
+    EXPECT_DECLS;
+
+    test_pkcs11_store_setup(&token, &func);
+    XMEMSET(&key, 0, sizeof(key));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(test_pkcs11_make_ecc(&key, &rng, id, (int)sizeof(id)), 0);
+
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &key, 0),
+        0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 2);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &key, 1),
+        0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+    for (i = 0; i < TEST_PKCS11_MAX_OBJS; i++) {
+        if (test_pkcs11_objs[i].used) {
+            ExpectIntEQ(test_pkcs11_objs[i].idLen, sizeof(id));
+            ExpectBufEQ(test_pkcs11_objs[i].id, id, sizeof(id));
+        }
+    }
+
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_EC, 0, &key), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+
+    wc_ecc_free(&key);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+
+    return EXPECT_RESULT();
+}
+
 #endif
