@@ -34,6 +34,7 @@ int test_wc_Pkcs11_StoreKeyPersistent(void);
 int test_wc_Pkcs11_PersistKey(void);
 int test_wc_Pkcs11_DeleteKey(void);
 int test_wc_Pkcs11_RsaIdNoLeak(void);
+int test_wc_Pkcs11_EcKeyUsage(void);
 
 #define TEST_PKCS11_DECLS                                                   \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_EcdsaSigDecode),               \
@@ -41,7 +42,8 @@ int test_wc_Pkcs11_RsaIdNoLeak(void);
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_StoreKeyPersistent),           \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_PersistKey),                   \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_DeleteKey),                    \
-    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_RsaIdNoLeak)
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_RsaIdNoLeak),                  \
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_EcKeyUsage)
 
 #else
 
