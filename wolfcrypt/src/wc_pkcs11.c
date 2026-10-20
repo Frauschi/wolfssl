@@ -6463,6 +6463,206 @@ exit:
 
 #endif /* !NO_CERTS */
 
+#if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA)
+/**
+ * Find key objects by label, or by id when there is no label.
+ *
+ * @param  [in]   session   Session object.
+ * @param  [in]   keyClass  Key class to match. NULL matches any class.
+ * @param  [in]   keyType   Key type to match.
+ * @param  [in]   onToken   Match token objects or session objects.
+ * @param  [in]   id        Identifier of key.
+ * @param  [in]   idLen     Length of identifier.
+ * @param  [in]   label     Label of key.
+ * @param  [in]   labelLen  Length of label.
+ * @param  [out]  handle    Handle of first object found.
+ * @param  [out]  count     Number of objects found, 0 or 1.
+ * @return  WC_HW_E when a PKCS#11 library call fails.
+ * @return  0 on success.
+ */
+static int Pkcs11FindKeyObject(Pkcs11Session* session,
+    CK_OBJECT_CLASS* keyClass, CK_KEY_TYPE keyType, CK_BBOOL onToken,
+    byte* id, int idLen, char* label, int labelLen, CK_OBJECT_HANDLE* handle,
+    CK_ULONG* count)
+{
+    CK_ATTRIBUTE tmpl[] = {
+        { CKA_KEY_TYPE, &keyType, sizeof(keyType) },
+        { CKA_TOKEN,    &onToken, sizeof(onToken) },
+        { CKA_ID,       id,       (CK_ULONG)idLen },
+        { CKA_CLASS,    keyClass, sizeof(*keyClass) }
+    };
+    CK_ULONG     tmplCnt = 3;
+
+    if (labelLen > 0) {
+        tmpl[2].type       = CKA_LABEL;
+        tmpl[2].pValue     = label;
+        tmpl[2].ulValueLen = (CK_ULONG)labelLen;
+    }
+    if (keyClass != NULL)
+        tmplCnt++;
+
+    return Pkcs11FindKeyByTemplate(handle, session, tmpl, tmplCnt, count);
+}
+
+/**
+ * Copy a private key's session object to a new token object.
+ *
+ * @param  [in]   session   Session object.
+ * @param  [in]   keyType   Key type.
+ * @param  [in]   devCtx    Handle of session object from key, may be NULL.
+ * @param  [in]   id        Identifier of key.
+ * @param  [in]   idLen     Length of identifier.
+ * @param  [in]   label     Label of key.
+ * @param  [in]   labelLen  Length of label.
+ * @param  [out]  sessKey   Handle of session object.
+ * @param  [out]  tokenKey  Handle of new token object.
+ * @return  BAD_FUNC_ARG when the key has neither id nor label.
+ * @return  BAD_STATE_E when the token already holds a key with the id.
+ * @return  WC_HW_E when no session object is found or a PKCS#11 call fails.
+ * @return  0 on success.
+ */
+static int Pkcs11PersistPrivKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
+    void* devCtx, byte* id, int idLen, char* label, int labelLen,
+    CK_OBJECT_HANDLE* sessKey, CK_OBJECT_HANDLE* tokenKey)
+{
+    int              ret = 0;
+    CK_RV            rv;
+    CK_ULONG         count = 0;
+    CK_OBJECT_HANDLE handle;
+    CK_ATTRIBUTE     copyTmpl[] = {
+        { CKA_TOKEN, &ckTrue, sizeof(ckTrue) }
+    };
+
+    if (idLen <= 0 && labelLen <= 0)
+        ret = BAD_FUNC_ARG;
+    if (ret == 0) {
+        ret = Pkcs11FindKeyObject(session, NULL, keyType, CK_TRUE, id, idLen,
+                                  label, labelLen, &handle, &count);
+    }
+    if (ret == 0 && count != 0)
+        ret = BAD_STATE_E;
+    if (ret == 0 && devCtx != NULL) {
+        *sessKey = (CK_OBJECT_HANDLE)(wc_ptr_t)devCtx;
+    }
+    else if (ret == 0) {
+        ret = Pkcs11FindKeyObject(session, &privKeyClass, keyType, CK_FALSE,
+                                  id, idLen, label, labelLen, sessKey, &count);
+        if (ret == 0 && count == 0)
+            ret = WC_HW_E;
+    }
+    if (ret == 0) {
+        rv = session->func->C_CopyObject(session->handle, *sessKey, copyTmpl,
+                                         1, tokenKey);
+        PKCS11_RV("C_CopyObject", rv);
+        if (rv != CKR_OK)
+            ret = WC_HW_E;
+    }
+
+    return ret;
+}
+#endif
+
+/**
+ * Make a private key held in a session object persistent on the token.
+ *
+ * @param  [in]  token  Token holding the key.
+ * @param  [in]  type   PKCS11_KEY_TYPE_RSA, _EC or _MLDSA.
+ * @param  [in]  key    Key with an id or label.
+ * @return  BAD_FUNC_ARG when token or key is NULL, or the key has neither id
+ *          nor label.
+ * @return  BAD_STATE_E when the token already holds a key with the id.
+ * @return  NOT_COMPILED_IN when the key type is not supported.
+ * @return  WC_HW_E when a PKCS#11 library call fails.
+ * @return  0 on success.
+ */
+int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
+{
+    int              ret = 0;
+    Pkcs11Session    session;
+    CK_OBJECT_HANDLE sessKey = NULL_PTR;
+    CK_OBJECT_HANDLE privKey = NULL_PTR;
+    CK_OBJECT_HANDLE pubKey = NULL_PTR;
+    CK_RV            rv;
+
+    if (token == NULL || key == NULL)
+        ret = BAD_FUNC_ARG;
+    if (ret == 0)
+        ret = Pkcs11OpenSession(token, &session, 1);
+    if (ret == 0) {
+        session.tokenObjects = 1;
+        switch (type) {
+    #ifndef NO_RSA
+            case PKCS11_KEY_TYPE_RSA: {
+                RsaKey* rsaKey = (RsaKey*)key;
+
+                ret = Pkcs11PersistPrivKey(&session, CKK_RSA, NULL,
+                                           rsaKey->id, rsaKey->idLen,
+                                           rsaKey->label, rsaKey->labelLen,
+                                           &sessKey, &privKey);
+                break;
+            }
+    #endif
+    #ifdef HAVE_ECC
+            case PKCS11_KEY_TYPE_EC: {
+                ecc_key* eccKey = (ecc_key*)key;
+
+                ret = Pkcs11PersistPrivKey(&session, CKK_EC, eccKey->devCtx,
+                                           eccKey->id, eccKey->idLen,
+                                           eccKey->label, eccKey->labelLen,
+                                           &sessKey, &privKey);
+                if (ret == 0 && !mp_iszero(eccKey->pubkey.x)) {
+                    ret = Pkcs11CreateEccPublicKey(&pubKey, &session, eccKey,
+                                                   CKA_VERIFY);
+                }
+                if (ret == 0)
+                    eccKey->devCtx = (void*)(wc_ptr_t)privKey;
+                break;
+            }
+    #endif
+    #ifdef WOLFSSL_HAVE_MLDSA
+            case PKCS11_KEY_TYPE_MLDSA: {
+                wc_MlDsaKey* mldsaKey = (wc_MlDsaKey*)key;
+                CK_MECHANISM_INFO mechInfo;
+
+                ret = Pkcs11PersistPrivKey(&session, CKK_ML_DSA,
+                                           mldsaKey->devCtx,
+                                           mldsaKey->id, mldsaKey->idLen,
+                                           mldsaKey->label, mldsaKey->labelLen,
+                                           &sessKey, &privKey);
+                if (ret == 0 && mldsaKey->pubKeySet) {
+                    ret = Pkcs11MechAvail(&session, CKM_ML_DSA, &mechInfo);
+                    if (ret == 0) {
+                        ret = Pkcs11CreateMldsaPublicKey(&pubKey, &session,
+                                                         mldsaKey, &mechInfo);
+                    }
+                }
+                if (ret == 0)
+                    mldsaKey->devCtx = (void*)(wc_ptr_t)privKey;
+                break;
+            }
+    #endif
+            default:
+                ret = NOT_COMPILED_IN;
+                break;
+        }
+
+        if (ret == 0) {
+            rv = session.func->C_DestroyObject(session.handle, sessKey);
+            PKCS11_RV("C_DestroyObject", rv);
+        }
+        else if (privKey != NULL_PTR) {
+            rv = session.func->C_DestroyObject(session.handle, privKey);
+            PKCS11_RV("C_DestroyObject", rv);
+        }
+        Pkcs11CloseSession(token, &session);
+    }
+
+    (void)pubKey;
+    (void)rv;
+
+    return ret;
+}
+
 /**
  * Perform a cryptographic operation using PKCS#11 device.
  *

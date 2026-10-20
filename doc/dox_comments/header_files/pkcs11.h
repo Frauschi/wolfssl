@@ -61,6 +61,43 @@ int wc_Pkcs11StoreKey_ex(Pkcs11Token* token, int type, int clear,
 
 /*!
     \ingroup PKCS11
+
+    \brief Makes a private key that lives in a session object persistent.
+    The session object, from key generation or wc_Pkcs11StoreKey, is copied
+    with C_CopyObject to a token object and then destroyed. For ECC and
+    ML-DSA keys a token object holding the public key is created as well,
+    and the key refers to the new private object through devCtx. Freeing the
+    key does not remove token objects. The token session must be read/write
+    and stay open from key generation until this call.
+
+    \return 0 on success.
+    \return BAD_FUNC_ARG when token or key is NULL, or the key has neither an
+    id nor a label.
+    \return BAD_STATE_E when the token already holds a key with the same id
+    or label.
+    \return NOT_COMPILED_IN when the key type is not supported.
+    \return WC_HW_E when no session object is found or a PKCS#11 call fails.
+
+    \param token Token holding the key.
+    \param type PKCS11_KEY_TYPE_RSA, PKCS11_KEY_TYPE_EC or
+    PKCS11_KEY_TYPE_MLDSA.
+    \param key RsaKey, ecc_key or wc_MlDsaKey with an id or label.
+
+    _Example_
+    \code
+    ecc_key key;
+    wc_ecc_init_id(&key, id, idLen, NULL, devId);
+    wc_ecc_make_key_ex(&rng, 32, &key, ECC_SECP256R1);
+    // use the key, for example to sign a CSR, then keep it
+    wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_EC, &key);
+    \endcode
+
+    \sa wc_Pkcs11StoreKey_ex
+*/
+int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key);
+
+/*!
+    \ingroup PKCS11
  */
 int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info,
     void* ctx);

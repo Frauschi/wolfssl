@@ -289,6 +289,7 @@ static TestPkcs11Obj test_pkcs11_find;
 static CK_ULONG      test_pkcs11_find_mask;
 static CK_ULONG      test_pkcs11_find_next;
 static int           test_pkcs11_destroy_calls = 0;
+static int           test_pkcs11_fail_pub_create = 0;
 
 #define TEST_PKCS11_FIND_CLASS  0x01
 #define TEST_PKCS11_FIND_TYPE   0x02
@@ -300,6 +301,7 @@ static void test_pkcs11_reset(void)
 {
     XMEMSET(test_pkcs11_objs, 0, sizeof(test_pkcs11_objs));
     test_pkcs11_destroy_calls = 0;
+    test_pkcs11_fail_pub_create = 0;
 }
 
 static TestPkcs11Obj* test_pkcs11_obj(CK_OBJECT_HANDLE h)
@@ -372,8 +374,11 @@ static CK_RV test_pkcs11_store_create(CK_SESSION_HANDLE session,
         return TEST_CKR_GENERAL_ERROR;
 
     XMEMSET(&test_pkcs11_objs[i], 0, sizeof(test_pkcs11_objs[i]));
-    test_pkcs11_objs[i].used = 1;
     (void)test_pkcs11_apply(&test_pkcs11_objs[i], tmpl, cnt);
+    if (test_pkcs11_fail_pub_create &&
+            test_pkcs11_objs[i].cls == CKO_PUBLIC_KEY)
+        return TEST_CKR_GENERAL_ERROR;
+    test_pkcs11_objs[i].used = 1;
     *object = i + 1;
     return CKR_OK;
 }
@@ -609,6 +614,100 @@ int test_wc_Pkcs11_StoreKeyPersistent(void)
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
 
     wc_ecc_free(&key);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+
+    return EXPECT_RESULT();
+}
+
+static CK_OBJECT_HANDLE test_pkcs11_find_obj(CK_OBJECT_CLASS cls,
+    CK_BBOOL onToken)
+{
+    int i;
+
+    for (i = 0; i < TEST_PKCS11_MAX_OBJS; i++) {
+        if (test_pkcs11_objs[i].used && test_pkcs11_objs[i].cls == cls &&
+                test_pkcs11_objs[i].onToken == onToken)
+            return (CK_OBJECT_HANDLE)(i + 1);
+    }
+    return 0;
+}
+
+int test_wc_Pkcs11_PersistKey(void)
+{
+    static const byte id[] = { 0x0a, 0x0b, 0x0c };
+    static CK_OBJECT_CLASS privClass = CKO_PRIVATE_KEY;
+    static CK_KEY_TYPE     ecType = CKK_EC;
+    CK_ATTRIBUTE tmpl[] = {
+        { CKA_CLASS,    &privClass,  sizeof(privClass) },
+        { CKA_KEY_TYPE, &ecType,     sizeof(ecType)    },
+        { CKA_ID,       (void*)id,   sizeof(id)        }
+    };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    CK_OBJECT_HANDLE sessObj = 0;
+    CK_OBJECT_HANDLE tokObj = 0;
+    ecc_key key;
+    ecc_key noId;
+    WC_RNG rng;
+    EXPECT_DECLS;
+
+    test_pkcs11_store_setup(&token, &func);
+    XMEMSET(&key, 0, sizeof(key));
+    XMEMSET(&noId, 0, sizeof(noId));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(test_pkcs11_make_ecc(&key, &rng, id, (int)sizeof(id)), 0);
+    ExpectIntEQ(wc_ecc_init(&noId), 0);
+
+    ExpectIntEQ(wc_Pkcs11PersistKey(NULL, PKCS11_KEY_TYPE_EC, &key),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_EC, NULL),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_EC, &noId),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_EC, &key),
+        WC_NO_ERR_TRACE(WC_HW_E));
+
+    /* Session object found by id, as left by an import. */
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_EC, 0, &key), 0);
+    sessObj = test_pkcs11_find_obj(CKO_PRIVATE_KEY, CK_FALSE);
+    ExpectIntNE(sessObj, 0);
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_EC, &key), 0);
+    tokObj = test_pkcs11_find_obj(CKO_PRIVATE_KEY, CK_TRUE);
+    ExpectIntNE(tokObj, 0);
+    ExpectNull(test_pkcs11_obj(sessObj));
+    ExpectNotNull(test_pkcs11_find_obj(CKO_PUBLIC_KEY, CK_TRUE));
+    ExpectPtrEq(key.devCtx, (void*)(wc_ptr_t)tokObj);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_EC, &key),
+        WC_NO_ERR_TRACE(BAD_STATE_E));
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+
+    ExpectIntEQ(test_pkcs11_free_ecc(&token, &key), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+
+    /* Session object in devCtx, as left by keygen; the public key fails. */
+    test_pkcs11_reset();
+    ExpectIntEQ(test_pkcs11_store_create(0, tmpl, 3, &sessObj), CKR_OK);
+    key.devCtx = (void*)(wc_ptr_t)sessObj;
+    test_pkcs11_fail_pub_create = 1;
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_EC, &key),
+        WC_NO_ERR_TRACE(WC_HW_E));
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+    ExpectNotNull(test_pkcs11_obj(sessObj));
+    ExpectPtrEq(key.devCtx, (void*)(wc_ptr_t)sessObj);
+
+    test_pkcs11_fail_pub_create = 0;
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_EC, &key), 0);
+    ExpectNull(test_pkcs11_obj(sessObj));
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+    ExpectPtrEq(key.devCtx,
+        (void*)(wc_ptr_t)test_pkcs11_find_obj(CKO_PRIVATE_KEY, CK_TRUE));
+
+    key.devCtx = NULL;
+    wc_ecc_free(&key);
+    wc_ecc_free(&noId);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
 
     return EXPECT_RESULT();
