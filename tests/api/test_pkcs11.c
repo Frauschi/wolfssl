@@ -1301,6 +1301,75 @@ int test_wc_Pkcs11_FreeNoObject(void)
     return EXPECT_RESULT();
 }
 
+int test_wc_Pkcs11_KeyGenSessionClosed(void)
+{
+    static const byte id[] = { 0x61 };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    ecc_key soft;
+    ecc_key key;
+    WC_RNG rng;
+    word32 len = sizeof(test_pkcs11_ec_point) - 2;
+#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+    RsaKey rsa;
+#endif
+    EXPECT_DECLS;
+
+    test_pkcs11_store_setup(&token, &func);
+    func.C_OpenSession = test_pkcs11_open_session;
+    func.C_CloseSession = test_pkcs11_close_session;
+    XMEMSET(&soft, 0, sizeof(soft));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(test_pkcs11_make_ecc(&soft, &rng, id, (int)sizeof(id)), 0);
+    test_pkcs11_ec_point[0] = ASN_OCTET_STRING;
+    test_pkcs11_ec_point[1] = (byte)len;
+    ExpectIntEQ(wc_ecc_export_x963(&soft, test_pkcs11_ec_point + 2, &len), 0);
+    ExpectIntEQ(wc_CryptoCb_RegisterDevice(TEST_PKCS11_DEVID,
+        wc_Pkcs11_CryptoDevCb, &token), 0);
+
+    /* A session key made in a session that closes has no object left. */
+    token.handle = 0;
+    ExpectIntEQ(wc_ecc_init_id(&key, (unsigned char*)id, (int)sizeof(id),
+        NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
+        WC_ECC_FLAG_NONE), 0);
+    ExpectNull(key.devCtx);
+    wc_ecc_free(&key);
+#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+    ExpectIntEQ(wc_InitRsaKey_ex(&rsa, NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_MakeRsaKey(&rsa, 2048, WC_RSA_EXPONENT, &rng), 0);
+    ExpectNull(rsa.devCtx);
+    ExpectIntEQ(wc_FreeRsaKey(&rsa), 0);
+#endif
+
+    /* A token key outlives the session. */
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_Pkcs11Token_SetKeyGenPersistent(&token, 1), 0);
+    ExpectIntEQ(wc_ecc_init_id(&key, (unsigned char*)id, (int)sizeof(id),
+        NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
+        WC_ECC_FLAG_NONE), 0);
+    ExpectNotNull(key.devCtx);
+    wc_ecc_free(&key);
+
+    /* So does a session key made in the open session. */
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_Pkcs11Token_SetKeyGenPersistent(&token, 0), 0);
+    token.handle = 1;
+    ExpectIntEQ(wc_ecc_init_id(&key, (unsigned char*)id, (int)sizeof(id),
+        NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
+        WC_ECC_FLAG_NONE), 0);
+    ExpectNotNull(key.devCtx);
+    wc_ecc_free(&key);
+
+    wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
+    wc_ecc_free(&soft);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+
+    return EXPECT_RESULT();
+}
+
 static CK_RV test_pkcs11_slot_info(CK_SLOT_ID slotId, CK_SLOT_INFO_PTR info)
 {
     (void)slotId;

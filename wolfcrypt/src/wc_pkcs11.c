@@ -7167,6 +7167,23 @@ int wc_Pkcs11DeleteKey(Pkcs11Token* token, int type, void* key)
     return ret;
 }
 
+#if (!defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)) || \
+    (defined(HAVE_ECC) && !defined(NO_PKCS11_EC_KEYGEN)) || \
+    defined(WOLFSSL_HAVE_MLKEM) || defined(WOLFSSL_HAVE_MLDSA)
+/**
+ * Check whether a key just generated in the session goes when it closes.
+ *
+ * @param  [in]  token    Token object.
+ * @param  [in]  session  Session object the key was generated in.
+ * @return  1 when the key is a session object of a session that closes.
+ * @return  0 otherwise.
+ */
+static int Pkcs11KeyGoesWithSession(Pkcs11Token* token, Pkcs11Session* session)
+{
+    return session->handle != token->handle && !session->tokenObjects;
+}
+#endif
+
 /**
  * Perform a cryptographic operation using PKCS#11 device.
  *
@@ -7220,6 +7237,8 @@ int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info, void* ctx)
                     if (ret == 0) {
                         session.tokenObjects = token->keyGenOnToken;
                         ret = Pkcs11RsaKeyGen(&session, info);
+                        if (Pkcs11KeyGoesWithSession(token, &session))
+                            info->pk.rsakg.key->devCtx = NULL;
                         Pkcs11CloseSession(token, &session);
                     }
                     break;
@@ -7247,6 +7266,8 @@ int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info, void* ctx)
                     if (ret == 0) {
                         session.tokenObjects = token->keyGenOnToken;
                         ret = Pkcs11EcKeyGen(&session, info);
+                        if (Pkcs11KeyGoesWithSession(token, &session))
+                            info->pk.eckg.key->devCtx = NULL;
                         Pkcs11CloseSession(token, &session);
                     }
                     break;
@@ -7289,6 +7310,10 @@ int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info, void* ctx)
                     if (ret == 0) {
                         session.tokenObjects = token->keyGenOnToken;
                         ret = Pkcs11PqcKemKeyGen(&session, info);
+                        if (ret == 0 &&
+                                Pkcs11KeyGoesWithSession(token, &session)) {
+                            ((MlKemKey*)info->pk.pqc_kem_kg.key)->devCtx = NULL;
+                        }
                         Pkcs11CloseSession(token, &session);
                     }
                     break;
@@ -7314,6 +7339,11 @@ int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info, void* ctx)
                     if (ret == 0) {
                         session.tokenObjects = token->keyGenOnToken;
                         ret = Pkcs11PqcSigKeyGen(&session, info);
+                        if (ret == 0 &&
+                                Pkcs11KeyGoesWithSession(token, &session)) {
+                            ((wc_MlDsaKey*)info->pk.pqc_sig_kg.key)->devCtx =
+                                NULL;
+                        }
                         Pkcs11CloseSession(token, &session);
                     }
                     break;
