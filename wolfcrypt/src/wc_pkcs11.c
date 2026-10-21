@@ -6970,6 +6970,39 @@ static int Pkcs11PersistPrivKey(Pkcs11Session* session,
 }
 #endif
 
+#if defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
+    defined(WOLFSSL_HAVE_MLKEM)
+/**
+ * Destroy the session public key objects with a key's id and label.
+ *
+ * @param  [in]  session   Session object.
+ * @param  [in]  keyType   Key type.
+ * @param  [in]  id        Identifier of key.
+ * @param  [in]  idLen     Length of identifier.
+ * @param  [in]  label     Label of key.
+ * @param  [in]  labelLen  Length of label.
+ */
+static void Pkcs11DestroySessionPubKeys(Pkcs11Session* session,
+    CK_KEY_TYPE keyType, byte* id, int idLen, char* label, int labelLen)
+{
+    int              ret = 0;
+    CK_RV            rv;
+    CK_ULONG         count = 1;
+    CK_OBJECT_HANDLE handle;
+
+    while (ret == 0 && count != 0) {
+        ret = Pkcs11FindKeyObject(session, &pubKeyClass, keyType, CK_FALSE, id,
+                                  idLen, label, labelLen, &handle, &count);
+        if (ret == 0 && count != 0) {
+            rv = session->func->C_DestroyObject(session->handle, handle);
+            PKCS11_RV("C_DestroyObject", rv);
+            if (rv != CKR_OK)
+                ret = WC_HW_E;
+        }
+    }
+}
+#endif
+
 /**
  * Make a private or secret key held in a session object persistent on the
  * token.
@@ -7075,8 +7108,11 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
                     ret = Pkcs11CreateEccPublicKey(&pubKey, &session, eccKey,
                                                    CKA_VERIFY);
                 }
-                if (ret == 0)
+                if (ret == 0) {
                     eccKey->devCtx = (void*)(wc_ptr_t)privKey;
+                    Pkcs11DestroySessionPubKeys(&session, CKK_EC, eccKey->id,
+                        eccKey->idLen, eccKey->label, eccKey->labelLen);
+                }
                 break;
             }
     #endif
@@ -7097,8 +7133,12 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
                                                          mldsaKey, &mechInfo);
                     }
                 }
-                if (ret == 0)
+                if (ret == 0) {
                     mldsaKey->devCtx = (void*)(wc_ptr_t)privKey;
+                    Pkcs11DestroySessionPubKeys(&session, CKK_ML_DSA,
+                        mldsaKey->id, mldsaKey->idLen, mldsaKey->label,
+                        mldsaKey->labelLen);
+                }
                 break;
             }
     #endif
@@ -7119,8 +7159,12 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
                                                          mlkemKey, &mechInfo);
                     }
                 }
-                if (ret == 0)
+                if (ret == 0) {
                     mlkemKey->devCtx = (void*)(wc_ptr_t)privKey;
+                    Pkcs11DestroySessionPubKeys(&session, CKK_ML_KEM,
+                        mlkemKey->id, mlkemKey->idLen, mlkemKey->label,
+                        mlkemKey->labelLen);
+                }
                 break;
             }
     #endif

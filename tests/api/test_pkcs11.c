@@ -883,6 +883,7 @@ int test_wc_Pkcs11_PersistKey(void)
     tokObj = test_pkcs11_find_obj(CKO_PRIVATE_KEY, CK_TRUE);
     ExpectIntNE(tokObj, 0);
     ExpectNull(test_pkcs11_obj(sessObj));
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
     ExpectNotNull(test_pkcs11_find_obj(CKO_PUBLIC_KEY, CK_TRUE));
     ExpectPtrEq(key.devCtx, (void*)(wc_ptr_t)tokObj);
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
