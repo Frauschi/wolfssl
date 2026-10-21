@@ -1000,7 +1000,6 @@ static int Pkcs11Token_SetPin(Pkcs11Token* token, const unsigned char* userPin,
     if (userPinSz < 0)
         ret = BAD_FUNC_ARG;
     if (ret == 0) {
-        /* A NULL PIN selects the token's protected authentication path. */
         token->userPin = (CK_UTF8CHAR_PTR)XMALLOC(userPinSz > 0 ? userPinSz : 1,
             token->heap, DYNAMIC_TYPE_TMP_BUFFER);
         if (token->userPin == NULL)
@@ -1213,7 +1212,6 @@ static int Pkcs11OpenSession(Pkcs11Token* token, Pkcs11Session* session,
 /**
  * Close a session on a token.
  * Won't close a session created externally.
- * The login ends with the application's last session, so there is no logout.
  *
  * @param  [in]  token    Token object.
  * @param  [in]  session  Session object.
