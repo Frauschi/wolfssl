@@ -301,6 +301,7 @@ static int           test_pkcs11_destroy_calls = 0;
 static int           test_pkcs11_fail_pub_create = 0;
 static int           test_pkcs11_no_ecdh = 0;
 static int           test_pkcs11_ecdsa_verify_only = 0;
+static int           test_pkcs11_no_hmac_type = 0;
 static int           test_pkcs11_fail_modulus = 0;
 static int           test_pkcs11_session_no_point = 0;
 static byte          test_pkcs11_ec_point[2 + 65];
@@ -351,8 +352,8 @@ static int test_pkcs11_token_keys_protected(void)
         o = &test_pkcs11_objs[i];
         if (!o->used || !o->onToken)
             continue;
-        if (o->cls == CKO_PRIVATE_KEY && (!o->isPrivate || !o->sensitive ||
-                o->extractable))
+        if ((o->cls == CKO_PRIVATE_KEY || o->cls == CKO_SECRET_KEY) &&
+                (!o->isPrivate || !o->sensitive || o->extractable))
             return 0;
         if (o->cls == CKO_PUBLIC_KEY && o->isPrivate)
             return 0;
@@ -433,6 +434,9 @@ static CK_RV test_pkcs11_store_create(CK_SESSION_HANDLE session,
     (void)test_pkcs11_apply(&test_pkcs11_objs[i], tmpl, cnt);
     if (test_pkcs11_fail_pub_create &&
             test_pkcs11_objs[i].cls == CKO_PUBLIC_KEY)
+        return TEST_CKR_GENERAL_ERROR;
+    if (test_pkcs11_no_hmac_type &&
+            test_pkcs11_objs[i].keyType == CKK_SHA256_HMAC)
         return TEST_CKR_GENERAL_ERROR;
     test_pkcs11_objs[i].used = 1;
     *object = i + 1;
@@ -571,7 +575,8 @@ static CK_RV test_pkcs11_store_mech_info(CK_SLOT_ID slotId,
 
     if (info == NULL || (type != CKM_ECDSA && type != CKM_RSA_X_509 &&
             type != CKM_EC_KEY_PAIR_GEN && type != CKM_ECDH1_DERIVE &&
-            type != CKM_RSA_PKCS_KEY_PAIR_GEN) ||
+            type != CKM_RSA_PKCS_KEY_PAIR_GEN && type != CKM_AES_GCM &&
+            type != CKM_SHA256_HMAC) ||
             (type == CKM_ECDH1_DERIVE && test_pkcs11_no_ecdh))
         return CKR_MECHANISM_INVALID;
 
@@ -663,6 +668,7 @@ static void test_pkcs11_store_setup(Pkcs11Token* token, CK_FUNCTION_LIST* func)
     test_pkcs11_no_ecdh = 0;
     test_pkcs11_ecdsa_verify_only = 0;
     test_pkcs11_session_state = CKS_RW_USER_FUNCTIONS;
+    test_pkcs11_no_hmac_type = 0;
     test_pkcs11_reset();
 }
 
@@ -1398,6 +1404,65 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
     wc_ecc_free(&soft);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
 
+    return EXPECT_RESULT();
+}
+
+int test_wc_Pkcs11_SecretKeyPersist(void)
+{
+    EXPECT_DECLS;
+#if !defined(NO_AES) && defined(HAVE_AESGCM)
+    static unsigned char id[] = { 0x71 };
+    static const byte secret[16] = { 0x01 };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    Aes aes;
+#if !defined(NO_HMAC) && !defined(NO_SHA256)
+    Hmac hmac;
+#endif
+
+    test_pkcs11_store_setup(&token, &func);
+    ExpectIntEQ(wc_AesInit_Id(&aes, id, (int)sizeof(id), NULL, INVALID_DEVID),
+        0);
+    if (EXPECT_SUCCESS()) {
+        aes.keylen = sizeof(secret);
+        XMEMCPY(aes.devKey, secret, sizeof(secret));
+    }
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_AES_GCM, 0, &aes),
+        0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 1);
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_AES_GCM, &aes), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    ExpectIntEQ(test_pkcs11_token_keys_protected(), 1);
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_AES_GCM, &aes), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+    wc_AesFree(&aes);
+
+#if !defined(NO_HMAC) && !defined(NO_SHA256)
+    /* A token without the HMAC key type holds a generic secret. */
+    test_pkcs11_reset();
+    test_pkcs11_no_hmac_type = 1;
+    ExpectIntEQ(wc_HmacInit_Id(&hmac, id, (int)sizeof(id), NULL,
+        INVALID_DEVID), 0);
+    if (EXPECT_SUCCESS()) {
+        hmac.macType = WC_SHA256;
+        hmac.keyRaw = secret;
+        hmac.keyLen = sizeof(secret);
+    }
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_HMAC, 0, &hmac), 0);
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_HMAC, &hmac), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    ExpectIntEQ(test_pkcs11_token_keys_protected(), 1);
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_HMAC, 0, &hmac,
+        1), WC_NO_ERR_TRACE(BAD_STATE_E));
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_HMAC, &hmac), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+    test_pkcs11_no_hmac_type = 0;
+    wc_HmacFree(&hmac);
+#endif
+#endif
     return EXPECT_RESULT();
 }
 

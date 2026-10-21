@@ -1295,7 +1295,8 @@ int wc_Pkcs11Token_SetKeyGenPersistent(Pkcs11Token* token, int persistent)
 }
 
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
-    defined(WOLFSSL_HAVE_MLKEM)
+    defined(WOLFSSL_HAVE_MLKEM) || (!defined(NO_AES) && \
+    (defined(HAVE_AESGCM) || defined(HAVE_AES_CBC))) || !defined(NO_HMAC)
 /**
  * Read whether a key object is a token object.
  *
@@ -1321,7 +1322,10 @@ static int Pkcs11KeyOnToken(Pkcs11Session* session, CK_OBJECT_HANDLE handle,
 
     return ret;
 }
+#endif
 
+#if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
+    defined(WOLFSSL_HAVE_MLKEM)
 /**
  * Destroy a key object only when it is a session object.
  * Token objects, and objects whose CKA_TOKEN cannot be read, are kept.
@@ -6894,11 +6898,13 @@ exit:
 #endif /* !NO_CERTS */
 
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
-    defined(WOLFSSL_HAVE_MLKEM)
+    defined(WOLFSSL_HAVE_MLKEM) || (!defined(NO_AES) && \
+    (defined(HAVE_AESGCM) || defined(HAVE_AES_CBC))) || !defined(NO_HMAC)
 /**
- * Copy a private key's session object to a new token object.
+ * Copy a private or secret key's session object to a new token object.
  *
  * @param  [in]   session   Session object.
+ * @param  [in]   keyClass  Key class.
  * @param  [in]   keyType   Key type.
  * @param  [in]   devCtx    Handle of session object from key, may be NULL.
  * @param  [in]   id        Identifier of key.
@@ -6913,9 +6919,10 @@ exit:
  * @return  WC_HW_E when no session object is found or a PKCS#11 call fails.
  * @return  0 on success.
  */
-static int Pkcs11PersistPrivKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
-    void* devCtx, byte* id, int idLen, char* label, int labelLen,
-    CK_OBJECT_HANDLE* sessKey, CK_OBJECT_HANDLE* tokenKey)
+static int Pkcs11PersistPrivKey(Pkcs11Session* session,
+    CK_OBJECT_CLASS* keyClass, CK_KEY_TYPE keyType, void* devCtx, byte* id,
+    int idLen, char* label, int labelLen, CK_OBJECT_HANDLE* sessKey,
+    CK_OBJECT_HANDLE* tokenKey)
 {
     int              ret;
     CK_RV            rv;
@@ -6930,8 +6937,8 @@ static int Pkcs11PersistPrivKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
             ret = BAD_STATE_E;
     }
     else if (ret == 0) {
-        ret = Pkcs11FindKeyObject(session, &privKeyClass, keyType, CK_FALSE,
-                                  id, idLen, label, labelLen, sessKey, &count);
+        ret = Pkcs11FindKeyObject(session, keyClass, keyType, CK_FALSE, id,
+                                  idLen, label, labelLen, sessKey, &count);
         if (ret == 0 && count == 0)
             ret = WC_HW_E;
     }
@@ -6948,10 +6955,12 @@ static int Pkcs11PersistPrivKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
 #endif
 
 /**
- * Make a private key held in a session object persistent on the token.
+ * Make a private or secret key held in a session object persistent on the
+ * token.
  *
  * @param  [in]  token  Token holding the key.
- * @param  [in]  type   PKCS11_KEY_TYPE_RSA, _EC, _MLDSA or _MLKEM.
+ * @param  [in]  type   PKCS11_KEY_TYPE_RSA, _EC, _MLDSA, _MLKEM, _AES_GCM,
+ *                      _AES_CBC or _HMAC.
  * @param  [in]  key    Key with an id or label.
  * @return  BAD_FUNC_ARG when token or key is NULL, or the key has neither id
  *          nor label.
@@ -6977,11 +6986,58 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
     if (ret == 0) {
         session.tokenObjects = 1;
         switch (type) {
+    #if !defined(NO_AES) && (defined(HAVE_AESGCM) || defined(HAVE_AES_CBC))
+            case PKCS11_KEY_TYPE_AES_GCM:
+            case PKCS11_KEY_TYPE_AES_CBC: {
+                Aes* aes = (Aes*)key;
+
+                ret = Pkcs11PersistPrivKey(&session, &secretKeyClass, CKK_AES,
+                                           NULL, (byte*)aes->id, aes->idLen,
+                                           aes->label, aes->labelLen,
+                                           &sessKey, &privKey);
+                break;
+            }
+    #endif
+    #ifndef NO_HMAC
+            case PKCS11_KEY_TYPE_HMAC: {
+                Hmac*       hmac = (Hmac*)key;
+                int         mechType;
+                int         keyType;
+                CK_KEY_TYPE otherType = CKK_GENERIC_SECRET;
+                CK_ULONG    count = 0;
+
+                ret = Pkcs11HmacTypes(hmac->macType, &mechType, &keyType);
+                if (ret == 0) {
+                    ret = Pkcs11FindKeyObject(&session, &secretKeyClass,
+                        (CK_KEY_TYPE)keyType, CK_FALSE, (byte*)hmac->id,
+                        hmac->idLen, hmac->label, hmac->labelLen, &sessKey,
+                        &count);
+                }
+                /* wc_Pkcs11StoreKey falls back to a generic secret. */
+                if (ret == 0 && count == 0) {
+                    otherType = (CK_KEY_TYPE)keyType;
+                    keyType = (int)CKK_GENERIC_SECRET;
+                }
+                if (ret == 0) {
+                    ret = Pkcs11CheckNewTokenKey(&session, otherType,
+                        (byte*)hmac->id, hmac->idLen, hmac->label,
+                        hmac->labelLen);
+                }
+                if (ret == 0) {
+                    ret = Pkcs11PersistPrivKey(&session, &secretKeyClass,
+                        (CK_KEY_TYPE)keyType, NULL, (byte*)hmac->id,
+                        hmac->idLen, hmac->label, hmac->labelLen, &sessKey,
+                        &privKey);
+                }
+                break;
+            }
+    #endif
     #ifndef NO_RSA
             case PKCS11_KEY_TYPE_RSA: {
                 RsaKey* rsaKey = (RsaKey*)key;
 
-                ret = Pkcs11PersistPrivKey(&session, CKK_RSA, rsaKey->devCtx,
+                ret = Pkcs11PersistPrivKey(&session, &privKeyClass, CKK_RSA,
+                                           rsaKey->devCtx,
                                            rsaKey->id, rsaKey->idLen,
                                            rsaKey->label, rsaKey->labelLen,
                                            &sessKey, &privKey);
@@ -6994,7 +7050,8 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
             case PKCS11_KEY_TYPE_EC: {
                 ecc_key* eccKey = (ecc_key*)key;
 
-                ret = Pkcs11PersistPrivKey(&session, CKK_EC, eccKey->devCtx,
+                ret = Pkcs11PersistPrivKey(&session, &privKeyClass, CKK_EC,
+                                           eccKey->devCtx,
                                            eccKey->id, eccKey->idLen,
                                            eccKey->label, eccKey->labelLen,
                                            &sessKey, &privKey);
@@ -7012,8 +7069,8 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
                 wc_MlDsaKey* mldsaKey = (wc_MlDsaKey*)key;
                 CK_MECHANISM_INFO mechInfo;
 
-                ret = Pkcs11PersistPrivKey(&session, CKK_ML_DSA,
-                                           mldsaKey->devCtx,
+                ret = Pkcs11PersistPrivKey(&session, &privKeyClass,
+                                           CKK_ML_DSA, mldsaKey->devCtx,
                                            mldsaKey->id, mldsaKey->idLen,
                                            mldsaKey->label, mldsaKey->labelLen,
                                            &sessKey, &privKey);
@@ -7034,8 +7091,8 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
                 MlKemKey* mlkemKey = (MlKemKey*)key;
                 CK_MECHANISM_INFO mechInfo;
 
-                ret = Pkcs11PersistPrivKey(&session, CKK_ML_KEM,
-                                           mlkemKey->devCtx,
+                ret = Pkcs11PersistPrivKey(&session, &privKeyClass,
+                                           CKK_ML_KEM, mlkemKey->devCtx,
                                            mlkemKey->id, mlkemKey->idLen,
                                            mlkemKey->label, mlkemKey->labelLen,
                                            &sessKey, &privKey);
@@ -7074,7 +7131,8 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
 }
 
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
-    defined(WOLFSSL_HAVE_MLKEM)
+    defined(WOLFSSL_HAVE_MLKEM) || (!defined(NO_AES) && \
+    (defined(HAVE_AESGCM) || defined(HAVE_AES_CBC))) || !defined(NO_HMAC)
 /**
  * Check that the user is logged in, so the session sees private objects.
  *
@@ -7142,10 +7200,11 @@ static int Pkcs11DeleteTokenKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
 #endif
 
 /**
- * Remove a key's private and public token objects from the token.
+ * Remove a key's token objects from the token.
  *
  * @param  [in]  token  Token holding the key.
- * @param  [in]  type   PKCS11_KEY_TYPE_RSA, _EC, _MLDSA or _MLKEM.
+ * @param  [in]  type   PKCS11_KEY_TYPE_RSA, _EC, _MLDSA, _MLKEM, _AES_GCM,
+ *                      _AES_CBC or _HMAC.
  * @param  [in]  key    Key with an id or label.
  * @return  BAD_FUNC_ARG when token or key is NULL, or the key has neither id
  *          nor label.
@@ -7165,6 +7224,37 @@ int wc_Pkcs11DeleteKey(Pkcs11Token* token, int type, void* key)
         ret = Pkcs11OpenSession(token, &session, 1);
     if (ret == 0) {
         switch (type) {
+    #if !defined(NO_AES) && (defined(HAVE_AESGCM) || defined(HAVE_AES_CBC))
+            case PKCS11_KEY_TYPE_AES_GCM:
+            case PKCS11_KEY_TYPE_AES_CBC: {
+                Aes* aes = (Aes*)key;
+
+                ret = Pkcs11DeleteTokenKey(&session, CKK_AES, (byte*)aes->id,
+                                           aes->idLen, aes->label,
+                                           aes->labelLen);
+                break;
+            }
+    #endif
+    #ifndef NO_HMAC
+            case PKCS11_KEY_TYPE_HMAC: {
+                Hmac* hmac = (Hmac*)key;
+                int   mechType;
+                int   keyType;
+
+                ret = Pkcs11HmacTypes(hmac->macType, &mechType, &keyType);
+                if (ret == 0) {
+                    ret = Pkcs11DeleteTokenKey(&session, (CK_KEY_TYPE)keyType,
+                                               (byte*)hmac->id, hmac->idLen,
+                                               hmac->label, hmac->labelLen);
+                }
+                if (ret == 0) {
+                    ret = Pkcs11DeleteTokenKey(&session, CKK_GENERIC_SECRET,
+                                               (byte*)hmac->id, hmac->idLen,
+                                               hmac->label, hmac->labelLen);
+                }
+                break;
+            }
+    #endif
     #ifndef NO_RSA
             case PKCS11_KEY_TYPE_RSA: {
                 RsaKey* rsaKey = (RsaKey*)key;

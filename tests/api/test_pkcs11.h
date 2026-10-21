@@ -43,6 +43,7 @@ int test_wc_Pkcs11_TokenOpenDropsPin(void);
 int test_wc_Pkcs11_KeyNames(void);
 int test_wc_Pkcs11_FreeNoObject(void);
 int test_wc_Pkcs11_KeyGenSessionClosed(void);
+int test_wc_Pkcs11_SecretKeyPersist(void);
 
 #define TEST_PKCS11_DECLS                                                   \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_EcdsaSigDecode),               \
@@ -59,7 +60,8 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void);
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_TokenOpenDropsPin),            \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_KeyNames),                    \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_FreeNoObject),                 \
-    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_KeyGenSessionClosed)
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_KeyGenSessionClosed),          \
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_SecretKeyPersist)
 
 #else
 
