@@ -309,6 +309,7 @@ static int           test_pkcs11_fail_pub_create = 0;
 static int           test_pkcs11_no_ecdh = 0;
 static int           test_pkcs11_ecdsa_verify_only = 0;
 static int           test_pkcs11_no_hmac_type = 0;
+static CK_OBJECT_HANDLE test_pkcs11_sign_key = 0;
 static int           test_pkcs11_fail_modulus = 0;
 static int           test_pkcs11_session_no_point = 0;
 static byte          test_pkcs11_ec_point[2 + 65];
@@ -606,6 +607,30 @@ static CK_RV test_pkcs11_store_session_info(CK_SESSION_HANDLE session,
     return CKR_OK;
 }
 
+static CK_RV test_pkcs11_store_sign_init(CK_SESSION_HANDLE session,
+    CK_MECHANISM_PTR mechanism, CK_OBJECT_HANDLE key)
+{
+    (void)session;
+    (void)mechanism;
+
+    test_pkcs11_sign_key = key;
+    return test_pkcs11_obj(key) != NULL ? CKR_OK : TEST_CKR_GENERAL_ERROR;
+}
+
+static CK_RV test_pkcs11_store_sign(CK_SESSION_HANDLE session,
+    CK_BYTE_PTR data, CK_ULONG dataLen, CK_BYTE_PTR sig, CK_ULONG_PTR sigLen)
+{
+    (void)session;
+    (void)data;
+    (void)dataLen;
+
+    if (*sigLen < 64)
+        return TEST_CKR_GENERAL_ERROR;
+    XMEMSET(sig, 0x01, 64);
+    *sigLen = 64;
+    return CKR_OK;
+}
+
 static CK_RV test_pkcs11_store_decrypt_init(CK_SESSION_HANDLE session,
     CK_MECHANISM_PTR mechanism, CK_OBJECT_HANDLE key)
 {
@@ -668,6 +693,8 @@ static void test_pkcs11_store_setup(Pkcs11Token* token, CK_FUNCTION_LIST* func)
     func->C_DecryptInit = test_pkcs11_store_decrypt_init;
     func->C_Decrypt = test_pkcs11_store_decrypt;
     func->C_GetSessionInfo = test_pkcs11_store_session_info;
+    func->C_SignInit = test_pkcs11_store_sign_init;
+    func->C_Sign = test_pkcs11_store_sign;
     token->func = func;
     token->slotId = 1;
     token->handle = 1;
@@ -1363,6 +1390,9 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
     ecc_key key;
     WC_RNG rng;
     word32 len = sizeof(test_pkcs11_ec_point) - 2;
+    byte hash[32];
+    byte sig[ECC_MAX_SIG_SIZE];
+    word32 sigLen = sizeof(sig);
 #ifdef TEST_PKCS11_RSA_KEYGEN
     RsaKey rsa;
 #endif
@@ -1370,6 +1400,7 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
     test_pkcs11_store_setup(&token, &func);
     func.C_OpenSession = test_pkcs11_open_session;
     func.C_CloseSession = test_pkcs11_close_session;
+    XMEMSET(hash, 0x5a, sizeof(hash));
     XMEMSET(&soft, 0, sizeof(soft));
     ExpectIntEQ(wc_InitRng(&rng), 0);
     ExpectIntEQ(test_pkcs11_make_ecc(&soft, &rng, id, (int)sizeof(id)), 0);
@@ -1379,29 +1410,37 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
     ExpectIntEQ(wc_CryptoCb_RegisterDevice(TEST_PKCS11_DEVID,
         wc_Pkcs11_CryptoDevCb, &token), 0);
 
-    /* A session key made in a session that closes has no object left. */
+    /* A session key would go with a session that closes, so keygen fails. */
     token.handle = 0;
     ExpectIntEQ(wc_ecc_init_id(&key, (unsigned char*)id, (int)sizeof(id),
         NULL, TEST_PKCS11_DEVID), 0);
     ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
-        WC_ECC_FLAG_NONE), 0);
+        WC_ECC_FLAG_NONE), WC_NO_ERR_TRACE(BAD_STATE_E));
     ExpectNull(key.devCtx);
     wc_ecc_free(&key);
 #ifdef TEST_PKCS11_RSA_KEYGEN
     ExpectIntEQ(wc_InitRsaKey_ex(&rsa, NULL, TEST_PKCS11_DEVID), 0);
-    ExpectIntEQ(wc_MakeRsaKey(&rsa, 2048, WC_RSA_EXPONENT, &rng), 0);
+    ExpectIntEQ(wc_MakeRsaKey(&rsa, 2048, WC_RSA_EXPONENT, &rng),
+        WC_NO_ERR_TRACE(BAD_STATE_E));
     ExpectNull(rsa.devCtx);
     ExpectIntEQ(wc_FreeRsaKey(&rsa), 0);
 #endif
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
 
-    /* A token key outlives the session. */
+    /* A token key outlives the session and is then found by its id. */
     test_pkcs11_reset();
     ExpectIntEQ(wc_Pkcs11Token_SetKeyGenPersistent(&token, 1), 0);
     ExpectIntEQ(wc_ecc_init_id(&key, (unsigned char*)id, (int)sizeof(id),
         NULL, TEST_PKCS11_DEVID), 0);
     ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
         WC_ECC_FLAG_NONE), 0);
-    ExpectNotNull(key.devCtx);
+    ExpectNull(key.devCtx);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+    test_pkcs11_sign_key = 0;
+    ExpectIntEQ(wc_ecc_sign_hash(hash, sizeof(hash), sig, &sigLen, &rng, &key),
+        0);
+    ExpectIntEQ(test_pkcs11_sign_key,
+        test_pkcs11_find_obj(CKO_PRIVATE_KEY, CK_TRUE));
     wc_ecc_free(&key);
 
     /* So does a session key made in the open session. */

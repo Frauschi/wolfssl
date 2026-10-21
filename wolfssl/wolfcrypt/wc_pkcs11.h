@@ -75,6 +75,7 @@ typedef struct Pkcs11Session {
     int               version;          /* Pkcs11InterfaceVersionType         */
     byte              tokenObjects:1;   /* Create keys with CKA_TOKEN set     */
     byte              loggedIn:1;       /* C_Login done for this session      */
+    byte              closes:1;         /* Closed after this operation        */
 } Pkcs11Session;
 
 /* Types of keys that can be stored. */
