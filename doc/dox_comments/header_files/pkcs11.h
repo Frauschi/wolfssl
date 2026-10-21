@@ -62,16 +62,19 @@ void wc_Pkcs11Token_Close(Pkcs11Token* token);
     PKCS#11 crypto callback create token objects (CKA_TOKEN set) instead of
     session objects for keys with an id or label. Use it for tokens that
     cannot make a session key persistent later with wc_Pkcs11PersistKey,
-    such as tokens that only report the public key of a token object. ECC
-    and ML-DSA keys also keep a token object for the public key under the
-    same id or label. Key generation fails with BAD_STATE_E when the token
-    already holds a key of that type with the same id or label. A key
+    such as tokens that only report the public key of a token object. ECC,
+    ML-DSA and ML-KEM keys also keep a token object for the public key under
+    the same id or label. Key generation fails with BAD_STATE_E when the
+    token already holds a key of that type with the same id or label. A key
     without a name, such as a TLS ephemeral key, is still generated as a
     session object. Remove an unwanted key with wc_Pkcs11DeleteKey. Key
     generation opens a read/write session for this, but a session opened
     with wc_Pkcs11Token_Open is used as it is and must be read/write. A
     private key on the token is created with CKA_PRIVATE, so the token must
-    be logged in.
+    be logged in. Without a session from wc_Pkcs11Token_Open, a session key
+    cannot be generated, as it would be destroyed with its session (the call
+    fails with BAD_STATE_E), and a token key is found by its id or label
+    afterwards.
 
     \return 0 on success.
     \return BAD_FUNC_ARG when token is NULL.
@@ -124,7 +127,8 @@ int wc_Pkcs11StoreKey_ex(Pkcs11Token* token, int type, int clear,
     persistent. The session object, from key generation or
     wc_Pkcs11StoreKey, is copied with C_CopyObject to a token object and
     then destroyed. For ECC, ML-DSA and ML-KEM keys that hold their public
-    key, a token object with the public key is created as well. RSA, ECC,
+    key, a token object with the public key replaces any session public
+    key with the same names. RSA, ECC,
     ML-DSA and ML-KEM keys refer to the new private object through devCtx.
     Freeing the key does not remove token objects. The token session must
     be read/write and logged in, and stay open from key generation until

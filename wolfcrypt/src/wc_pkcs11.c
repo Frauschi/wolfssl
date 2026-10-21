@@ -5054,9 +5054,7 @@ static int Pkcs11MlKemKeyGen(Pkcs11Session* session, MlKemKey* key)
         ret = Pkcs11GetMlKemPublicKey(key, session, pubKey);
     }
 
-    /* Destroy the public key object, as encapsulation using the public key will
-     * probably be performed outside of the PKCS#11 token. If not, user can call
-     * wc_Pkcs11StoreKey() to import the public key to the token. */
+    /* Encapsulation usually runs in software, so a session public key goes. */
     if (pubKey != NULL_PTR && (ret != 0 || !session->tokenObjects)) {
         session->func->C_DestroyObject(session->handle, pubKey);
     }
