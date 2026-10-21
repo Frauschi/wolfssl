@@ -7192,12 +7192,10 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
     defined(WOLFSSL_HAVE_MLKEM) || (!defined(NO_AES) && \
     (defined(HAVE_AESGCM) || defined(HAVE_AES_CBC))) || !defined(NO_HMAC)
 /**
- * Check that the session sees private objects: the user is logged in, or the
- * token needs no login.
+ * Check that the user is logged in, so the session sees private objects.
  *
  * @param  [in]  session  Session object.
- * @return  BAD_STATE_E when the token needs a login and the user is not
- *          logged in.
+ * @return  BAD_STATE_E when the user is not logged in.
  * @return  WC_HW_E when a PKCS#11 library call fails.
  * @return  0 on success.
  */
@@ -7206,21 +7204,14 @@ static int Pkcs11CheckUserSession(Pkcs11Session* session)
     int             ret = 0;
     CK_RV           rv;
     CK_SESSION_INFO info;
-    CK_TOKEN_INFO   tinfo;
 
     rv = session->func->C_GetSessionInfo(session->handle, &info);
     PKCS11_RV("C_GetSessionInfo", rv);
     if (rv != CKR_OK)
         ret = WC_HW_E;
     else if (info.state != CKS_RO_USER_FUNCTIONS &&
-             info.state != CKS_RW_USER_FUNCTIONS) {
-        rv = session->func->C_GetTokenInfo(session->slotId, &tinfo);
-        PKCS11_RV("C_GetTokenInfo", rv);
-        if (rv != CKR_OK)
-            ret = WC_HW_E;
-        else if ((tinfo.flags & CKF_LOGIN_REQUIRED) != 0)
-            ret = BAD_STATE_E;
-    }
+             info.state != CKS_RW_USER_FUNCTIONS)
+        ret = BAD_STATE_E;
 
     return ret;
 }
@@ -7235,8 +7226,7 @@ static int Pkcs11CheckUserSession(Pkcs11Session* session)
  * @param  [in]  label     Label of key.
  * @param  [in]  labelLen  Length of label.
  * @return  BAD_FUNC_ARG when the key has neither id nor label.
- * @return  BAD_STATE_E when the token needs a login and the user is not
- *          logged in.
+ * @return  BAD_STATE_E when the user is not logged in.
  * @return  WC_HW_E when a PKCS#11 library call fails.
  * @return  0 on success.
  */
@@ -7276,8 +7266,7 @@ static int Pkcs11DeleteTokenKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
  * @param  [in]  key    Key with an id or label.
  * @return  BAD_FUNC_ARG when token or key is NULL, or the key has neither id
  *          nor label.
- * @return  BAD_STATE_E when the token needs a login and the user is not
- *          logged in.
+ * @return  BAD_STATE_E when the user is not logged in.
  * @return  NOT_COMPILED_IN when the key type is not supported.
  * @return  WC_HW_E when a PKCS#11 library call fails.
  * @return  0 on success.

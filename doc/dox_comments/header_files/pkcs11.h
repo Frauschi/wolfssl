@@ -166,17 +166,16 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key);
     \ingroup PKCS11
 
     \brief Removes a key from the token: every token object of the key type
-    with the key's id and label is destroyed. Unless the token needs no
-    login, the user must be logged in to see private objects. For RSA, ECC,
-    ML-DSA and ML-KEM keys a session object in devCtx is destroyed as well
-    and devCtx is cleared. An HMAC key is removed under its HMAC key type
-    and as a generic secret. Finding nothing to remove is not an error.
+    with the key's id and label is destroyed. The user must be logged in to
+    see private objects. For RSA, ECC, ML-DSA and ML-KEM keys a session
+    object in devCtx is destroyed as well and devCtx is cleared. An HMAC key
+    is removed under its HMAC key type and as a generic secret. Finding
+    nothing to remove is not an error.
 
     \return 0 on success.
     \return BAD_FUNC_ARG when token or key is NULL, or the key has neither an
     id nor a label.
-    \return BAD_STATE_E when the token needs a login and the user is not
-    logged in.
+    \return BAD_STATE_E when the user is not logged in.
     \return NOT_COMPILED_IN when the key type is not supported.
     \return WC_HW_E when a PKCS#11 call fails.
 

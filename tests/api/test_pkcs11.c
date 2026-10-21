@@ -317,7 +317,6 @@ static int           test_pkcs11_fail_modulus = 0;
 static int           test_pkcs11_session_no_point = 0;
 static byte          test_pkcs11_ec_point[2 + 65];
 static CK_STATE      test_pkcs11_session_state = CKS_RW_USER_FUNCTIONS;
-static CK_FLAGS      test_pkcs11_token_flags = CKF_LOGIN_REQUIRED;
 
 #define TEST_PKCS11_FIND_CLASS  0x01
 #define TEST_PKCS11_FIND_TYPE   0x02
@@ -615,16 +614,6 @@ static CK_RV test_pkcs11_store_session_info(CK_SESSION_HANDLE session,
     return CKR_OK;
 }
 
-static CK_RV test_pkcs11_store_token_info(CK_SLOT_ID slotId,
-    CK_TOKEN_INFO_PTR info)
-{
-    (void)slotId;
-
-    XMEMSET(info, 0, sizeof(*info));
-    info->flags = test_pkcs11_token_flags;
-    return CKR_OK;
-}
-
 static CK_RV test_pkcs11_store_sign_init(CK_SESSION_HANDLE session,
     CK_MECHANISM_PTR mechanism, CK_OBJECT_HANDLE key)
 {
@@ -711,7 +700,6 @@ static void test_pkcs11_store_setup(Pkcs11Token* token, CK_FUNCTION_LIST* func)
     func->C_DecryptInit = test_pkcs11_store_decrypt_init;
     func->C_Decrypt = test_pkcs11_store_decrypt;
     func->C_GetSessionInfo = test_pkcs11_store_session_info;
-    func->C_GetTokenInfo = test_pkcs11_store_token_info;
     func->C_SignInit = test_pkcs11_store_sign_init;
     func->C_Sign = test_pkcs11_store_sign;
     token->func = func;
@@ -721,7 +709,6 @@ static void test_pkcs11_store_setup(Pkcs11Token* token, CK_FUNCTION_LIST* func)
     test_pkcs11_no_ecdh = 0;
     test_pkcs11_ecdsa_verify_only = 0;
     test_pkcs11_session_state = CKS_RW_USER_FUNCTIONS;
-    test_pkcs11_token_flags = CKF_LOGIN_REQUIRED;
     test_pkcs11_no_hmac_type = 0;
     test_pkcs11_fail_copy = 0;
     test_pkcs11_fail_destroy = 0;
@@ -1004,12 +991,6 @@ int test_wc_Pkcs11_DeleteKey(void)
     ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_EC, &key),
         WC_NO_ERR_TRACE(BAD_STATE_E));
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 3);
-
-    /* A token that needs no login shows every object to a public session. */
-    test_pkcs11_token_flags = 0;
-    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_EC, &key), 0);
-    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
-    test_pkcs11_token_flags = CKF_LOGIN_REQUIRED;
     test_pkcs11_session_state = CKS_RW_USER_FUNCTIONS;
 
     wc_ecc_free(&key);

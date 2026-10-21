@@ -42,8 +42,6 @@ extern "C" {
 #define CKF_REMOVABLE_DEVICE                  0x00000002UL
 #define CKF_HW_SLOT                           0x00000004UL
 
-#define CKF_LOGIN_REQUIRED                    0x00000004UL
-
 #define CKF_HW                                0x00000001UL
 #define CKF_ENCRYPT                           0x00000100UL
 #define CKF_DECRYPT                           0x00000200UL
