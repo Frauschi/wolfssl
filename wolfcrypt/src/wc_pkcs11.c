@@ -4906,10 +4906,11 @@ static int Pkcs11MlKemKeyGen(Pkcs11Session* session, MlKemKey* key)
         { CKA_KEY_TYPE,      &mlkemKeyType, sizeof(mlkemKeyType) },
         { CKA_PARAMETER_SET, &param_set,    sizeof(param_set)    },
         { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
         { 0,                 NULL,          0                    }
     };
     CK_ULONG                     pubTmplCnt =
-        sizeof(pubKeyTmpl) / sizeof(*pubKeyTmpl) - 2;
+        sizeof(pubKeyTmpl) / sizeof(*pubKeyTmpl) - 3;
     CK_ATTRIBUTE                 privKeyTmpl[] = {
         { CKA_CLASS,         &privKeyClass, sizeof(privKeyClass) },
         { CKA_DECAPSULATE,   &ckTrue,       sizeof(ckTrue)       },
@@ -4990,6 +4991,11 @@ static int Pkcs11MlKemKeyGen(Pkcs11Session* session, MlKemKey* key)
             XMEMCPY(&privKeyTmpl[privTmplCnt], pkcs11TokenKeyAttrs,
                 sizeof(pkcs11TokenKeyAttrs));
             privTmplCnt += PKCS11_TOKEN_KEY_ATTRS;
+
+            pubKeyTmpl[pubTmplCnt].type       = CKA_TOKEN;
+            pubKeyTmpl[pubTmplCnt].pValue     = &ckTrue;
+            pubKeyTmpl[pubTmplCnt].ulValueLen = sizeof(ckTrue);
+            pubTmplCnt++;
         }
 
         mech.mechanism      = CKM_ML_KEM_KEY_PAIR_GEN;
@@ -5014,7 +5020,7 @@ static int Pkcs11MlKemKeyGen(Pkcs11Session* session, MlKemKey* key)
     /* Destroy the public key object, as encapsulation using the public key will
      * probably be performed outside of the PKCS#11 token. If not, user can call
      * wc_Pkcs11StoreKey() to import the public key to the token. */
-    if (pubKey != NULL_PTR) {
+    if (pubKey != NULL_PTR && (ret != 0 || !session->tokenObjects)) {
         session->func->C_DestroyObject(session->handle, pubKey);
     }
     if (ret == 0 && privKey != NULL_PTR) {
@@ -6999,12 +7005,20 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
     #ifdef WOLFSSL_HAVE_MLKEM
             case PKCS11_KEY_TYPE_MLKEM: {
                 MlKemKey* mlkemKey = (MlKemKey*)key;
+                CK_MECHANISM_INFO mechInfo;
 
                 ret = Pkcs11PersistPrivKey(&session, CKK_ML_KEM,
                                            mlkemKey->devCtx,
                                            mlkemKey->id, mlkemKey->idLen,
                                            mlkemKey->label, mlkemKey->labelLen,
                                            &sessKey, &privKey);
+                if (ret == 0 && (mlkemKey->flags & MLKEM_FLAG_PUB_SET) != 0) {
+                    ret = Pkcs11MechAvail(&session, CKM_ML_KEM, &mechInfo);
+                    if (ret == 0) {
+                        ret = Pkcs11CreateMlKemPublicKey(&pubKey, &session,
+                                                         mlkemKey, &mechInfo);
+                    }
+                }
                 if (ret == 0)
                     mlkemKey->devCtx = (void*)(wc_ptr_t)privKey;
                 break;
