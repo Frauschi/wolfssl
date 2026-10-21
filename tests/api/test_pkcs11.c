@@ -848,6 +848,15 @@ int test_wc_Pkcs11_PersistKey(void)
     ExpectPtrEq(key.devCtx,
         (void*)(wc_ptr_t)test_pkcs11_find_obj(CKO_PRIVATE_KEY, CK_TRUE));
 
+    /* A key already on the token under other names is not copied again. */
+    tokObj = (CK_OBJECT_HANDLE)(wc_ptr_t)key.devCtx;
+    key.id[0] = 0x0f;
+    key.idLen = 1;
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_EC, &key),
+        WC_NO_ERR_TRACE(BAD_STATE_E));
+    ExpectNotNull(test_pkcs11_obj(tokObj));
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+
     key.devCtx = NULL;
     wc_ecc_free(&key);
     wc_ecc_free(&noId);

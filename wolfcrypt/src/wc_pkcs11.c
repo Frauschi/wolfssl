@@ -1297,6 +1297,32 @@ int wc_Pkcs11Token_SetKeyGenPersistent(Pkcs11Token* token, int persistent)
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
     defined(WOLFSSL_HAVE_MLKEM)
 /**
+ * Read whether a key object is a token object.
+ *
+ * @param  [in]   session  Session object.
+ * @param  [in]   handle   Handle of key object.
+ * @param  [out]  onToken  CK_TRUE for a token object.
+ * @return  WC_HW_E when CKA_TOKEN cannot be read.
+ * @return  0 on success.
+ */
+static int Pkcs11KeyOnToken(Pkcs11Session* session, CK_OBJECT_HANDLE handle,
+                            CK_BBOOL* onToken)
+{
+    int          ret = 0;
+    CK_RV        rv;
+    CK_ATTRIBUTE tmpl[] = {
+        { CKA_TOKEN, onToken, sizeof(*onToken) }
+    };
+
+    rv = session->func->C_GetAttributeValue(session->handle, handle, tmpl, 1);
+    PKCS11_RV("C_GetAttributeValue", rv);
+    if (rv != CKR_OK || tmpl[0].ulValueLen != sizeof(*onToken))
+        ret = WC_HW_E;
+
+    return ret;
+}
+
+/**
  * Destroy a key object only when it is a session object.
  * Token objects, and objects whose CKA_TOKEN cannot be read, are kept.
  *
@@ -1306,19 +1332,15 @@ int wc_Pkcs11Token_SetKeyGenPersistent(Pkcs11Token* token, int persistent)
 static void Pkcs11DestroySessionKey(Pkcs11Session* session,
                                     CK_OBJECT_HANDLE handle)
 {
-    CK_RV        rv;
-    CK_BBOOL     onToken = CK_TRUE;
-    CK_ATTRIBUTE tmpl[] = {
-        { CKA_TOKEN, &onToken, sizeof(onToken) }
-    };
+    CK_RV    rv;
+    CK_BBOOL onToken = CK_TRUE;
 
-    rv = session->func->C_GetAttributeValue(session->handle, handle, tmpl, 1);
-    PKCS11_RV("C_GetAttributeValue", rv);
-    if (rv == CKR_OK && tmpl[0].ulValueLen == sizeof(onToken) &&
+    if (Pkcs11KeyOnToken(session, handle, &onToken) == 0 &&
             onToken == CK_FALSE) {
         rv = session->func->C_DestroyObject(session->handle, handle);
         PKCS11_RV("C_DestroyObject", rv);
     }
+    (void)rv;
 }
 #endif
 
@@ -6886,7 +6908,8 @@ exit:
  * @param  [out]  sessKey   Handle of session object.
  * @param  [out]  tokenKey  Handle of new token object.
  * @return  BAD_FUNC_ARG when the key has neither id nor label.
- * @return  BAD_STATE_E when the token already holds a key with the id.
+ * @return  BAD_STATE_E when the token already holds a key with the id, or
+ *          devCtx is a token object.
  * @return  WC_HW_E when no session object is found or a PKCS#11 call fails.
  * @return  0 on success.
  */
@@ -6897,11 +6920,14 @@ static int Pkcs11PersistPrivKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
     int              ret;
     CK_RV            rv;
     CK_ULONG         count = 0;
-
+    CK_BBOOL         onToken = CK_FALSE;
 
     ret = Pkcs11CheckNewTokenKey(session, keyType, id, idLen, label, labelLen);
     if (ret == 0 && devCtx != NULL) {
         *sessKey = (CK_OBJECT_HANDLE)(wc_ptr_t)devCtx;
+        ret = Pkcs11KeyOnToken(session, *sessKey, &onToken);
+        if (ret == 0 && onToken != CK_FALSE)
+            ret = BAD_STATE_E;
     }
     else if (ret == 0) {
         ret = Pkcs11FindKeyObject(session, &privKeyClass, keyType, CK_FALSE,
@@ -6929,7 +6955,8 @@ static int Pkcs11PersistPrivKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
  * @param  [in]  key    Key with an id or label.
  * @return  BAD_FUNC_ARG when token or key is NULL, or the key has neither id
  *          nor label.
- * @return  BAD_STATE_E when the token already holds a key with the id.
+ * @return  BAD_STATE_E when the token already holds a key with the id, or the
+ *          key already refers to a token object.
  * @return  NOT_COMPILED_IN when the key type is not supported.
  * @return  WC_HW_E when a PKCS#11 library call fails.
  * @return  0 on success.
