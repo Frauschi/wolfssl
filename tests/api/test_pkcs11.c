@@ -300,6 +300,7 @@ static CK_ULONG      test_pkcs11_find_next;
 static int           test_pkcs11_destroy_calls = 0;
 static int           test_pkcs11_fail_pub_create = 0;
 static int           test_pkcs11_no_ecdh = 0;
+static int           test_pkcs11_ecdsa_verify_only = 0;
 static int           test_pkcs11_fail_modulus = 0;
 static int           test_pkcs11_session_no_point = 0;
 static byte          test_pkcs11_ec_point[2 + 65];
@@ -575,6 +576,10 @@ static CK_RV test_pkcs11_store_mech_info(CK_SLOT_ID slotId,
 
     XMEMSET(info, 0, sizeof(*info));
     info->flags = CKF_SIGN | CKF_VERIFY | CKF_DECRYPT;
+    if (type == CKM_ECDH1_DERIVE)
+        info->flags = CKF_DERIVE;
+    else if (type == CKM_ECDSA && test_pkcs11_ecdsa_verify_only)
+        info->flags = CKF_VERIFY;
     return CKR_OK;
 }
 
@@ -644,6 +649,7 @@ static void test_pkcs11_store_setup(Pkcs11Token* token, CK_FUNCTION_LIST* func)
     token->handle = 1;
     token->version = WC_PCKS11VERSION_2_40;
     test_pkcs11_no_ecdh = 0;
+    test_pkcs11_ecdsa_verify_only = 0;
     test_pkcs11_reset();
 }
 
@@ -1099,6 +1105,22 @@ int test_wc_Pkcs11_EcKeyUsage(void)
     test_pkcs11_no_ecdh = 1;
     ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_NONE, CK_TRUE,
         CK_FALSE, CK_FALSE), TEST_SUCCESS);
+
+    /* A usage needs a mechanism that can do it. */
+    test_pkcs11_reset();
+    soft.flags = WC_ECC_FLAG_DERIVE;
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_EC, 0, &soft),
+        WC_NO_ERR_TRACE(NOT_COMPILED_IN));
+    test_pkcs11_no_ecdh = 0;
+    test_pkcs11_ecdsa_verify_only = 1;
+    ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_NONE, CK_FALSE,
+        CK_TRUE, CK_FALSE), TEST_SUCCESS);
+    soft.flags = WC_ECC_FLAG_DEC_SIGN;
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_EC, 0, &soft),
+        WC_NO_ERR_TRACE(NOT_COMPILED_IN));
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    test_pkcs11_ecdsa_verify_only = 0;
+    soft.flags = 0;
 
     /* An import makes one private object, plus the public one for signing. */
     test_pkcs11_no_ecdh = 0;

@@ -2201,29 +2201,36 @@ static int Pkcs11MechAvail(Pkcs11Session* session, CK_MECHANISM_TYPE mech,
  * @param  [in]   session  Session object.
  * @param  [in]   key      ECC key.
  * @param  [out]  usage    PKCS11_ECC_SIGN and/or PKCS11_ECC_DERIVE.
- * @return  NOT_COMPILED_IN when no flag is set and the token has neither
- *          mechanism.
+ * @return  NOT_COMPILED_IN when the token cannot sign or derive with the key
+ *          as its flags ask, or does neither when no flag is set.
  * @return  0 on success.
  */
 static int Pkcs11EccKeyUsage(Pkcs11Session* session, ecc_key* key, int* usage)
 {
-    int ret = 0;
+    int               ret = 0;
+    int               want = 0;
+    CK_MECHANISM_INFO mechInfo;
+
+    if ((key->flags & WC_ECC_FLAG_DEC_SIGN) != 0)
+        want |= PKCS11_ECC_SIGN;
+    if ((key->flags & WC_ECC_FLAG_DERIVE) != 0)
+        want |= PKCS11_ECC_DERIVE;
 
     *usage = 0;
-    if ((key->flags & WC_ECC_FLAG_DEC_SIGN) != 0)
+    if ((want == 0 || (want & PKCS11_ECC_SIGN) != 0) &&
+            Pkcs11MechAvail(session, CKM_ECDSA, &mechInfo) == 0 &&
+            (mechInfo.flags & CKF_SIGN) != 0) {
         *usage |= PKCS11_ECC_SIGN;
-    if ((key->flags & WC_ECC_FLAG_DERIVE) != 0)
-        *usage |= PKCS11_ECC_DERIVE;
-    if (*usage == 0) {
-        if (Pkcs11MechAvail(session, CKM_ECDSA, NULL) == 0)
-            *usage |= PKCS11_ECC_SIGN;
-    #ifndef NO_PKCS11_ECDH
-        if (Pkcs11MechAvail(session, CKM_ECDH1_DERIVE, NULL) == 0)
-            *usage |= PKCS11_ECC_DERIVE;
-    #endif
-        if (*usage == 0)
-            ret = NOT_COMPILED_IN;
     }
+#ifndef NO_PKCS11_ECDH
+    if ((want == 0 || (want & PKCS11_ECC_DERIVE) != 0) &&
+            Pkcs11MechAvail(session, CKM_ECDH1_DERIVE, &mechInfo) == 0 &&
+            (mechInfo.flags & CKF_DERIVE) != 0) {
+        *usage |= PKCS11_ECC_DERIVE;
+    }
+#endif
+    if (*usage == 0 || (want != 0 && *usage != want))
+        ret = NOT_COMPILED_IN;
 
     return ret;
 }
