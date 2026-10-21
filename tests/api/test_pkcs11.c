@@ -310,6 +310,9 @@ static int           test_pkcs11_no_ecdh = 0;
 static int           test_pkcs11_ecdsa_verify_only = 0;
 static int           test_pkcs11_no_hmac_type = 0;
 static CK_OBJECT_HANDLE test_pkcs11_sign_key = 0;
+static int           test_pkcs11_fail_copy = 0;
+static int           test_pkcs11_fail_destroy = 0;
+static int           test_pkcs11_fail_session_info = 0;
 static int           test_pkcs11_fail_modulus = 0;
 static int           test_pkcs11_session_no_point = 0;
 static byte          test_pkcs11_ec_point[2 + 65];
@@ -460,7 +463,7 @@ static CK_RV test_pkcs11_store_destroy(CK_SESSION_HANDLE session,
     (void)session;
 
     test_pkcs11_destroy_calls++;
-    if (obj == NULL)
+    if (obj == NULL || test_pkcs11_fail_destroy)
         return TEST_CKR_GENERAL_ERROR;
     obj->used = 0;
     return CKR_OK;
@@ -567,7 +570,7 @@ static CK_RV test_pkcs11_store_copy(CK_SESSION_HANDLE session,
     TestPkcs11Obj* obj = test_pkcs11_obj(object);
     CK_RV rv;
 
-    if (obj == NULL)
+    if (obj == NULL || test_pkcs11_fail_copy)
         return TEST_CKR_GENERAL_ERROR;
     rv = test_pkcs11_store_create(session, NULL, 0, newObject);
     if (rv == CKR_OK) {
@@ -585,12 +588,14 @@ static CK_RV test_pkcs11_store_mech_info(CK_SLOT_ID slotId,
     if (info == NULL || (type != CKM_ECDSA && type != CKM_RSA_X_509 &&
             type != CKM_EC_KEY_PAIR_GEN && type != CKM_ECDH1_DERIVE &&
             type != CKM_RSA_PKCS_KEY_PAIR_GEN && type != CKM_AES_GCM &&
-            type != CKM_SHA256_HMAC) ||
+            type != CKM_AES_CBC && type != CKM_SHA256_HMAC &&
+            type != CKM_ML_DSA && type != CKM_ML_KEM) ||
             (type == CKM_ECDH1_DERIVE && test_pkcs11_no_ecdh))
         return CKR_MECHANISM_INVALID;
 
     XMEMSET(info, 0, sizeof(*info));
     info->flags = CKF_SIGN | CKF_VERIFY | CKF_DECRYPT;
+    info->ulMaxKeySize = 0x10000;
     if (type == CKM_ECDH1_DERIVE)
         info->flags = CKF_DERIVE;
     else if (type == CKM_ECDSA && test_pkcs11_ecdsa_verify_only)
@@ -603,6 +608,8 @@ static CK_RV test_pkcs11_store_session_info(CK_SESSION_HANDLE session,
 {
     (void)session;
 
+    if (test_pkcs11_fail_session_info)
+        return TEST_CKR_GENERAL_ERROR;
     XMEMSET(info, 0, sizeof(*info));
     info->state = test_pkcs11_session_state;
     return CKR_OK;
@@ -716,6 +723,9 @@ static void test_pkcs11_store_setup(Pkcs11Token* token, CK_FUNCTION_LIST* func)
     test_pkcs11_session_state = CKS_RW_USER_FUNCTIONS;
     test_pkcs11_token_flags = CKF_LOGIN_REQUIRED;
     test_pkcs11_no_hmac_type = 0;
+    test_pkcs11_fail_copy = 0;
+    test_pkcs11_fail_destroy = 0;
+    test_pkcs11_fail_session_info = 0;
     test_pkcs11_reset();
 }
 
@@ -1579,6 +1589,184 @@ int test_wc_Pkcs11_SecretKeyPersist(void)
     wc_HmacFree(&hmac);
 #endif
 #endif
+    return EXPECT_RESULT();
+}
+
+int test_wc_Pkcs11_PqcPersistDelete(void)
+{
+    EXPECT_DECLS;
+#if (defined(WOLFSSL_HAVE_MLDSA) && !defined(NO_PKCS11_MLDSA) && \
+     !defined(WOLFSSL_MLDSA_NO_MAKE_KEY)) || \
+    (defined(WOLFSSL_HAVE_MLKEM) && !defined(NO_PKCS11_MLKEM) && \
+     !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) && !defined(WOLFSSL_NO_ML_KEM_768))
+    static const unsigned char id[] = { 0x91 };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    WC_RNG rng;
+#if defined(WOLFSSL_HAVE_MLDSA) && !defined(NO_PKCS11_MLDSA) && \
+    !defined(WOLFSSL_MLDSA_NO_MAKE_KEY)
+    wc_MlDsaKey dsa;
+#endif
+#if defined(WOLFSSL_HAVE_MLKEM) && !defined(NO_PKCS11_MLKEM) && \
+    !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) && !defined(WOLFSSL_NO_ML_KEM_768)
+    MlKemKey kem;
+#endif
+
+    test_pkcs11_store_setup(&token, &func);
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+
+#if defined(WOLFSSL_HAVE_MLDSA) && !defined(NO_PKCS11_MLDSA) && \
+    !defined(WOLFSSL_MLDSA_NO_MAKE_KEY)
+    ExpectIntEQ(wc_MlDsaKey_InitId(&dsa, id, (int)sizeof(id), NULL,
+        INVALID_DEVID), 0);
+    ExpectIntEQ(wc_MlDsaKey_SetParams(&dsa, WC_ML_DSA_44), 0);
+    ExpectIntEQ(wc_MlDsaKey_MakeKey(&dsa, &rng), 0);
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_MLDSA, 0, &dsa), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 2);
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_MLDSA, &dsa), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+    ExpectIntEQ(test_pkcs11_token_keys_protected(), 1);
+    ExpectPtrEq(dsa.devCtx,
+        (void*)(wc_ptr_t)test_pkcs11_find_obj(CKO_PRIVATE_KEY, CK_TRUE));
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_MLDSA, &dsa), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+    ExpectNull(dsa.devCtx);
+    wc_MlDsaKey_Free(&dsa);
+#endif
+
+#if defined(WOLFSSL_HAVE_MLKEM) && !defined(NO_PKCS11_MLKEM) && \
+    !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) && !defined(WOLFSSL_NO_ML_KEM_768)
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_MlKemKey_Init_Id(&kem, WC_ML_KEM_768, (unsigned char*)id,
+        (int)sizeof(id), NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_MlKemKey_MakeKey(&kem, &rng), 0);
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_MLKEM, 0, &kem), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 2);
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_MLKEM, &kem), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+    ExpectIntEQ(test_pkcs11_token_keys_protected(), 1);
+    ExpectNotNull(test_pkcs11_obj(test_pkcs11_find_obj(CKO_PUBLIC_KEY,
+        CK_TRUE)));
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_MLKEM, &kem), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+    ExpectNull(kem.devCtx);
+    wc_MlKemKey_Free(&kem);
+#endif
+
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+#endif
+    return EXPECT_RESULT();
+}
+
+int test_wc_Pkcs11_PersistPaths(void)
+{
+    static const byte id[] = { 0xa1 };
+    static const byte secret[16] = { 0x02 };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    CK_OBJECT_HANDLE sessObj = 0;
+    ecc_key key;
+    WC_RNG rng;
+#if !defined(NO_AES) && defined(HAVE_AES_CBC) && !defined(NO_PKCS11_AES) && \
+    !defined(NO_PKCS11_AESCBC)
+    Aes aes;
+#endif
+#if !defined(NO_HMAC) && !defined(NO_SHA256) && !defined(NO_PKCS11_HMAC)
+    Hmac hmac;
+#endif
+#ifdef TEST_PKCS11_RSA_KEYGEN
+    RsaKey rsa;
+#endif
+    EXPECT_DECLS;
+
+    test_pkcs11_store_setup(&token, &func);
+    XMEMSET(&key, 0, sizeof(key));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(test_pkcs11_make_ecc(&key, &rng, id, (int)sizeof(id)), 0);
+
+    /* A failed copy leaves the session key and nothing on the token. */
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_EC, 0, &key), 0);
+    sessObj = test_pkcs11_find_obj(CKO_PRIVATE_KEY, CK_FALSE);
+    test_pkcs11_fail_copy = 1;
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_EC, &key),
+        WC_NO_ERR_TRACE(WC_HW_E));
+    test_pkcs11_fail_copy = 0;
+    ExpectNotNull(test_pkcs11_obj(sessObj));
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+
+    /* Delete reports a session state or destroy it cannot complete. */
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &key, 1),
+        0);
+    test_pkcs11_fail_session_info = 1;
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_EC, &key),
+        WC_NO_ERR_TRACE(WC_HW_E));
+    test_pkcs11_fail_session_info = 0;
+    test_pkcs11_fail_destroy = 1;
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_EC, &key),
+        WC_NO_ERR_TRACE(WC_HW_E));
+    test_pkcs11_fail_destroy = 0;
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+
+#ifdef TEST_PKCS11_RSA_KEYGEN
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_InitRsaKey_Id(&rsa, (unsigned char*)id, (int)sizeof(id),
+        NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_MakeRsaKey(&rsa, 2048, WC_RSA_EXPONENT, &rng), 0);
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_RSA, 0, &rsa, 1),
+        0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    ExpectIntEQ(test_pkcs11_token_keys_protected(), 1);
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_RSA, 0, &rsa, 1),
+        WC_NO_ERR_TRACE(BAD_STATE_E));
+    ExpectIntEQ(wc_FreeRsaKey(&rsa), 0);
+#endif
+
+#if !defined(NO_AES) && defined(HAVE_AES_CBC) && !defined(NO_PKCS11_AES) && \
+    !defined(NO_PKCS11_AESCBC)
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_AesInit_Id(&aes, (unsigned char*)id, (int)sizeof(id), NULL,
+        INVALID_DEVID), 0);
+    if (EXPECT_SUCCESS()) {
+        aes.keylen = sizeof(secret);
+        XMEMCPY(aes.devKey, secret, sizeof(secret));
+    }
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_AES_CBC, 0, &aes,
+        1), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    ExpectIntEQ(test_pkcs11_token_keys_protected(), 1);
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_AES_CBC, &aes), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+    wc_AesFree(&aes);
+#endif
+
+#if !defined(NO_HMAC) && !defined(NO_SHA256) && !defined(NO_PKCS11_HMAC)
+    /* An HMAC key stored under its own key type. */
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_HmacInit_Id(&hmac, (unsigned char*)id, (int)sizeof(id),
+        NULL, INVALID_DEVID), 0);
+    if (EXPECT_SUCCESS()) {
+        hmac.macType = WC_SHA256;
+        hmac.keyRaw = secret;
+        hmac.keyLen = sizeof(secret);
+    }
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_HMAC, 0, &hmac), 0);
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_HMAC, &hmac), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    ExpectIntEQ(test_pkcs11_objs[0].keyType == CKK_SHA256_HMAC ||
+        test_pkcs11_objs[1].keyType == CKK_SHA256_HMAC, 1);
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_HMAC, &hmac), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+    wc_HmacFree(&hmac);
+#endif
+
+    wc_ecc_free(&key);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+    (void)secret;
+
     return EXPECT_RESULT();
 }
 

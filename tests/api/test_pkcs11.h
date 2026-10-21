@@ -45,6 +45,8 @@ int test_wc_Pkcs11_FreeNoObject(void);
 int test_wc_Pkcs11_KeyGenSessionClosed(void);
 int test_wc_Pkcs11_SecretKeyPersist(void);
 int test_wc_Pkcs11_RsaPersistDelete(void);
+int test_wc_Pkcs11_PqcPersistDelete(void);
+int test_wc_Pkcs11_PersistPaths(void);
 
 #define TEST_PKCS11_DECLS                                                   \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_EcdsaSigDecode),               \
@@ -63,7 +65,9 @@ int test_wc_Pkcs11_RsaPersistDelete(void);
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_FreeNoObject),                 \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_KeyGenSessionClosed),          \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_SecretKeyPersist),             \
-    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_RsaPersistDelete)
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_RsaPersistDelete),             \
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_PqcPersistDelete),             \
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_PersistPaths)
 
 #else
 
