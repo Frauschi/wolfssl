@@ -7417,6 +7417,8 @@ int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info, void* ctx)
                 session.version = token->version;
                 session.handle  =
                     (CK_SESSION_HANDLE)(wc_ptr_t)hmac->devCtx;
+                session.tokenObjects = 0;
+                session.loggedIn = 0;
                 ret = Pkcs11Hmac(&session, info);
                 if (ret != 0 ||
                         hmac->innerHashKeyed
