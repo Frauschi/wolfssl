@@ -135,8 +135,8 @@ int wc_Pkcs11StoreKey_ex(Pkcs11Token* token, int type, int clear,
     this call.
 
     \return 0 on success.
-    \return BAD_FUNC_ARG when token or key is NULL, or the key has neither an
-    id nor a label.
+    \return BAD_FUNC_ARG when token or key is NULL, the key has neither an
+    id nor a label, or an Hmac has no hash type.
     \return BAD_STATE_E when the token already holds a key with the same id
     or label, or the key already refers to a token object.
     \return NOT_COMPILED_IN when the key type is not supported.
@@ -147,7 +147,7 @@ int wc_Pkcs11StoreKey_ex(Pkcs11Token* token, int type, int clear,
     PKCS11_KEY_TYPE_MLKEM, PKCS11_KEY_TYPE_AES_GCM, PKCS11_KEY_TYPE_AES_CBC
     or PKCS11_KEY_TYPE_HMAC.
     \param key RsaKey, ecc_key, wc_MlDsaKey, MlKemKey, Aes or Hmac with an id
-    or label.
+    or label. An Hmac needs its hash type (macType), as wc_HmacSetKey sets.
 
     _Example_
     \code
@@ -173,8 +173,8 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key);
     nothing to remove is not an error.
 
     \return 0 on success.
-    \return BAD_FUNC_ARG when token or key is NULL, or the key has neither an
-    id nor a label.
+    \return BAD_FUNC_ARG when token or key is NULL, the key has neither an
+    id nor a label, or an Hmac has no hash type.
     \return BAD_STATE_E when the user is not logged in.
     \return NOT_COMPILED_IN when the key type is not supported.
     \return WC_HW_E when a PKCS#11 call fails.
@@ -184,7 +184,7 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key);
     PKCS11_KEY_TYPE_MLKEM, PKCS11_KEY_TYPE_AES_GCM, PKCS11_KEY_TYPE_AES_CBC
     or PKCS11_KEY_TYPE_HMAC.
     \param key RsaKey, ecc_key, wc_MlDsaKey, MlKemKey, Aes or Hmac with an id
-    or label.
+    or label. An Hmac needs its hash type (macType), as wc_HmacSetKey sets.
 
     \sa wc_Pkcs11PersistKey
 */

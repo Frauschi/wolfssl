@@ -1748,6 +1748,15 @@ int test_wc_Pkcs11_PersistPaths(void)
     ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_HMAC, &hmac), 0);
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
     wc_HmacFree(&hmac);
+
+    /* A key named only by id has no hash type to find it by. */
+    ExpectIntEQ(wc_HmacInit_Id(&hmac, (unsigned char*)id, (int)sizeof(id),
+        NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_HMAC, &hmac),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_HMAC, &hmac),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    wc_HmacFree(&hmac);
 #endif
 
     wc_ecc_free(&key);

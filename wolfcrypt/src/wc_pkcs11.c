@@ -7020,8 +7020,8 @@ static int Pkcs11DestroyKeyObjects(Pkcs11Session* session,
  * @param  [in]  type   PKCS11_KEY_TYPE_RSA, _EC, _MLDSA, _MLKEM, _AES_GCM,
  *                      _AES_CBC or _HMAC.
  * @param  [in]  key    Key with an id or label.
- * @return  BAD_FUNC_ARG when token or key is NULL, or the key has neither id
- *          nor label.
+ * @return  BAD_FUNC_ARG when token or key is NULL, the key has neither id
+ *          nor label, or an HMAC key has no hash type.
  * @return  BAD_STATE_E when the token already holds a key with the id, or the
  *          key already refers to a token object.
  * @return  NOT_COMPILED_IN when the key type is not supported.
@@ -7064,7 +7064,10 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
                 CK_KEY_TYPE otherType = CKK_GENERIC_SECRET;
                 CK_ULONG    count = 0;
 
-                ret = Pkcs11HmacTypes(hmac->macType, &mechType, &keyType);
+                if (hmac->macType == WC_HASH_TYPE_NONE)
+                    ret = BAD_FUNC_ARG;
+                else
+                    ret = Pkcs11HmacTypes(hmac->macType, &mechType, &keyType);
                 if (ret == 0) {
                     ret = Pkcs11FindKeyObject(&session, &secretKeyClass,
                         (CK_KEY_TYPE)keyType, CK_FALSE, (byte*)hmac->id,
@@ -7267,8 +7270,8 @@ static int Pkcs11DeleteTokenKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
  * @param  [in]  type   PKCS11_KEY_TYPE_RSA, _EC, _MLDSA, _MLKEM, _AES_GCM,
  *                      _AES_CBC or _HMAC.
  * @param  [in]  key    Key with an id or label.
- * @return  BAD_FUNC_ARG when token or key is NULL, or the key has neither id
- *          nor label.
+ * @return  BAD_FUNC_ARG when token or key is NULL, the key has neither id
+ *          nor label, or an HMAC key has no hash type.
  * @return  BAD_STATE_E when the user is not logged in.
  * @return  NOT_COMPILED_IN when the key type is not supported.
  * @return  WC_HW_E when a PKCS#11 library call fails.
@@ -7302,7 +7305,10 @@ int wc_Pkcs11DeleteKey(Pkcs11Token* token, int type, void* key)
                 int   mechType;
                 int   keyType;
 
-                ret = Pkcs11HmacTypes(hmac->macType, &mechType, &keyType);
+                if (hmac->macType == WC_HASH_TYPE_NONE)
+                    ret = BAD_FUNC_ARG;
+                else
+                    ret = Pkcs11HmacTypes(hmac->macType, &mechType, &keyType);
                 if (ret == 0) {
                     ret = Pkcs11DeleteTokenKey(&session, (CK_KEY_TYPE)keyType,
                                                (byte*)hmac->id, hmac->idLen,
