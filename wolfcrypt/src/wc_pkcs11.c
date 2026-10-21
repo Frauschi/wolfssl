@@ -2401,6 +2401,11 @@ int wc_Pkcs11StoreKey_ex(Pkcs11Token* token, int type, int clear, void* key,
                         (byte*)hmac->id, hmac->idLen, hmac->label,
                         hmac->labelLen);
                 }
+                if (ret == 0 && persistent) {
+                    ret = Pkcs11CheckNewTokenKey(&session, CKK_GENERIC_SECRET,
+                        (byte*)hmac->id, hmac->idLen, hmac->label,
+                        hmac->labelLen);
+                }
                 if (ret == 0) {
                     ret = Pkcs11CreateSecretKey(&privKey, &session, keyType,
                                                 (unsigned char*)hmac->keyRaw,
