@@ -1004,6 +1004,28 @@ static int test_pkcs11_ec_usage(Pkcs11Token* token, WC_RNG* rng, int flags,
     return EXPECT_RESULT();
 }
 
+static int test_pkcs11_store_private_only(Pkcs11Token* token, ecc_key* src)
+{
+    static unsigned char id[] = { 0x13 };
+    byte priv[MAX_ECC_BYTES];
+    word32 privSz = sizeof(priv);
+    ecc_key key;
+    int ret;
+
+    ret = wc_ecc_export_private_only(src, priv, &privSz);
+    if (ret == 0)
+        ret = wc_ecc_init_id(&key, id, (int)sizeof(id), NULL, INVALID_DEVID);
+    if (ret == 0) {
+        ret = wc_ecc_import_private_key_ex(priv, privSz, NULL, 0, &key,
+            ECC_SECP256R1);
+        if (ret == 0)
+            ret = wc_Pkcs11StoreKey(token, PKCS11_KEY_TYPE_EC, 0, &key);
+        wc_ecc_free(&key);
+    }
+    wc_ForceZero(priv, sizeof(priv));
+    return ret;
+}
+
 int test_wc_Pkcs11_EcKeyUsage(void)
 {
     static const byte id[] = { 0x11 };
@@ -1059,6 +1081,12 @@ int test_wc_Pkcs11_EcKeyUsage(void)
         ExpectIntEQ(priv->sign, CK_FALSE);
         ExpectIntEQ(priv->derive, CK_TRUE);
     }
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 1);
+
+    /* A key with only its private half gets no public object. */
+    test_pkcs11_reset();
+    soft.flags = 0;
+    ExpectIntEQ(test_pkcs11_store_private_only(&token, &soft), 0);
     ExpectIntEQ(test_pkcs11_count(CK_FALSE), 1);
 
     wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);

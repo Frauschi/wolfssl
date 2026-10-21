@@ -2397,7 +2397,8 @@ int wc_Pkcs11StoreKey_ex(Pkcs11Token* token, int type, int clear, void* key,
                     ret = Pkcs11CreateEccPrivateKey(&privKey, &session, eccKey,
                                                     usage);
                 }
-                if (ret == 0 && (usage & PKCS11_ECC_SIGN) != 0) {
+                if (ret == 0 && (usage & PKCS11_ECC_SIGN) != 0 &&
+                        !mp_iszero(eccKey->pubkey.x)) {
                     CK_OBJECT_HANDLE pubKey = NULL_PTR;
                     /* Store public key for validation with cert. */
                     ret = Pkcs11CreateEccPublicKey(&pubKey, &session, eccKey,
