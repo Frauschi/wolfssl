@@ -75,8 +75,10 @@
 #endif
 
 
-#if (defined(HAVE_ECC) && !defined(NO_PKCS11_ECDH)) || \
-    defined(WOLFSSL_HAVE_MLKEM)
+#if !defined(NO_RSA) || defined(HAVE_ECC) || (!defined(NO_AES) && \
+           (defined(HAVE_AESGCM) || defined(HAVE_AES_CBC))) || \
+           !defined(NO_HMAC) || defined(WOLFSSL_HAVE_MLDSA) || \
+           defined(WOLFSSL_HAVE_MLKEM)
 /* Pointer to false required for templates. */
 static CK_BBOOL ckFalse = CK_FALSE;
 #endif
@@ -86,6 +88,20 @@ static CK_BBOOL ckFalse = CK_FALSE;
            defined(WOLFSSL_HAVE_MLKEM)
 /* Pointer to true required for templates. */
 static CK_BBOOL ckTrue  = CK_TRUE;
+#endif
+
+#if !defined(NO_RSA) || defined(HAVE_ECC) || (!defined(NO_AES) && \
+           (defined(HAVE_AESGCM) || defined(HAVE_AES_CBC))) || \
+           !defined(NO_HMAC) || defined(WOLFSSL_HAVE_MLDSA) || \
+           defined(WOLFSSL_HAVE_MLKEM)
+/* Attributes of a private or secret key created as a token object. */
+static CK_ATTRIBUTE pkcs11TokenKeyAttrs[] = {
+    { CKA_TOKEN,       &ckTrue,  sizeof(ckTrue)  },
+    { CKA_PRIVATE,     &ckTrue,  sizeof(ckTrue)  },
+    { CKA_SENSITIVE,   &ckTrue,  sizeof(ckTrue)  },
+    { CKA_EXTRACTABLE, &ckFalse, sizeof(ckFalse) }
+};
+#define PKCS11_TOKEN_KEY_ATTRS 4
 #endif
 
 #ifndef NO_RSA
@@ -1343,6 +1359,9 @@ static int Pkcs11CreateSecretKey(CK_OBJECT_HANDLE* key, Pkcs11Session* session,
         { CKA_VALUE,    NULL,            0                      },
         { 0,            NULL,            0                      },
         { 0,            NULL,            0                      },
+        { 0,            NULL,            0                      },
+        { 0,            NULL,            0                      },
+        { 0,            NULL,            0                      },
         { 0,            NULL,            0                      }
     };
     /* Empty entries for optional label/ID/token. */
@@ -1354,10 +1373,13 @@ static int Pkcs11CreateSecretKey(CK_OBJECT_HANDLE* key, Pkcs11Session* session,
         { CKA_VALUE,    NULL,            0                      },
         { 0,            NULL,            0                      },
         { 0,            NULL,            0                      },
+        { 0,            NULL,            0                      },
+        { 0,            NULL,            0                      },
+        { 0,            NULL,            0                      },
         { 0,            NULL,            0                      }
     };
     CK_ATTRIBUTE*    keyTemplate = NULL;
-    /* 5 mandatory entries + 3 optional. */
+    /* 5 mandatory entries + 6 optional. */
     int              keyTmplCnt = 5;
 
     WOLFSSL_MSG("PKCS#11: Create Secret Key");
@@ -1390,10 +1412,9 @@ static int Pkcs11CreateSecretKey(CK_OBJECT_HANDLE* key, Pkcs11Session* session,
             keyTmplCnt++;
         }
         if (session->tokenObjects) {
-            keyTemplate[keyTmplCnt].type       = CKA_TOKEN;
-            keyTemplate[keyTmplCnt].pValue     = &ckTrue;
-            keyTemplate[keyTmplCnt].ulValueLen = sizeof(ckTrue);
-            keyTmplCnt++;
+            XMEMCPY(&keyTemplate[keyTmplCnt], pkcs11TokenKeyAttrs,
+                sizeof(pkcs11TokenKeyAttrs));
+            keyTmplCnt += PKCS11_TOKEN_KEY_ATTRS;
         }
 
         PKCS11_DUMP_TEMPLATE("Secret Key", keyTemplate, keyTmplCnt);
@@ -1442,10 +1463,13 @@ static int Pkcs11CreateRsaPrivateKey(CK_OBJECT_HANDLE* privateKey,
         { CKA_PUBLIC_EXPONENT,  NULL,          0                    },
         { 0,                    NULL,          0                    },
         { 0,                    NULL,          0                    },
+        { 0,                    NULL,          0                    },
+        { 0,                    NULL,          0                    },
+        { 0,                    NULL,          0                    },
         { 0,                    NULL,          0                    }
     };
-    /* Mandatory entries + 3 optional. */
-    CK_ULONG        keyTmplCnt = sizeof(keyTemplate) / sizeof(*keyTemplate) - 3;
+    /* Mandatory entries + 6 optional. */
+    CK_ULONG        keyTmplCnt = sizeof(keyTemplate) / sizeof(*keyTemplate) - 6;
 
     /* Set the modulus and private key data. */
     keyTemplate[ 4].pValue     = rsaKey->n.raw.buf;
@@ -1478,10 +1502,9 @@ static int Pkcs11CreateRsaPrivateKey(CK_OBJECT_HANDLE* privateKey,
         keyTmplCnt++;
     }
     if (session->tokenObjects) {
-        keyTemplate[keyTmplCnt].type       = CKA_TOKEN;
-        keyTemplate[keyTmplCnt].pValue     = &ckTrue;
-        keyTemplate[keyTmplCnt].ulValueLen = sizeof(ckTrue);
-        keyTmplCnt++;
+        XMEMCPY(&keyTemplate[keyTmplCnt], pkcs11TokenKeyAttrs,
+            sizeof(pkcs11TokenKeyAttrs));
+        keyTmplCnt += PKCS11_TOKEN_KEY_ATTRS;
     }
 
     PKCS11_DUMP_TEMPLATE("RSA Private Key", keyTemplate, keyTmplCnt);
@@ -1658,10 +1681,13 @@ static int Pkcs11CreateEccPrivateKey(CK_OBJECT_HANDLE* privateKey,
         { 0,             NULL,          0                    },
         { 0,             NULL,          0                    },
         { 0,             NULL,          0                    },
+        { 0,             NULL,          0                    },
+        { 0,             NULL,          0                    },
+        { 0,             NULL,          0                    },
         { 0,             NULL,          0                    }
     };
-    /* Mandatory entries + 5 optional. */
-    CK_ULONG        keyTmplCnt = sizeof(keyTemplate) / sizeof(*keyTemplate) - 5;
+    /* Mandatory entries + 8 optional. */
+    CK_ULONG        keyTmplCnt = sizeof(keyTemplate) / sizeof(*keyTemplate) - 8;
 
     if ((usage & PKCS11_ECC_SIGN) != 0) {
         keyTemplate[keyTmplCnt].type       = CKA_SIGN;
@@ -1689,10 +1715,9 @@ static int Pkcs11CreateEccPrivateKey(CK_OBJECT_HANDLE* privateKey,
         keyTmplCnt++;
     }
     if (session->tokenObjects) {
-        keyTemplate[keyTmplCnt].type       = CKA_TOKEN;
-        keyTemplate[keyTmplCnt].pValue     = &ckTrue;
-        keyTemplate[keyTmplCnt].ulValueLen = sizeof(ckTrue);
-        keyTmplCnt++;
+        XMEMCPY(&keyTemplate[keyTmplCnt], pkcs11TokenKeyAttrs,
+            sizeof(pkcs11TokenKeyAttrs));
+        keyTmplCnt += PKCS11_TOKEN_KEY_ATTRS;
     }
 
     ret = Pkcs11EccSetParams(private_key, keyTemplate, 2);
@@ -1857,9 +1882,12 @@ static int Pkcs11CreateMlKemPrivateKey(CK_OBJECT_HANDLE* privateKey,
         { 0,                 NULL,          0                    },
         { 0,                 NULL,          0                    },
         { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
     };
     CK_ULONG                     keyTmplCnt =
-        sizeof(keyTemplate) / sizeof(*keyTemplate) - 3;
+        sizeof(keyTemplate) / sizeof(*keyTemplate) - 6;
 
     if (mechInfo == NULL || (key->flags & MLKEM_FLAG_PRIV_SET) == 0) {
         ret = BAD_FUNC_ARG;
@@ -1877,10 +1905,9 @@ static int Pkcs11CreateMlKemPrivateKey(CK_OBJECT_HANDLE* privateKey,
         keyTmplCnt++;
     }
     if (ret == 0 && session->tokenObjects) {
-        keyTemplate[keyTmplCnt].type       = CKA_TOKEN;
-        keyTemplate[keyTmplCnt].pValue     = &ckTrue;
-        keyTemplate[keyTmplCnt].ulValueLen = sizeof(ckTrue);
-        keyTmplCnt++;
+        XMEMCPY(&keyTemplate[keyTmplCnt], pkcs11TokenKeyAttrs,
+            sizeof(pkcs11TokenKeyAttrs));
+        keyTmplCnt += PKCS11_TOKEN_KEY_ATTRS;
     }
     if (ret == 0) {
         switch (key->type) {
@@ -2068,10 +2095,13 @@ static int Pkcs11CreateMldsaPrivateKey(CK_OBJECT_HANDLE* privateKey,
     { CKA_PARAMETER_SET, &param_set,    sizeof(param_set)    },
     { 0,                 NULL,          0                    },
     { 0,                 NULL,          0                    },
+    { 0,                 NULL,          0                    },
+    { 0,                 NULL,          0                    },
+    { 0,                 NULL,          0                    },
     { 0,                 NULL,          0                    }
     };
-    /* Mandatory entries + 3 optional. */
-    CK_ULONG keyTmplCnt = sizeof(keyTemplate) / sizeof(*keyTemplate) - 3;
+    /* Mandatory entries + 6 optional. */
+    CK_ULONG keyTmplCnt = sizeof(keyTemplate) / sizeof(*keyTemplate) - 6;
 
     if (key->labelLen > 0) {
         keyTemplate[keyTmplCnt].type       = CKA_LABEL;
@@ -2086,10 +2116,9 @@ static int Pkcs11CreateMldsaPrivateKey(CK_OBJECT_HANDLE* privateKey,
         keyTmplCnt++;
     }
     if (session->tokenObjects) {
-        keyTemplate[keyTmplCnt].type       = CKA_TOKEN;
-        keyTemplate[keyTmplCnt].pValue     = &ckTrue;
-        keyTemplate[keyTmplCnt].ulValueLen = sizeof(ckTrue);
-        keyTmplCnt++;
+        XMEMCPY(&keyTemplate[keyTmplCnt], pkcs11TokenKeyAttrs,
+            sizeof(pkcs11TokenKeyAttrs));
+        keyTmplCnt += PKCS11_TOKEN_KEY_ATTRS;
     }
 
     if ((key->level == WC_ML_DSA_44) &&
@@ -3492,9 +3521,12 @@ static int Pkcs11RsaKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
         { CKA_SIGN,     &ckTrue, sizeof(ckTrue) },
         { 0,            NULL,    0              },
         { 0,            NULL,    0              },
+        { 0,            NULL,    0              },
+        { 0,            NULL,    0              },
+        { 0,            NULL,    0              },
         { 0,            NULL,    0              }
     };
-    /* 2 mandatory entries + 3 optional. */
+    /* 2 mandatory entries + 6 optional. */
     int               privTmplCnt = 2;
     int               i;
 
@@ -3530,10 +3562,9 @@ static int Pkcs11RsaKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
             privTmplCnt++;
         }
         if (session->tokenObjects) {
-            privKeyTmpl[privTmplCnt].type       = CKA_TOKEN;
-            privKeyTmpl[privTmplCnt].pValue     = &ckTrue;
-            privKeyTmpl[privTmplCnt].ulValueLen = sizeof(ckTrue);
-            privTmplCnt++;
+            XMEMCPY(&privKeyTmpl[privTmplCnt], pkcs11TokenKeyAttrs,
+                sizeof(pkcs11TokenKeyAttrs));
+            privTmplCnt += PKCS11_TOKEN_KEY_ATTRS;
         }
 
         mech.mechanism      = CKM_RSA_PKCS_KEY_PAIR_GEN;
@@ -3831,6 +3862,9 @@ static int Pkcs11EcKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
         { 0,           NULL,    0              },
         { 0,           NULL,    0              },
         { 0,           NULL,    0              },
+        { 0,           NULL,    0              },
+        { 0,           NULL,    0              },
+        { 0,           NULL,    0              },
     };
     CK_ATTRIBUTE*     privKeyTmpl = privKeyAttrs;
     int               privTmplCnt = 0;
@@ -3879,10 +3913,9 @@ static int Pkcs11EcKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
             privTmplCnt++;
         }
         if (session->tokenObjects) {
-            privKeyTmpl[privTmplCnt].type       = CKA_TOKEN;
-            privKeyTmpl[privTmplCnt].pValue     = &ckTrue;
-            privKeyTmpl[privTmplCnt].ulValueLen = sizeof(ckTrue);
-            privTmplCnt++;
+            XMEMCPY(&privKeyTmpl[privTmplCnt], pkcs11TokenKeyAttrs,
+                sizeof(pkcs11TokenKeyAttrs));
+            privTmplCnt += PKCS11_TOKEN_KEY_ATTRS;
             if (key->labelLen != 0) {
                 pubKeyTmpl[pubTmplCnt].type       = CKA_LABEL;
                 pubKeyTmpl[pubTmplCnt].pValue     = key->label;
@@ -4870,10 +4903,13 @@ static int Pkcs11MlKemKeyGen(Pkcs11Session* session, MlKemKey* key)
         { CKA_KEY_TYPE,      &mlkemKeyType, sizeof(mlkemKeyType) },
         { 0,                 NULL,          0                    },
         { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
         { 0,                 NULL,          0                    }
     };
     CK_ULONG                     privTmplCnt =
-        sizeof(privKeyTmpl) / sizeof(*privKeyTmpl) - 3;
+        sizeof(privKeyTmpl) / sizeof(*privKeyTmpl) - 6;
 
     if (key->idLen == 0 && key->labelLen == 0)
         session->tokenObjects = 0;
@@ -4938,10 +4974,9 @@ static int Pkcs11MlKemKeyGen(Pkcs11Session* session, MlKemKey* key)
             pubTmplCnt++;
         }
         if (session->tokenObjects) {
-            privKeyTmpl[privTmplCnt].type       = CKA_TOKEN;
-            privKeyTmpl[privTmplCnt].pValue     = &ckTrue;
-            privKeyTmpl[privTmplCnt].ulValueLen = sizeof(ckTrue);
-            privTmplCnt++;
+            XMEMCPY(&privKeyTmpl[privTmplCnt], pkcs11TokenKeyAttrs,
+                sizeof(pkcs11TokenKeyAttrs));
+            privTmplCnt += PKCS11_TOKEN_KEY_ATTRS;
         }
 
         mech.mechanism      = CKM_ML_KEM_KEY_PAIR_GEN;
@@ -5454,10 +5489,13 @@ static int Pkcs11MldsaKeyGen(Pkcs11Session* session, wc_MlDsaKey* key)
         { CKA_KEY_TYPE,      &mldsaKeyType, sizeof(mldsaKeyType) },
         { 0,                 NULL,          0                    },
         { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
+        { 0,                 NULL,          0                    },
         { 0,                 NULL,          0                    }
     };
-    /* Mandatory entries + 3 optional. */
-    CK_ULONG        privTmplCnt = sizeof(privKeyTmpl)/sizeof(*privKeyTmpl) - 3;
+    /* Mandatory entries + 6 optional. */
+    CK_ULONG        privTmplCnt = sizeof(privKeyTmpl)/sizeof(*privKeyTmpl) - 6;
 
     if (key->idLen == 0 && key->labelLen == 0)
         session->tokenObjects = 0;
@@ -5512,10 +5550,9 @@ static int Pkcs11MldsaKeyGen(Pkcs11Session* session, wc_MlDsaKey* key)
             pubTmplCnt++;
         }
         if (session->tokenObjects) {
-            privKeyTmpl[privTmplCnt].type       = CKA_TOKEN;
-            privKeyTmpl[privTmplCnt].pValue     = &ckTrue;
-            privKeyTmpl[privTmplCnt].ulValueLen = sizeof(ckTrue);
-            privTmplCnt++;
+            XMEMCPY(&privKeyTmpl[privTmplCnt], pkcs11TokenKeyAttrs,
+                sizeof(pkcs11TokenKeyAttrs));
+            privTmplCnt += PKCS11_TOKEN_KEY_ATTRS;
             pubKeyTmpl[pubTmplCnt].type       = CKA_TOKEN;
             pubKeyTmpl[pubTmplCnt].pValue     = &ckTrue;
             pubKeyTmpl[pubTmplCnt].ulValueLen = sizeof(ckTrue);
@@ -6841,9 +6878,7 @@ static int Pkcs11PersistPrivKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
     int              ret;
     CK_RV            rv;
     CK_ULONG         count = 0;
-    CK_ATTRIBUTE     copyTmpl[] = {
-        { CKA_TOKEN, &ckTrue, sizeof(ckTrue) }
-    };
+
 
     ret = Pkcs11CheckNewTokenKey(session, keyType, id, idLen, label, labelLen);
     if (ret == 0 && devCtx != NULL) {
@@ -6856,8 +6891,8 @@ static int Pkcs11PersistPrivKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
             ret = WC_HW_E;
     }
     if (ret == 0) {
-        rv = session->func->C_CopyObject(session->handle, *sessKey, copyTmpl,
-                                         1, tokenKey);
+        rv = session->func->C_CopyObject(session->handle, *sessKey,
+                 pkcs11TokenKeyAttrs, PKCS11_TOKEN_KEY_ATTRS, tokenKey);
         PKCS11_RV("C_CopyObject", rv);
         if (rv != CKR_OK)
             ret = WC_HW_E;

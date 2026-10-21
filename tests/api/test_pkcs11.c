@@ -285,6 +285,9 @@ typedef struct TestPkcs11Obj {
     CK_BBOOL        sign;
     CK_BBOOL        derive;
     CK_BBOOL        decrypt;
+    CK_BBOOL        isPrivate;
+    CK_BBOOL        sensitive;
+    CK_BBOOL        extractable;
 } TestPkcs11Obj;
 
 static const byte test_pkcs11_modulus[256] = { 0xc0, 0x01 };
@@ -335,6 +338,26 @@ static int test_pkcs11_count(CK_BBOOL onToken)
     return cnt;
 }
 
+/* 1 when every token private key carries the protecting attributes and no
+ * public key does. */
+static int test_pkcs11_token_keys_protected(void)
+{
+    int i;
+    const TestPkcs11Obj* o;
+
+    for (i = 0; i < TEST_PKCS11_MAX_OBJS; i++) {
+        o = &test_pkcs11_objs[i];
+        if (!o->used || !o->onToken)
+            continue;
+        if (o->cls == CKO_PRIVATE_KEY && (!o->isPrivate || !o->sensitive ||
+                o->extractable))
+            return 0;
+        if (o->cls == CKO_PUBLIC_KEY && o->isPrivate)
+            return 0;
+    }
+    return 1;
+}
+
 /* Applies the template to obj and returns a TEST_PKCS11_FIND_* mask. */
 static CK_ULONG test_pkcs11_apply(TestPkcs11Obj* obj, CK_ATTRIBUTE_PTR tmpl,
     CK_ULONG cnt)
@@ -370,6 +393,15 @@ static CK_ULONG test_pkcs11_apply(TestPkcs11Obj* obj, CK_ATTRIBUTE_PTR tmpl,
         else if (tmpl[i].type == CKA_DECRYPT) {
             obj->decrypt = *(CK_BBOOL*)tmpl[i].pValue;
         }
+        else if (tmpl[i].type == CKA_PRIVATE) {
+            obj->isPrivate = *(CK_BBOOL*)tmpl[i].pValue;
+        }
+        else if (tmpl[i].type == CKA_SENSITIVE) {
+            obj->sensitive = *(CK_BBOOL*)tmpl[i].pValue;
+        }
+        else if (tmpl[i].type == CKA_EXTRACTABLE) {
+            obj->extractable = *(CK_BBOOL*)tmpl[i].pValue;
+        }
         else if (tmpl[i].type == CKA_LABEL &&
                  tmpl[i].ulValueLen <= TEST_PKCS11_MAX_ID_LEN) {
             XMEMCPY(obj->label, tmpl[i].pValue, tmpl[i].ulValueLen);
@@ -395,6 +427,7 @@ static CK_RV test_pkcs11_store_create(CK_SESSION_HANDLE session,
         return TEST_CKR_GENERAL_ERROR;
 
     XMEMSET(&test_pkcs11_objs[i], 0, sizeof(test_pkcs11_objs[i]));
+    test_pkcs11_objs[i].extractable = CK_TRUE;
     (void)test_pkcs11_apply(&test_pkcs11_objs[i], tmpl, cnt);
     if (test_pkcs11_fail_pub_create &&
             test_pkcs11_objs[i].cls == CKO_PUBLIC_KEY)
@@ -704,6 +737,7 @@ int test_wc_Pkcs11_StoreKeyPersistent(void)
         0);
     ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+    ExpectIntEQ(test_pkcs11_token_keys_protected(), 1);
     for (i = 0; i < TEST_PKCS11_MAX_OBJS; i++) {
         if (test_pkcs11_objs[i].used) {
             ExpectIntEQ(test_pkcs11_objs[i].idLen, sizeof(id));
@@ -780,6 +814,7 @@ int test_wc_Pkcs11_PersistKey(void)
     ExpectNotNull(test_pkcs11_find_obj(CKO_PUBLIC_KEY, CK_TRUE));
     ExpectPtrEq(key.devCtx, (void*)(wc_ptr_t)tokObj);
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+    ExpectIntEQ(test_pkcs11_token_keys_protected(), 1);
 
     ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_EC, &key),
         WC_NO_ERR_TRACE(BAD_STATE_E));
@@ -1359,6 +1394,7 @@ int test_wc_Pkcs11_KeyGenPersistent(void)
     ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
         WC_ECC_FLAG_DEC_SIGN), 0);
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+    ExpectIntEQ(test_pkcs11_token_keys_protected(), 1);
     ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
     ExpectNotNull(priv = test_pkcs11_obj((CK_OBJECT_HANDLE)(wc_ptr_t)
         key.devCtx));
@@ -1398,6 +1434,7 @@ int test_wc_Pkcs11_KeyGenPersistent(void)
         NULL, TEST_PKCS11_DEVID), 0);
     ExpectIntEQ(wc_MakeRsaKey(&rsa, 2048, WC_RSA_EXPONENT, &rng), 0);
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    ExpectIntEQ(test_pkcs11_token_keys_protected(), 1);
     ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
     ExpectIntEQ(wc_FreeRsaKey(&rsa), 0);
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
