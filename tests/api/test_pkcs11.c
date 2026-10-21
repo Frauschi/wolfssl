@@ -304,6 +304,7 @@ static int           test_pkcs11_ecdsa_verify_only = 0;
 static int           test_pkcs11_fail_modulus = 0;
 static int           test_pkcs11_session_no_point = 0;
 static byte          test_pkcs11_ec_point[2 + 65];
+static CK_STATE      test_pkcs11_session_state = CKS_RW_USER_FUNCTIONS;
 
 #define TEST_PKCS11_FIND_CLASS  0x01
 #define TEST_PKCS11_FIND_TYPE   0x02
@@ -583,6 +584,16 @@ static CK_RV test_pkcs11_store_mech_info(CK_SLOT_ID slotId,
     return CKR_OK;
 }
 
+static CK_RV test_pkcs11_store_session_info(CK_SESSION_HANDLE session,
+    CK_SESSION_INFO_PTR info)
+{
+    (void)session;
+
+    XMEMSET(info, 0, sizeof(*info));
+    info->state = test_pkcs11_session_state;
+    return CKR_OK;
+}
+
 static CK_RV test_pkcs11_store_decrypt_init(CK_SESSION_HANDLE session,
     CK_MECHANISM_PTR mechanism, CK_OBJECT_HANDLE key)
 {
@@ -644,12 +655,14 @@ static void test_pkcs11_store_setup(Pkcs11Token* token, CK_FUNCTION_LIST* func)
     func->C_GenerateKeyPair = test_pkcs11_store_keygen;
     func->C_DecryptInit = test_pkcs11_store_decrypt_init;
     func->C_Decrypt = test_pkcs11_store_decrypt;
+    func->C_GetSessionInfo = test_pkcs11_store_session_info;
     token->func = func;
     token->slotId = 1;
     token->handle = 1;
     token->version = WC_PCKS11VERSION_2_40;
     test_pkcs11_no_ecdh = 0;
     test_pkcs11_ecdsa_verify_only = 0;
+    test_pkcs11_session_state = CKS_RW_USER_FUNCTIONS;
     test_pkcs11_reset();
 }
 
@@ -919,6 +932,15 @@ int test_wc_Pkcs11_DeleteKey(void)
 
     ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_EC, &key), 0);
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+
+    /* Without a user login the private key is hidden from the search. */
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &key, 1),
+        0);
+    test_pkcs11_session_state = 2;
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_EC, &key),
+        WC_NO_ERR_TRACE(BAD_STATE_E));
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 3);
+    test_pkcs11_session_state = CKS_RW_USER_FUNCTIONS;
 
     wc_ecc_free(&key);
     wc_ecc_free(&noId);

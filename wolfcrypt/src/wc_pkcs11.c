@@ -7076,6 +7076,31 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
 #if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
     defined(WOLFSSL_HAVE_MLKEM)
 /**
+ * Check that the user is logged in, so the session sees private objects.
+ *
+ * @param  [in]  session  Session object.
+ * @return  BAD_STATE_E when the user is not logged in.
+ * @return  WC_HW_E when a PKCS#11 library call fails.
+ * @return  0 on success.
+ */
+static int Pkcs11CheckUserSession(Pkcs11Session* session)
+{
+    int             ret = 0;
+    CK_RV           rv;
+    CK_SESSION_INFO info;
+
+    rv = session->func->C_GetSessionInfo(session->handle, &info);
+    PKCS11_RV("C_GetSessionInfo", rv);
+    if (rv != CKR_OK)
+        ret = WC_HW_E;
+    else if (info.state != CKS_RO_USER_FUNCTIONS &&
+             info.state != CKS_RW_USER_FUNCTIONS)
+        ret = BAD_STATE_E;
+
+    return ret;
+}
+
+/**
  * Destroy all token objects of a key type with the key's id and label.
  *
  * @param  [in]  session   Session object.
@@ -7085,6 +7110,7 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
  * @param  [in]  label     Label of key.
  * @param  [in]  labelLen  Length of label.
  * @return  BAD_FUNC_ARG when the key has neither id nor label.
+ * @return  BAD_STATE_E when the user is not logged in.
  * @return  WC_HW_E when a PKCS#11 library call fails.
  * @return  0 on success.
  */
@@ -7098,6 +7124,8 @@ static int Pkcs11DeleteTokenKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
 
     if (idLen <= 0 && labelLen <= 0)
         ret = BAD_FUNC_ARG;
+    if (ret == 0)
+        ret = Pkcs11CheckUserSession(session);
     while (ret == 0 && count != 0) {
         ret = Pkcs11FindKeyObject(session, NULL, keyType, CK_TRUE, id, idLen,
                                   label, labelLen, &handle, &count);
@@ -7121,6 +7149,7 @@ static int Pkcs11DeleteTokenKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
  * @param  [in]  key    Key with an id or label.
  * @return  BAD_FUNC_ARG when token or key is NULL, or the key has neither id
  *          nor label.
+ * @return  BAD_STATE_E when the user is not logged in.
  * @return  NOT_COMPILED_IN when the key type is not supported.
  * @return  WC_HW_E when a PKCS#11 library call fails.
  * @return  0 on success.
