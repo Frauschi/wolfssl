@@ -1352,17 +1352,23 @@ int test_wc_Pkcs11_KeyGenPersistent(void)
     wc_ecc_free(&key);
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
 
-    /* The id is taken now, and a key without a name cannot be found later. */
+    /* The id is taken now. */
     ExpectIntEQ(wc_ecc_init_id(&key, (unsigned char*)id, (int)sizeof(id),
         NULL, TEST_PKCS11_DEVID), 0);
     ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
         WC_ECC_FLAG_DEC_SIGN), WC_NO_ERR_TRACE(BAD_STATE_E));
     wc_ecc_free(&key);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+
+    /* A key without a name, like a TLS ephemeral key, is a session key. */
+    test_pkcs11_session_no_point = 0;
     ExpectIntEQ(wc_ecc_init_ex(&key, NULL, TEST_PKCS11_DEVID), 0);
     ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &key, ECC_SECP256R1,
-        WC_ECC_FLAG_DEC_SIGN), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
-    wc_ecc_free(&key);
+        WC_ECC_FLAG_DEC_SIGN), 0);
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 1);
+    wc_ecc_free(&key);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
 
 #if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
     test_pkcs11_reset();

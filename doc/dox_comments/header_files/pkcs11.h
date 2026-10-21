@@ -58,16 +58,16 @@ void wc_Pkcs11Token_Close(Pkcs11Token* token);
 /*!
     \ingroup PKCS11
 
-    \brief Makes RSA, ECC and ML-DSA key generation through the PKCS#11 crypto
-    callback create token objects (CKA_TOKEN set) instead of session objects.
-    Use it for tokens that cannot make a session key persistent later with
-    wc_Pkcs11PersistKey, such as tokens that only report the public key of a
-    token object. ECC and ML-DSA keys also keep a token object for the public
-    key under the same id or label. A generated key must have an id or label
-    and fails with BAD_FUNC_ARG otherwise, and with BAD_STATE_E when the
-    token already holds a key of that type with the same id or label. Remove
-    an unwanted key with wc_Pkcs11DeleteKey. Key generation opens a
-    read/write session for this.
+    \brief Makes RSA, ECC, ML-DSA and ML-KEM key generation through the
+    PKCS#11 crypto callback create token objects (CKA_TOKEN set) instead of
+    session objects for keys with an id or label. Use it for tokens that
+    cannot make a session key persistent later with wc_Pkcs11PersistKey,
+    such as tokens that only report the public key of a token object. ECC
+    and ML-DSA keys also keep a token object for the public key under the
+    same id or label. Key generation fails with BAD_STATE_E when the token
+    already holds a key of that type with the same id or label. A key
+    without a name, such as a TLS ephemeral key, is still generated as a
+    session object. Remove an unwanted key with wc_Pkcs11DeleteKey.
 
     \return 0 on success.
     \return BAD_FUNC_ARG when token is NULL.
@@ -114,8 +114,9 @@ int wc_Pkcs11StoreKey_ex(Pkcs11Token* token, int type, int clear,
     \brief Makes a private key that lives in a session object persistent.
     The session object, from key generation or wc_Pkcs11StoreKey, is copied
     with C_CopyObject to a token object and then destroyed. For ECC and
-    ML-DSA keys a token object holding the public key is created as well,
-    and the key refers to the new private object through devCtx. Freeing the
+    ML-DSA keys a token object holding the public key is created as well.
+    ECC, ML-DSA and ML-KEM keys refer to the new private object through
+    devCtx. Freeing the
     key does not remove token objects. The token session must be read/write
     and stay open from key generation until this call.
 
@@ -128,9 +129,9 @@ int wc_Pkcs11StoreKey_ex(Pkcs11Token* token, int type, int clear,
     \return WC_HW_E when no session object is found or a PKCS#11 call fails.
 
     \param token Token holding the key.
-    \param type PKCS11_KEY_TYPE_RSA, PKCS11_KEY_TYPE_EC or
-    PKCS11_KEY_TYPE_MLDSA.
-    \param key RsaKey, ecc_key or wc_MlDsaKey with an id or label.
+    \param type PKCS11_KEY_TYPE_RSA, PKCS11_KEY_TYPE_EC, PKCS11_KEY_TYPE_MLDSA
+    or PKCS11_KEY_TYPE_MLKEM.
+    \param key RsaKey, ecc_key, wc_MlDsaKey or MlKemKey with an id or label.
 
     _Example_
     \code
@@ -149,9 +150,9 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key);
     \ingroup PKCS11
 
     \brief Removes a key from the token: every token object of the key type
-    with the key's label, or id when it has no label, is destroyed. For ECC
-    and ML-DSA keys a session object in devCtx is destroyed as well and
-    devCtx is cleared. Finding nothing to remove is not an error.
+    with the key's id and label is destroyed. For ECC, ML-DSA and ML-KEM
+    keys a session object in devCtx is destroyed as well and devCtx is
+    cleared. Finding nothing to remove is not an error.
 
     \return 0 on success.
     \return BAD_FUNC_ARG when token or key is NULL, or the key has neither an
@@ -160,9 +161,9 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key);
     \return WC_HW_E when a PKCS#11 call fails.
 
     \param token Token holding the key.
-    \param type PKCS11_KEY_TYPE_RSA, PKCS11_KEY_TYPE_EC or
-    PKCS11_KEY_TYPE_MLDSA.
-    \param key RsaKey, ecc_key or wc_MlDsaKey with an id or label.
+    \param type PKCS11_KEY_TYPE_RSA, PKCS11_KEY_TYPE_EC, PKCS11_KEY_TYPE_MLDSA
+    or PKCS11_KEY_TYPE_MLKEM.
+    \param key RsaKey, ecc_key, wc_MlDsaKey or MlKemKey with an id or label.
 
     \sa wc_Pkcs11PersistKey
 */
