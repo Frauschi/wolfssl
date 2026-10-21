@@ -1168,6 +1168,7 @@ int test_wc_Pkcs11_EcKeyUsage(void)
     Pkcs11Token token;
     CK_FUNCTION_LIST func;
     ecc_key soft;
+    ecc_key gen;
     WC_RNG rng;
     word32 len = sizeof(test_pkcs11_ec_point) - 2;
     TestPkcs11Obj* priv = NULL;
@@ -1204,6 +1205,11 @@ int test_wc_Pkcs11_EcKeyUsage(void)
     test_pkcs11_ecdsa_verify_only = 1;
     ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_NONE, CK_FALSE,
         CK_TRUE, CK_FALSE), TEST_SUCCESS);
+    ExpectIntEQ(wc_ecc_init_ex(&gen, NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &gen, ECC_SECP256R1,
+        WC_ECC_FLAG_DEC_SIGN), WC_NO_ERR_TRACE(WC_HW_E));
+    ExpectNull(gen.devCtx);
+    wc_ecc_free(&gen);
     soft.flags = WC_ECC_FLAG_DEC_SIGN;
     ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_EC, 0, &soft),
         WC_NO_ERR_TRACE(NOT_COMPILED_IN));

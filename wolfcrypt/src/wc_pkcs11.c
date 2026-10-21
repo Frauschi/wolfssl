@@ -3931,8 +3931,12 @@ static int Pkcs11EcKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
         ret = Pkcs11CheckNewTokenKey(session, CKK_EC, key->id, key->idLen,
                                      key->label, key->labelLen);
     }
-    if (ret == 0)
+    if (ret == 0) {
         ret = Pkcs11EccKeyUsage(session, key, &usage);
+        /* Software keygen would not keep the key on the token. */
+        if (ret == WC_NO_ERR_TRACE(NOT_COMPILED_IN))
+            ret = WC_HW_E;
+    }
     if (ret == 0) {
         if ((key->flags & WC_ECC_FLAG_DEC_SIGN) != 0) {
             privTmplCnt = 2;
