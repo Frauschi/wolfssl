@@ -29,12 +29,12 @@ void wc_Pkcs11Token_Final(Pkcs11Token* token);
     \ingroup PKCS11
 
     \brief Opens a session on the token that is used for all operations until
-    wc_Pkcs11Token_Close. When the token was initialized with a user PIN and
-    this session logs in, the token's copy of the PIN is zeroized and freed,
-    since the login lasts while the session is open. After that, opening a
-    new session on the token fails with BAD_STATE_E: call
-    wc_Pkcs11Token_Final and initialize the token again with the PIN. If the
-    application was already logged in through another token, the PIN is
+    wc_Pkcs11Token_Close.
+
+    When this session logs in with the user PIN, the token's copy of the PIN
+    is zeroized and freed, as the login lasts while the session is open. A
+    later session then needs wc_Pkcs11Token_Final and a new init with the
+    PIN. If another token already logged the application in, the PIN is
     kept. Calling this again while the session is open does nothing.
 
     \return 0 on success.
@@ -58,23 +58,19 @@ void wc_Pkcs11Token_Close(Pkcs11Token* token);
 /*!
     \ingroup PKCS11
 
-    \brief Makes RSA, ECC, ML-DSA and ML-KEM key generation through the
-    PKCS#11 crypto callback create token objects (CKA_TOKEN set) instead of
-    session objects for keys with an id or label. Use it for tokens that
-    cannot make a session key persistent later with wc_Pkcs11PersistKey,
-    such as tokens that only report the public key of a token object. ECC,
-    ML-DSA and ML-KEM keys also keep a token object for the public key under
-    the same id or label. Key generation fails with BAD_STATE_E when the
-    token already holds a key of that type with the same id or label. A key
-    without a name, such as a TLS ephemeral key, is still generated as a
-    session object. Remove an unwanted key with wc_Pkcs11DeleteKey. Key
-    generation opens a read/write session for this, but a session opened
-    with wc_Pkcs11Token_Open is used as it is and must be read/write. A
-    private key on the token is created with CKA_PRIVATE, so the token must
-    be logged in. Without a session from wc_Pkcs11Token_Open, a session key
-    cannot be generated, as it would be destroyed with its session (the call
-    fails with BAD_STATE_E), and a token key is found by its id or label
-    afterwards.
+    \brief Makes the crypto callback generate RSA, ECC, ML-DSA and ML-KEM
+    keys that have an id or label as token objects (CKA_TOKEN set).
+
+    Use it for tokens that cannot make a session key persistent later with
+    wc_Pkcs11PersistKey. ECC, ML-DSA and ML-KEM keys also get a token public
+    key. Key generation fails with BAD_STATE_E when a token key of the type
+    already has the id or label. A key without a name, such as a TLS
+    ephemeral key, stays a session object.
+
+    The private key gets CKA_PRIVATE, so the session must be logged in, and
+    a session from wc_Pkcs11Token_Open must be read/write. Without such a
+    session a token key is later found by its id or label, and a session
+    key cannot be generated (BAD_STATE_E).
 
     \return 0 on success.
     \return BAD_FUNC_ARG when token is NULL.
