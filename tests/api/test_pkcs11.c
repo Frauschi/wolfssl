@@ -24,7 +24,7 @@
 #include <tests/api/api.h>
 #include <tests/api/test_pkcs11.h>
 
-#if defined(HAVE_PKCS11) && defined(HAVE_ECC) && \
+#if defined(HAVE_PKCS11) && defined(HAVE_ECC) && !defined(NO_PKCS11_ECC) && \
     defined(HAVE_ECC_VERIFY) && !defined(WC_NO_RNG) && \
     !defined(NO_ECC256) && !defined(NO_ECC_SECP)
 
@@ -268,6 +268,13 @@ int test_wc_Pkcs11_EcdsaSigDecode(void)
 
     return EXPECT_RESULT();
 }
+
+#if !defined(NO_RSA) && !defined(NO_PKCS11_RSA) && defined(WOLFSSL_KEY_GEN)
+    #define TEST_PKCS11_RSA_KEYGEN
+#endif
+#if !defined(NO_PKCS11_EC_KEYGEN) && defined(HAVE_ECC_KEY_EXPORT)
+    #define TEST_PKCS11_EC_KEYGEN
+#endif
 
 #define TEST_PKCS11_MAX_OBJS    8
 #define TEST_PKCS11_MAX_ID_LEN  32
@@ -955,7 +962,8 @@ int test_wc_Pkcs11_DeleteKey(void)
     return EXPECT_RESULT();
 }
 
-#if !defined(NO_RSA) && defined(HAVE_WOLF_BIGINT) && \
+#if !defined(NO_RSA) && !defined(NO_PKCS11_RSA) && \
+    defined(HAVE_WOLF_BIGINT) && \
     defined(USE_WOLFSSL_MEMORY) && !defined(WOLFSSL_STATIC_MEMORY) && \
     !defined(WOLFSSL_DEBUG_MEMORY)
 static wolfSSL_Malloc_cb  test_pkcs11_mf = NULL;
@@ -1015,7 +1023,8 @@ static int test_pkcs11_rsa_decrypt(Pkcs11Token* token, RsaKey* key)
 int test_wc_Pkcs11_RsaIdNoLeak(void)
 {
     EXPECT_DECLS;
-#if !defined(NO_RSA) && defined(HAVE_WOLF_BIGINT) && \
+#if !defined(NO_RSA) && !defined(NO_PKCS11_RSA) && \
+    defined(HAVE_WOLF_BIGINT) && \
     defined(USE_WOLFSSL_MEMORY) && !defined(WOLFSSL_STATIC_MEMORY) && \
     !defined(WOLFSSL_DEBUG_MEMORY)
     static unsigned char id[] = { 0x05 };
@@ -1060,6 +1069,8 @@ int test_wc_Pkcs11_RsaIdNoLeak(void)
 
 #define TEST_PKCS11_DEVID 0x7031
 
+#if defined(TEST_PKCS11_EC_KEYGEN) && defined(HAVE_ECC_KEY_IMPORT) && \
+    !defined(NO_PKCS11_ECDH)
 static int test_pkcs11_ec_usage(Pkcs11Token* token, WC_RNG* rng, int flags,
     CK_BBOOL sign, CK_BBOOL derive, CK_BBOOL decrypt)
 {
@@ -1108,9 +1119,13 @@ static int test_pkcs11_store_private_only(Pkcs11Token* token, ecc_key* src)
     wc_ForceZero(priv, sizeof(priv));
     return ret;
 }
+#endif
 
 int test_wc_Pkcs11_EcKeyUsage(void)
 {
+    EXPECT_DECLS;
+#if defined(TEST_PKCS11_EC_KEYGEN) && defined(HAVE_ECC_KEY_IMPORT) && \
+    !defined(NO_PKCS11_ECDH)
     static const byte id[] = { 0x11 };
     Pkcs11Token token;
     CK_FUNCTION_LIST func;
@@ -1118,7 +1133,6 @@ int test_wc_Pkcs11_EcKeyUsage(void)
     WC_RNG rng;
     word32 len = sizeof(test_pkcs11_ec_point) - 2;
     TestPkcs11Obj* priv = NULL;
-    EXPECT_DECLS;
 
     test_pkcs11_store_setup(&token, &func);
     XMEMSET(&soft, 0, sizeof(soft));
@@ -1191,7 +1205,7 @@ int test_wc_Pkcs11_EcKeyUsage(void)
     wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
     wc_ecc_free(&soft);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
-
+#endif
     return EXPECT_RESULT();
 }
 
@@ -1311,7 +1325,7 @@ int test_wc_Pkcs11_FreeNoObject(void)
     Pkcs11Token token;
     CK_FUNCTION_LIST func;
     ecc_key key;
-#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+#ifdef TEST_PKCS11_RSA_KEYGEN
     RsaKey rsa;
 #endif
     EXPECT_DECLS;
@@ -1327,7 +1341,7 @@ int test_wc_Pkcs11_FreeNoObject(void)
     /* A key with no object on the device is freed without a session. */
     ExpectIntEQ(wc_ecc_init_ex(&key, NULL, TEST_PKCS11_DEVID), 0);
     wc_ecc_free(&key);
-#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+#ifdef TEST_PKCS11_RSA_KEYGEN
     ExpectIntEQ(wc_InitRsaKey_ex(&rsa, NULL, TEST_PKCS11_DEVID), 0);
     ExpectIntEQ(wc_FreeRsaKey(&rsa), 0);
 #endif
@@ -1340,6 +1354,8 @@ int test_wc_Pkcs11_FreeNoObject(void)
 
 int test_wc_Pkcs11_KeyGenSessionClosed(void)
 {
+    EXPECT_DECLS;
+#ifdef TEST_PKCS11_EC_KEYGEN
     static const byte id[] = { 0x61 };
     Pkcs11Token token;
     CK_FUNCTION_LIST func;
@@ -1347,10 +1363,9 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
     ecc_key key;
     WC_RNG rng;
     word32 len = sizeof(test_pkcs11_ec_point) - 2;
-#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+#ifdef TEST_PKCS11_RSA_KEYGEN
     RsaKey rsa;
 #endif
-    EXPECT_DECLS;
 
     test_pkcs11_store_setup(&token, &func);
     func.C_OpenSession = test_pkcs11_open_session;
@@ -1372,7 +1387,7 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
         WC_ECC_FLAG_NONE), 0);
     ExpectNull(key.devCtx);
     wc_ecc_free(&key);
-#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+#ifdef TEST_PKCS11_RSA_KEYGEN
     ExpectIntEQ(wc_InitRsaKey_ex(&rsa, NULL, TEST_PKCS11_DEVID), 0);
     ExpectIntEQ(wc_MakeRsaKey(&rsa, 2048, WC_RSA_EXPONENT, &rng), 0);
     ExpectNull(rsa.devCtx);
@@ -1403,20 +1418,21 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
     wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
     wc_ecc_free(&soft);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
-
+#endif
     return EXPECT_RESULT();
 }
 
 int test_wc_Pkcs11_SecretKeyPersist(void)
 {
     EXPECT_DECLS;
-#if !defined(NO_AES) && defined(HAVE_AESGCM)
+#if !defined(NO_AES) && defined(HAVE_AESGCM) && !defined(NO_PKCS11_AES) && \
+    !defined(NO_PKCS11_AESGCM)
     static unsigned char id[] = { 0x71 };
     static const byte secret[16] = { 0x01 };
     Pkcs11Token token;
     CK_FUNCTION_LIST func;
     Aes aes;
-#if !defined(NO_HMAC) && !defined(NO_SHA256)
+#if !defined(NO_HMAC) && !defined(NO_SHA256) && !defined(NO_PKCS11_HMAC)
     Hmac hmac;
 #endif
 
@@ -1438,7 +1454,7 @@ int test_wc_Pkcs11_SecretKeyPersist(void)
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
     wc_AesFree(&aes);
 
-#if !defined(NO_HMAC) && !defined(NO_SHA256)
+#if !defined(NO_HMAC) && !defined(NO_SHA256) && !defined(NO_PKCS11_HMAC)
     /* A token without the HMAC key type holds a generic secret. */
     test_pkcs11_reset();
     test_pkcs11_no_hmac_type = 1;
@@ -1526,7 +1542,7 @@ int test_wc_Pkcs11_TokenPinCopy(void)
 int test_wc_Pkcs11_RsaKeyGenError(void)
 {
     EXPECT_DECLS;
-#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+#ifdef TEST_PKCS11_RSA_KEYGEN
     Pkcs11Token token;
     CK_FUNCTION_LIST func;
     RsaKey key;
@@ -1576,6 +1592,8 @@ int test_wc_Pkcs11_RsaKeyGenError(void)
 
 int test_wc_Pkcs11_KeyGenPersistent(void)
 {
+    EXPECT_DECLS;
+#ifdef TEST_PKCS11_EC_KEYGEN
     static const byte id[] = { 0x21, 0x22 };
     Pkcs11Token token;
     CK_FUNCTION_LIST func;
@@ -1585,10 +1603,9 @@ int test_wc_Pkcs11_KeyGenPersistent(void)
     word32 len = sizeof(test_pkcs11_ec_point) - 2;
     TestPkcs11Obj* priv = NULL;
     TestPkcs11Obj* pub = NULL;
-#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+#ifdef TEST_PKCS11_RSA_KEYGEN
     RsaKey rsa;
 #endif
-    EXPECT_DECLS;
 
     test_pkcs11_store_setup(&token, &func);
     XMEMSET(&soft, 0, sizeof(soft));
@@ -1649,7 +1666,7 @@ int test_wc_Pkcs11_KeyGenPersistent(void)
     wc_ecc_free(&key);
     ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
 
-#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+#ifdef TEST_PKCS11_RSA_KEYGEN
     test_pkcs11_reset();
     ExpectIntEQ(wc_InitRsaKey_Id(&rsa, (unsigned char*)id, (int)sizeof(id),
         NULL, TEST_PKCS11_DEVID), 0);
@@ -1675,7 +1692,7 @@ int test_wc_Pkcs11_KeyGenPersistent(void)
     wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
     wc_ecc_free(&soft);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
-
+#endif
     return EXPECT_RESULT();
 }
 
@@ -1719,7 +1736,7 @@ int test_wc_Pkcs11_TokenOpenDropsPin(void)
      * again. */
     ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), WC_NO_ERR_TRACE(BAD_STATE_E));
     ExpectIntEQ(test_pkcs11_logins, 1);
-    ExpectNull(token.handle);
+    ExpectIntEQ(token.handle, 0);
     wc_Pkcs11Token_Final(&token);
 
     /* A failed login closes the session and keeps no handle. */
@@ -1727,7 +1744,7 @@ int test_wc_Pkcs11_TokenOpenDropsPin(void)
     test_pkcs11_login_rv = TEST_CKR_GENERAL_ERROR;
     test_pkcs11_closes = 0;
     ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), WC_NO_ERR_TRACE(WC_HW_E));
-    ExpectNull(token.handle);
+    ExpectIntEQ(token.handle, 0);
     ExpectIntEQ(test_pkcs11_closes, 1);
     ExpectNotNull(token.userPin);
 
