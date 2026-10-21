@@ -1422,6 +1422,47 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
     return EXPECT_RESULT();
 }
 
+int test_wc_Pkcs11_RsaPersistDelete(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_PKCS11_RSA_KEYGEN
+    static unsigned char id[] = { 0x81 };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    CK_OBJECT_HANDLE sessObj = 0;
+    RsaKey key;
+    WC_RNG rng;
+
+    test_pkcs11_store_setup(&token, &func);
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_CryptoCb_RegisterDevice(TEST_PKCS11_DEVID,
+        wc_Pkcs11_CryptoDevCb, &token), 0);
+    ExpectIntEQ(wc_InitRsaKey_Id(&key, id, (int)sizeof(id), NULL,
+        TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_MakeRsaKey(&key, 2048, WC_RSA_EXPONENT, &rng), 0);
+    if (EXPECT_SUCCESS())
+        sessObj = (CK_OBJECT_HANDLE)(wc_ptr_t)key.devCtx;
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 1);
+
+    ExpectIntEQ(wc_Pkcs11PersistKey(&token, PKCS11_KEY_TYPE_RSA, &key), 0);
+    ExpectNull(test_pkcs11_obj(sessObj));
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    ExpectIntEQ(test_pkcs11_token_keys_protected(), 1);
+    ExpectPtrEq(key.devCtx,
+        (void*)(wc_ptr_t)test_pkcs11_find_obj(CKO_PRIVATE_KEY, CK_TRUE));
+
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_RSA, &key), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 0);
+    ExpectNull(key.devCtx);
+    ExpectIntEQ(wc_FreeRsaKey(&key), 0);
+
+    wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+#endif
+    return EXPECT_RESULT();
+}
+
 int test_wc_Pkcs11_SecretKeyPersist(void)
 {
     EXPECT_DECLS;
