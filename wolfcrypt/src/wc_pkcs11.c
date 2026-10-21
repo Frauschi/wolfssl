@@ -2320,6 +2320,7 @@ int wc_Pkcs11StoreKey(Pkcs11Token* token, int type, int clear, void* key)
  * @param  [in]  clear       Clear out the private data from software key.
  * @param  [in]  key         Key type specific object.
  * @param  [in]  persistent  Create token objects (CKA_TOKEN set).
+ * @return  BAD_FUNC_ARG when token or key is NULL.
  * @return  NOT_COMPILED_IN when mechanism not available.
  * @return  0 on success.
  */
@@ -2330,7 +2331,10 @@ int wc_Pkcs11StoreKey_ex(Pkcs11Token* token, int type, int clear, void* key,
     Pkcs11Session     session;
     CK_OBJECT_HANDLE  privKey = NULL_PTR;
 
-    ret = Pkcs11OpenSession(token, &session, 1);
+    if (token == NULL || key == NULL)
+        ret = BAD_FUNC_ARG;
+    if (ret == 0)
+        ret = Pkcs11OpenSession(token, &session, 1);
     if (ret == 0) {
         session.tokenObjects = (persistent != 0);
         switch (type) {
