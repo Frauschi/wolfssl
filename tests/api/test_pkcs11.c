@@ -1456,4 +1456,105 @@ int test_wc_Pkcs11_TokenOpenDropsPin(void)
     return EXPECT_RESULT();
 }
 
+static int test_pkcs11_add_token_key(const char* label, byte idByte)
+{
+    static CK_OBJECT_CLASS privClass = CKO_PRIVATE_KEY;
+    static CK_KEY_TYPE     ecType = CKK_EC;
+    static CK_BBOOL        isToken = CK_TRUE;
+    byte id[1];
+    CK_ATTRIBUTE tmpl[] = {
+        { CKA_CLASS,    &privClass,    sizeof(privClass) },
+        { CKA_KEY_TYPE, &ecType,       sizeof(ecType)    },
+        { CKA_TOKEN,    &isToken,      sizeof(isToken)   },
+        { CKA_ID,       id,            sizeof(id)        },
+        { CKA_LABEL,    (void*)label,  0                 }
+    };
+    CK_OBJECT_HANDLE h = 0;
+
+    id[0] = idByte;
+    tmpl[4].ulValueLen = (CK_ULONG)XSTRLEN(label);
+    if (test_pkcs11_store_create(0, tmpl, 5, &h) != CKR_OK)
+        return 0;
+    return (int)h;
+}
+
+static void test_pkcs11_name_key(ecc_key* key, byte idByte, const char* label)
+{
+    key->id[0] = idByte;
+    key->idLen = 1;
+    key->labelLen = (int)XSTRLEN(label);
+    XMEMCPY(key->label, label, (size_t)key->labelLen);
+}
+
+int test_wc_Pkcs11_KeyNames(void)
+{
+    static const byte id[] = { 0x31 };
+    static CK_OBJECT_CLASS privClass = CKO_PRIVATE_KEY;
+    static CK_KEY_TYPE     ecType = CKK_EC;
+    CK_ATTRIBUTE sess[] = {
+        { CKA_CLASS,    &privClass, sizeof(privClass) },
+        { CKA_KEY_TYPE, &ecType,    sizeof(ecType)    }
+    };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    CK_OBJECT_HANDLE sessObj = 0;
+    ecc_key key;
+    ecc_key noName;
+    WC_RNG rng;
+    int other = 0;
+    EXPECT_DECLS;
+
+    test_pkcs11_store_setup(&token, &func);
+    XMEMSET(&key, 0, sizeof(key));
+    XMEMSET(&noName, 0, sizeof(noName));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(test_pkcs11_make_ecc(&key, &rng, id, (int)sizeof(id)), 0);
+    ExpectIntEQ(wc_ecc_init(&noName), 0);
+    ExpectIntEQ(wc_ecc_make_key(&rng, 32, &noName), 0);
+
+    /* A persistent import needs a name that no token key has. */
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &noName,
+        1), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &key, 1),
+        0);
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &key, 1),
+        WC_NO_ERR_TRACE(BAD_STATE_E));
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+
+    /* Either name in use makes a duplicate. */
+    test_pkcs11_reset();
+    ExpectIntNE(test_pkcs11_add_token_key("old", 0x41), 0);
+    test_pkcs11_name_key(&key, 0x41, "new");
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &key, 1),
+        WC_NO_ERR_TRACE(BAD_STATE_E));
+    test_pkcs11_name_key(&key, 0x42, "old");
+    ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &key, 1),
+        WC_NO_ERR_TRACE(BAD_STATE_E));
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+
+    /* A delete only removes keys with both the id and the label. */
+    test_pkcs11_reset();
+    ExpectIntNE(test_pkcs11_add_token_key("shared", 0x51), 0);
+    ExpectIntNE(other = test_pkcs11_add_token_key("shared", 0x52), 0);
+    test_pkcs11_name_key(&key, 0x51, "shared");
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_EC, &key), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    ExpectNotNull(test_pkcs11_obj((CK_OBJECT_HANDLE)other));
+
+    /* A key without a name is rejected before its session key is touched. */
+    ExpectIntEQ(test_pkcs11_store_create(0, sess, 2, &sessObj), CKR_OK);
+    noName.devCtx = (void*)(wc_ptr_t)sessObj;
+    ExpectIntEQ(wc_Pkcs11DeleteKey(&token, PKCS11_KEY_TYPE_EC, &noName),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectPtrEq(noName.devCtx, (void*)(wc_ptr_t)sessObj);
+    ExpectNotNull(test_pkcs11_obj(sessObj));
+    noName.devCtx = NULL;
+
+    wc_ecc_free(&key);
+    wc_ecc_free(&noName);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+
+    return EXPECT_RESULT();
+}
+
 #endif
