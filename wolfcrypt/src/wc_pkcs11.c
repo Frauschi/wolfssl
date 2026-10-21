@@ -2801,7 +2801,8 @@ static int Pkcs11FindKeyObject(Pkcs11Session* session,
  * @param  [in]  label     Label of key.
  * @param  [in]  labelLen  Length of label.
  * @return  BAD_FUNC_ARG when the key has neither id nor label.
- * @return  BAD_STATE_E when a token key of the type has the id or label.
+ * @return  BAD_STATE_E when a token key of the type has the id or label, or
+ *          with WC_PKCS11_FIND_WITH_ID_ONLY any token object has the id.
  * @return  WC_HW_E when a PKCS#11 library call fails.
  * @return  0 on success.
  */
@@ -2815,8 +2816,19 @@ static int Pkcs11CheckNewTokenKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
     if (idLen <= 0 && labelLen <= 0)
         ret = BAD_FUNC_ARG;
     if (ret == 0 && idLen > 0) {
+    #ifdef WC_PKCS11_FIND_WITH_ID_ONLY
+        /* Lookups by id match any object, so any token object blocks it. */
+        CK_BBOOL     onToken = CK_TRUE;
+        CK_ATTRIBUTE tmpl[] = {
+            { CKA_TOKEN, &onToken, sizeof(onToken) },
+            { CKA_ID,    id,       (CK_ULONG)idLen }
+        };
+
+        ret = Pkcs11FindKeyByTemplate(&handle, session, tmpl, 2, &count);
+    #else
         ret = Pkcs11FindKeyObject(session, NULL, keyType, CK_TRUE, id, idLen,
                                   NULL, 0, &handle, &count);
+    #endif
     }
     if (ret == 0 && count == 0 && labelLen > 0) {
         ret = Pkcs11FindKeyObject(session, NULL, keyType, CK_TRUE, NULL, 0,

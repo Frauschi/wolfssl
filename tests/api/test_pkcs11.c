@@ -1478,8 +1478,10 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
     test_pkcs11_sign_key = 0;
     ExpectIntEQ(wc_ecc_sign_hash(hash, sizeof(hash), sig, &sigLen, &rng, &key),
         0);
+#ifndef WC_PKCS11_FIND_WITH_ID_ONLY
     ExpectIntEQ(test_pkcs11_sign_key,
         test_pkcs11_find_obj(CKO_PRIVATE_KEY, CK_TRUE));
+#endif
 #endif
     wc_ecc_free(&key);
 
@@ -2261,6 +2263,28 @@ int test_wc_Pkcs11_KeyNames(void)
     ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &key, 1),
         WC_NO_ERR_TRACE(BAD_STATE_E));
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+
+#ifdef WC_PKCS11_FIND_WITH_ID_ONLY
+    /* Lookups by id ignore the type, so any token object with it is a clash. */
+    test_pkcs11_reset();
+    {
+        static CK_OBJECT_CLASS certClass = CKO_CERTIFICATE;
+        static CK_BBOOL        onToken = CK_TRUE;
+        static byte            certId[] = { 0x61 };
+        CK_ATTRIBUTE cert[] = {
+            { CKA_CLASS, &certClass, sizeof(certClass) },
+            { CKA_TOKEN, &onToken,   sizeof(onToken)   },
+            { CKA_ID,    certId,     sizeof(certId)    }
+        };
+        CK_OBJECT_HANDLE certObj = 0;
+
+        ExpectIntEQ(test_pkcs11_store_create(0, cert, 3, &certObj), CKR_OK);
+        test_pkcs11_name_key(&key, 0x61, "");
+        ExpectIntEQ(wc_Pkcs11StoreKey_ex(&token, PKCS11_KEY_TYPE_EC, 0, &key,
+            1), WC_NO_ERR_TRACE(BAD_STATE_E));
+        ExpectIntEQ(test_pkcs11_count(CK_TRUE), 1);
+    }
+#endif
 
     /* A delete only removes keys with both the id and the label. */
     test_pkcs11_reset();
