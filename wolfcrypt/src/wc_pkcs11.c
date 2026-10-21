@@ -970,7 +970,6 @@ static int Pkcs11Token_Init(Pkcs11Token* token, Pkcs11Dev* dev, int slotId,
         token->userPin = NULL_PTR;
         token->userPinSz = 0;
         token->userPinLogin = 0;
-        token->loggedIn = 0;
         token->keyGenOnToken = 0;
         token->pinDropped = 0;
         token->version = dev->version;
@@ -1245,12 +1244,10 @@ int wc_Pkcs11Token_Open(Pkcs11Token* token, int readWrite)
 
     if (ret == 0 && token->handle == NULL_PTR) {
         ret = Pkcs11OpenSession(token, &session, readWrite);
-        if (ret == 0) {
+        if (ret == 0)
             token->handle = session.handle;
-            token->loggedIn = session.loggedIn;
-        }
         /* The login lasts while this session is open. */
-        if (ret == 0 && token->loggedIn) {
+        if (ret == 0 && session.loggedIn) {
             Pkcs11Token_ClearPin(token);
             token->pinDropped = 1;
         }
@@ -1273,7 +1270,6 @@ void wc_Pkcs11Token_Close(Pkcs11Token* token)
         session.func = token->func;
         session.handle = token->handle;
         token->handle = NULL_PTR;
-        token->loggedIn = 0;
         Pkcs11CloseSession(token, &session);
     }
 }
@@ -6975,20 +6971,26 @@ static int Pkcs11PersistPrivKey(Pkcs11Session* session,
 }
 #endif
 
-#if defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
-    defined(WOLFSSL_HAVE_MLKEM)
+#if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
+    defined(WOLFSSL_HAVE_MLKEM) || (!defined(NO_AES) && \
+    (defined(HAVE_AESGCM) || defined(HAVE_AES_CBC))) || !defined(NO_HMAC)
 /**
- * Destroy the session public key objects with a key's id and label.
+ * Destroy all key objects of a key type with a key's id and label.
  *
  * @param  [in]  session   Session object.
+ * @param  [in]  keyClass  Key class to match. NULL matches any class.
  * @param  [in]  keyType   Key type.
+ * @param  [in]  onToken   Destroy token objects or session objects.
  * @param  [in]  id        Identifier of key.
  * @param  [in]  idLen     Length of identifier.
  * @param  [in]  label     Label of key.
  * @param  [in]  labelLen  Length of label.
+ * @return  WC_HW_E when a PKCS#11 library call fails.
+ * @return  0 on success.
  */
-static void Pkcs11DestroySessionPubKeys(Pkcs11Session* session,
-    CK_KEY_TYPE keyType, byte* id, int idLen, char* label, int labelLen)
+static int Pkcs11DestroyKeyObjects(Pkcs11Session* session,
+    CK_OBJECT_CLASS* keyClass, CK_KEY_TYPE keyType, CK_BBOOL onToken,
+    byte* id, int idLen, char* label, int labelLen)
 {
     int              ret = 0;
     CK_RV            rv;
@@ -6996,7 +6998,7 @@ static void Pkcs11DestroySessionPubKeys(Pkcs11Session* session,
     CK_OBJECT_HANDLE handle;
 
     while (ret == 0 && count != 0) {
-        ret = Pkcs11FindKeyObject(session, &pubKeyClass, keyType, CK_FALSE, id,
+        ret = Pkcs11FindKeyObject(session, keyClass, keyType, onToken, id,
                                   idLen, label, labelLen, &handle, &count);
         if (ret == 0 && count != 0) {
             rv = session->func->C_DestroyObject(session->handle, handle);
@@ -7005,6 +7007,8 @@ static void Pkcs11DestroySessionPubKeys(Pkcs11Session* session,
                 ret = WC_HW_E;
         }
     }
+
+    return ret;
 }
 #endif
 
@@ -7115,8 +7119,9 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
                 }
                 if (ret == 0) {
                     eccKey->devCtx = (void*)(wc_ptr_t)privKey;
-                    Pkcs11DestroySessionPubKeys(&session, CKK_EC, eccKey->id,
-                        eccKey->idLen, eccKey->label, eccKey->labelLen);
+                    (void)Pkcs11DestroyKeyObjects(&session, &pubKeyClass,
+                        CKK_EC, CK_FALSE, eccKey->id, eccKey->idLen,
+                        eccKey->label, eccKey->labelLen);
                 }
                 break;
             }
@@ -7140,9 +7145,9 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
                 }
                 if (ret == 0) {
                     mldsaKey->devCtx = (void*)(wc_ptr_t)privKey;
-                    Pkcs11DestroySessionPubKeys(&session, CKK_ML_DSA,
-                        mldsaKey->id, mldsaKey->idLen, mldsaKey->label,
-                        mldsaKey->labelLen);
+                    (void)Pkcs11DestroyKeyObjects(&session, &pubKeyClass,
+                        CKK_ML_DSA, CK_FALSE, mldsaKey->id, mldsaKey->idLen,
+                        mldsaKey->label, mldsaKey->labelLen);
                 }
                 break;
             }
@@ -7166,9 +7171,9 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
                 }
                 if (ret == 0) {
                     mlkemKey->devCtx = (void*)(wc_ptr_t)privKey;
-                    Pkcs11DestroySessionPubKeys(&session, CKK_ML_KEM,
-                        mlkemKey->id, mlkemKey->idLen, mlkemKey->label,
-                        mlkemKey->labelLen);
+                    (void)Pkcs11DestroyKeyObjects(&session, &pubKeyClass,
+                        CKK_ML_KEM, CK_FALSE, mlkemKey->id, mlkemKey->idLen,
+                        mlkemKey->label, mlkemKey->labelLen);
                 }
                 break;
             }
@@ -7240,24 +7245,15 @@ static int Pkcs11CheckUserSession(Pkcs11Session* session)
 static int Pkcs11DeleteTokenKey(Pkcs11Session* session, CK_KEY_TYPE keyType,
     byte* id, int idLen, char* label, int labelLen)
 {
-    int              ret = 0;
-    CK_RV            rv;
-    CK_ULONG         count = 1;
-    CK_OBJECT_HANDLE handle;
+    int ret = 0;
 
     if (idLen <= 0 && labelLen <= 0)
         ret = BAD_FUNC_ARG;
     if (ret == 0)
         ret = Pkcs11CheckUserSession(session);
-    while (ret == 0 && count != 0) {
-        ret = Pkcs11FindKeyObject(session, NULL, keyType, CK_TRUE, id, idLen,
-                                  label, labelLen, &handle, &count);
-        if (ret == 0 && count != 0) {
-            rv = session->func->C_DestroyObject(session->handle, handle);
-            PKCS11_RV("C_DestroyObject", rv);
-            if (rv != CKR_OK)
-                ret = WC_HW_E;
-        }
+    if (ret == 0) {
+        ret = Pkcs11DestroyKeyObjects(session, NULL, keyType, CK_TRUE, id,
+                                      idLen, label, labelLen);
     }
 
     return ret;

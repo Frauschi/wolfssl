@@ -61,7 +61,6 @@ typedef struct Pkcs11Token {
     CK_UTF8CHAR_PTR   userPin;          /* User's PIN to login with           */
     CK_ULONG          userPinSz;        /* Size of user's PIN in bytes        */
     byte              userPinLogin:1;   /* Login with User's PIN              */
-    byte              loggedIn:1;       /* Open session logged in by wolfSSL  */
     byte              keyGenOnToken:1;  /* Generate keys as token objects     */
     byte              pinDropped:1;     /* PIN discarded after logging in     */
     int               version;          /* Pkcs11InterfaceVersionType         */

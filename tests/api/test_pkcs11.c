@@ -2025,10 +2025,11 @@ int test_wc_Pkcs11_TokenOpenDropsPin(void)
 
     /* A second open keeps the first session and its login. */
     test_pkcs11_login_rv = CKR_OK;
+    test_pkcs11_logins = 0;
     ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
-    ExpectIntEQ(token.loggedIn, 1);
+    ExpectIntEQ(token.pinDropped, 1);
     ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
-    ExpectIntEQ(token.loggedIn, 1);
+    ExpectIntEQ(test_pkcs11_logins, 1);
     wc_Pkcs11Token_Close(&token);
     wc_Pkcs11Token_Final(&token);
 
