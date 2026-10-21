@@ -1000,7 +1000,7 @@ static int Pkcs11Token_SetPin(Pkcs11Token* token, const unsigned char* userPin,
     if (userPinSz < 0)
         ret = BAD_FUNC_ARG;
     if (ret == 0) {
-        /* An empty PIN still needs a pointer: NULL asks for the PIN pad. */
+        /* A NULL PIN selects the token's protected authentication path. */
         token->userPin = (CK_UTF8CHAR_PTR)XMALLOC(userPinSz > 0 ? userPinSz : 1,
             token->heap, DYNAMIC_TYPE_TMP_BUFFER);
         if (token->userPin == NULL)
@@ -2940,7 +2940,6 @@ static int Pkcs11GetRsaPublicKey(RsaKey* key, Pkcs11Session* session,
         PKCS11_DUMP_TEMPLATE("RSA Public Key", tmpl, tmplCnt);
     }
     if (ret == 0) {
-        /* The decode re-initializes n and e, dropping their raw buffers. */
         mp_free(&key->n);
         mp_free(&key->e);
         ret = wc_RsaPublicKeyDecodeRaw(mod, modSz, exp, expSz, key);
