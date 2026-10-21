@@ -1140,6 +1140,7 @@ static CK_RV test_pkcs11_login_rv = CKR_OK;
 static int   test_pkcs11_logins = 0;
 static int   test_pkcs11_logouts = 0;
 static int   test_pkcs11_closes = 0;
+static int   test_pkcs11_opens = 0;
 
 static CK_RV test_pkcs11_open_session(CK_SLOT_ID slotId, CK_FLAGS flags,
     CK_VOID_PTR app, CK_NOTIFY notify, CK_SESSION_HANDLE_PTR session)
@@ -1149,6 +1150,7 @@ static CK_RV test_pkcs11_open_session(CK_SLOT_ID slotId, CK_FLAGS flags,
     (void)app;
     (void)notify;
 
+    test_pkcs11_opens++;
     *session = 5;
     return CKR_OK;
 }
@@ -1241,6 +1243,38 @@ int test_wc_Pkcs11_LoginShared(void)
 
     wc_ecc_free(&key);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
+
+    return EXPECT_RESULT();
+}
+
+int test_wc_Pkcs11_FreeNoObject(void)
+{
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    ecc_key key;
+#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+    RsaKey rsa;
+#endif
+    EXPECT_DECLS;
+
+    test_pkcs11_store_setup(&token, &func);
+    func.C_OpenSession = test_pkcs11_open_session;
+    func.C_CloseSession = test_pkcs11_close_session;
+    token.handle = 0;
+    test_pkcs11_opens = 0;
+    ExpectIntEQ(wc_CryptoCb_RegisterDevice(TEST_PKCS11_DEVID,
+        wc_Pkcs11_CryptoDevCb, &token), 0);
+
+    /* A key with no object on the device is freed without a session. */
+    ExpectIntEQ(wc_ecc_init_ex(&key, NULL, TEST_PKCS11_DEVID), 0);
+    wc_ecc_free(&key);
+#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+    ExpectIntEQ(wc_InitRsaKey_ex(&rsa, NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_FreeRsaKey(&rsa), 0);
+#endif
+    ExpectIntEQ(test_pkcs11_opens, 0);
+
+    wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
 
     return EXPECT_RESULT();
 }
