@@ -1333,7 +1333,7 @@ static int Pkcs11KeyOnToken(Pkcs11Session* session, CK_OBJECT_HANDLE handle,
 static void Pkcs11DestroySessionKey(Pkcs11Session* session,
                                     CK_OBJECT_HANDLE handle)
 {
-    CK_RV    rv;
+    CK_RV    rv = CKR_OK;
     CK_BBOOL onToken = CK_TRUE;
 
     if (Pkcs11KeyOnToken(session, handle, &onToken) == 0 &&
@@ -7035,7 +7035,7 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
     CK_OBJECT_HANDLE sessKey = NULL_PTR;
     CK_OBJECT_HANDLE privKey = NULL_PTR;
     CK_OBJECT_HANDLE pubKey = NULL_PTR;
-    CK_RV            rv;
+    CK_RV            rv = CKR_OK;
 
     if (token == NULL || key == NULL)
         ret = BAD_FUNC_ARG;

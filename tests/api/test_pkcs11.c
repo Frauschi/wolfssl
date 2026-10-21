@@ -1407,9 +1407,11 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
     ecc_key key;
     WC_RNG rng;
     word32 len = sizeof(test_pkcs11_ec_point) - 2;
+#ifdef HAVE_ECC_SIGN
     byte hash[32];
     byte sig[ECC_MAX_SIG_SIZE];
     word32 sigLen = sizeof(sig);
+#endif
 #ifdef TEST_PKCS11_RSA_KEYGEN
     RsaKey rsa;
 #endif
@@ -1417,7 +1419,9 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
     test_pkcs11_store_setup(&token, &func);
     func.C_OpenSession = test_pkcs11_open_session;
     func.C_CloseSession = test_pkcs11_close_session;
+#ifdef HAVE_ECC_SIGN
     XMEMSET(hash, 0x5a, sizeof(hash));
+#endif
     XMEMSET(&soft, 0, sizeof(soft));
     ExpectIntEQ(wc_InitRng(&rng), 0);
     ExpectIntEQ(test_pkcs11_make_ecc(&soft, &rng, id, (int)sizeof(id)), 0);
@@ -1453,11 +1457,13 @@ int test_wc_Pkcs11_KeyGenSessionClosed(void)
         WC_ECC_FLAG_NONE), 0);
     ExpectNull(key.devCtx);
     ExpectIntEQ(test_pkcs11_count(CK_TRUE), 2);
+#ifdef HAVE_ECC_SIGN
     test_pkcs11_sign_key = 0;
     ExpectIntEQ(wc_ecc_sign_hash(hash, sizeof(hash), sig, &sigLen, &rng, &key),
         0);
     ExpectIntEQ(test_pkcs11_sign_key,
         test_pkcs11_find_obj(CKO_PRIVATE_KEY, CK_TRUE));
+#endif
     wc_ecc_free(&key);
 
     /* So does a session key made in the open session. */
