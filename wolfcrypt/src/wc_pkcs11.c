@@ -3825,8 +3825,8 @@ static int Pkcs11EcKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
     int               pubTmplCnt = 1;
     /* Empty entries for optional label/ID/token. */
     CK_ATTRIBUTE      privKeyAttrs[] = {
-        { CKA_SIGN,    &ckTrue, sizeof(ckTrue) },
         { CKA_DECRYPT, &ckTrue, sizeof(ckTrue) },
+        { CKA_SIGN,    &ckTrue, sizeof(ckTrue) },
         { CKA_DERIVE,  &ckTrue, sizeof(ckTrue) },
         { 0,           NULL,    0              },
         { 0,           NULL,    0              },
@@ -3852,14 +3852,18 @@ static int Pkcs11EcKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
     if (ret == 0)
         ret = Pkcs11EccKeyUsage(session, key, &usage);
     if (ret == 0) {
-        if ((usage & PKCS11_ECC_SIGN) != 0) {
+        if ((key->flags & WC_ECC_FLAG_DEC_SIGN) != 0) {
             privTmplCnt = 2;
-            pubTmplCnt = 2;
+        }
+        else if ((usage & PKCS11_ECC_SIGN) != 0) {
+            privKeyTmpl = privKeyAttrs + 1;
+            privTmplCnt = 1;
         }
         else {
-            /* Derive only: the template starts at CKA_DERIVE. */
             privKeyTmpl = privKeyAttrs + 2;
         }
+        if ((usage & PKCS11_ECC_SIGN) != 0)
+            pubTmplCnt = 2;
         if ((usage & PKCS11_ECC_DERIVE) != 0)
             privTmplCnt++;
         if (key->labelLen != 0) {

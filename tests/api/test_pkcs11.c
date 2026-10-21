@@ -284,6 +284,7 @@ typedef struct TestPkcs11Obj {
     CK_ULONG        labelLen;
     CK_BBOOL        sign;
     CK_BBOOL        derive;
+    CK_BBOOL        decrypt;
 } TestPkcs11Obj;
 
 static const byte test_pkcs11_modulus[256] = { 0xc0, 0x01 };
@@ -365,6 +366,9 @@ static CK_ULONG test_pkcs11_apply(TestPkcs11Obj* obj, CK_ATTRIBUTE_PTR tmpl,
         }
         else if (tmpl[i].type == CKA_DERIVE) {
             obj->derive = *(CK_BBOOL*)tmpl[i].pValue;
+        }
+        else if (tmpl[i].type == CKA_DECRYPT) {
+            obj->decrypt = *(CK_BBOOL*)tmpl[i].pValue;
         }
         else if (tmpl[i].type == CKA_LABEL &&
                  tmpl[i].ulValueLen <= TEST_PKCS11_MAX_ID_LEN) {
@@ -979,7 +983,7 @@ int test_wc_Pkcs11_RsaIdNoLeak(void)
 #define TEST_PKCS11_DEVID 0x7031
 
 static int test_pkcs11_ec_usage(Pkcs11Token* token, WC_RNG* rng, int flags,
-    CK_BBOOL sign, CK_BBOOL derive)
+    CK_BBOOL sign, CK_BBOOL derive, CK_BBOOL decrypt)
 {
     EXPECT_DECLS;
     ecc_key key;
@@ -997,6 +1001,7 @@ static int test_pkcs11_ec_usage(Pkcs11Token* token, WC_RNG* rng, int flags,
         ExpectIntEQ(obj->cls, CKO_PRIVATE_KEY);
         ExpectIntEQ(obj->sign, sign);
         ExpectIntEQ(obj->derive, derive);
+        ExpectIntEQ(obj->decrypt, decrypt);
     }
     wc_ecc_free(&key);
     (void)token;
@@ -1048,17 +1053,17 @@ int test_wc_Pkcs11_EcKeyUsage(void)
         wc_Pkcs11_CryptoDevCb, &token), 0);
 
     ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_NONE, CK_TRUE,
-        CK_TRUE), TEST_SUCCESS);
-    ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_DEC_SIGN,
         CK_TRUE, CK_FALSE), TEST_SUCCESS);
+    ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_DEC_SIGN,
+        CK_TRUE, CK_FALSE, CK_TRUE), TEST_SUCCESS);
     ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_DERIVE,
-        CK_FALSE, CK_TRUE), TEST_SUCCESS);
+        CK_FALSE, CK_TRUE, CK_FALSE), TEST_SUCCESS);
     ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng,
-        WC_ECC_FLAG_DEC_SIGN | WC_ECC_FLAG_DERIVE, CK_TRUE, CK_TRUE),
+        WC_ECC_FLAG_DEC_SIGN | WC_ECC_FLAG_DERIVE, CK_TRUE, CK_TRUE, CK_TRUE),
         TEST_SUCCESS);
     test_pkcs11_no_ecdh = 1;
     ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_NONE, CK_TRUE,
-        CK_FALSE), TEST_SUCCESS);
+        CK_FALSE, CK_FALSE), TEST_SUCCESS);
 
     /* An import makes one private object, plus the public one for signing. */
     test_pkcs11_no_ecdh = 0;
