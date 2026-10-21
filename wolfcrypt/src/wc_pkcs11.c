@@ -1280,7 +1280,7 @@ int wc_Pkcs11Token_SetKeyGenPersistent(Pkcs11Token* token, int persistent)
     return 0;
 }
 
-#if defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
+#if !defined(NO_RSA) || defined(HAVE_ECC) || defined(WOLFSSL_HAVE_MLDSA) || \
     defined(WOLFSSL_HAVE_MLKEM)
 /**
  * Destroy a key object only when it is a session object.
@@ -2980,6 +2980,10 @@ static int Pkcs11RsaPrivateKey(Pkcs11Session* session, RsaKey* rsaKey,
         ret = NOT_COMPILED_IN;
     #endif
     }
+    else if (rsaKey->devCtx != NULL) {
+        *privateKey = (CK_OBJECT_HANDLE)(wc_ptr_t)rsaKey->devCtx;
+        ret = 0;
+    }
     else if (rsaKey->labelLen > 0) {
         ret = Pkcs11FindKeyByLabel(privateKey, CKO_PRIVATE_KEY, CKK_RSA,
                                    session, rsaKey->label, rsaKey->labelLen);
@@ -3475,15 +3479,13 @@ static int Pkcs11RsaKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
     CK_OBJECT_HANDLE  pubKey = NULL_PTR, privKey = NULL_PTR;
     CK_MECHANISM      mech;
     static CK_BYTE    pub_exp[] = { 0x01, 0x00, 0x01, 0x00 };
-    /* Empty entry for optional token. */
     CK_ATTRIBUTE      pubKeyTmpl[] = {
         { CKA_MODULUS_BITS,    &bits,    sizeof(bits)    },
         { CKA_ENCRYPT,         &ckTrue,  sizeof(ckTrue)  },
         { CKA_VERIFY,          &ckTrue,  sizeof(ckTrue)  },
-        { CKA_PUBLIC_EXPONENT, &pub_exp, sizeof(pub_exp) },
-        { 0,                   NULL,     0               }
+        { CKA_PUBLIC_EXPONENT, &pub_exp, sizeof(pub_exp) }
     };
-    CK_ULONG          pubTmplCnt = sizeof(pubKeyTmpl)/sizeof(*pubKeyTmpl) - 1;
+    CK_ULONG          pubTmplCnt = sizeof(pubKeyTmpl)/sizeof(*pubKeyTmpl);
     /* Empty entries for optional label/ID/token. */
     CK_ATTRIBUTE      privKeyTmpl[] = {
         { CKA_DECRYPT,  &ckTrue, sizeof(ckTrue) },
@@ -3532,10 +3534,6 @@ static int Pkcs11RsaKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
             privKeyTmpl[privTmplCnt].pValue     = &ckTrue;
             privKeyTmpl[privTmplCnt].ulValueLen = sizeof(ckTrue);
             privTmplCnt++;
-            pubKeyTmpl[pubTmplCnt].type       = CKA_TOKEN;
-            pubKeyTmpl[pubTmplCnt].pValue     = &ckTrue;
-            pubKeyTmpl[pubTmplCnt].ulValueLen = sizeof(ckTrue);
-            pubTmplCnt++;
         }
 
         mech.mechanism      = CKM_RSA_PKCS_KEY_PAIR_GEN;
@@ -3559,10 +3557,30 @@ static int Pkcs11RsaKeyGen(Pkcs11Session* session, wc_CryptoInfo* info)
 
     if (pubKey != NULL_PTR)
         session->func->C_DestroyObject(session->handle, pubKey);
-    if (ret != 0 && privKey != NULL_PTR)
+    if (ret == 0 && privKey != NULL_PTR)
+        key->devCtx = (void*)(wc_ptr_t)privKey;
+    else if (ret != 0 && privKey != NULL_PTR)
         session->func->C_DestroyObject(session->handle, privKey);
 
     return ret;
+}
+
+/**
+ * Deletes the RSA private key if it is a session object.
+ *
+ * @param  [in]  session  Session object.
+ * @param  [in]  key      RSA key.
+ * @return  0 on success.
+ */
+static int Pkcs11RsaDeletePrivKey(Pkcs11Session* session, RsaKey* key)
+{
+    if (key != NULL && key->devCtx != NULL) {
+        Pkcs11DestroySessionKey(session,
+            (CK_OBJECT_HANDLE)(wc_ptr_t)key->devCtx);
+        key->devCtx = NULL;
+    }
+
+    return 0;
 }
 #endif /* WOLFSSL_KEY_GEN */
 #endif /* !NO_RSA */
@@ -6878,10 +6896,12 @@ int wc_Pkcs11PersistKey(Pkcs11Token* token, int type, void* key)
             case PKCS11_KEY_TYPE_RSA: {
                 RsaKey* rsaKey = (RsaKey*)key;
 
-                ret = Pkcs11PersistPrivKey(&session, CKK_RSA, NULL,
+                ret = Pkcs11PersistPrivKey(&session, CKK_RSA, rsaKey->devCtx,
                                            rsaKey->id, rsaKey->idLen,
                                            rsaKey->label, rsaKey->labelLen,
                                            &sessKey, &privKey);
+                if (ret == 0)
+                    rsaKey->devCtx = (void*)(wc_ptr_t)privKey;
                 break;
             }
     #endif
@@ -7030,6 +7050,11 @@ int wc_Pkcs11DeleteKey(Pkcs11Token* token, int type, void* key)
                 ret = Pkcs11DeleteTokenKey(&session, CKK_RSA, rsaKey->id,
                                            rsaKey->idLen, rsaKey->label,
                                            rsaKey->labelLen);
+                if (ret == 0 && rsaKey->devCtx != NULL) {
+                    Pkcs11DestroySessionKey(&session,
+                        (CK_OBJECT_HANDLE)(wc_ptr_t)rsaKey->devCtx);
+                    rsaKey->devCtx = NULL;
+                }
                 break;
             }
     #endif
@@ -7416,6 +7441,18 @@ int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info, void* ctx)
     #endif
         }
         else if (info->algo_type == WC_ALGO_TYPE_FREE) {
+    #if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+            if (info->free.algo == WC_ALGO_TYPE_PK &&
+                info->free.type == WC_PK_TYPE_RSA) {
+                if (Pkcs11OpenSession(token, &session, readWrite) == 0) {
+                    Pkcs11RsaDeletePrivKey(&session, (RsaKey*)info->free.obj);
+                    Pkcs11CloseSession(token, &session);
+                }
+                /* wc_FreeRsaKey skips its own cleanup on any other code. */
+                ret = CRYPTOCB_UNAVAILABLE;
+            }
+            else
+    #endif
     #ifdef HAVE_ECC
             if (info->free.algo == WC_ALGO_TYPE_PK &&
                 info->free.type == WC_PK_TYPE_EC_KEYGEN) {
