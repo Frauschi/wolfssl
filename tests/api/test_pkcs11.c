@@ -1400,9 +1400,28 @@ int test_wc_Pkcs11_TokenOpenDropsPin(void)
     wc_Pkcs11Token_Close(&token);
     ExpectIntEQ(test_pkcs11_logouts, 0);
 
-    /* Without the PIN no further login is attempted. */
-    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
+    /* Without the PIN no session can be opened until the token is set up
+     * again. */
+    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), WC_NO_ERR_TRACE(BAD_STATE_E));
     ExpectIntEQ(test_pkcs11_logins, 1);
+    ExpectNull(token.handle);
+    wc_Pkcs11Token_Final(&token);
+
+    /* A failed login closes the session and keeps no handle. */
+    ExpectIntEQ(wc_Pkcs11Token_Init(&token, &dev, 1, NULL, pin, 4), 0);
+    test_pkcs11_login_rv = TEST_CKR_GENERAL_ERROR;
+    test_pkcs11_closes = 0;
+    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), WC_NO_ERR_TRACE(WC_HW_E));
+    ExpectNull(token.handle);
+    ExpectIntEQ(test_pkcs11_closes, 1);
+    ExpectNotNull(token.userPin);
+
+    /* A second open keeps the first session and its login. */
+    test_pkcs11_login_rv = CKR_OK;
+    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
+    ExpectIntEQ(token.loggedIn, 1);
+    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
+    ExpectIntEQ(token.loggedIn, 1);
     wc_Pkcs11Token_Close(&token);
     wc_Pkcs11Token_Final(&token);
 

@@ -63,6 +63,7 @@ typedef struct Pkcs11Token {
     byte              userPinLogin:1;   /* Login with User's PIN              */
     byte              loggedIn:1;       /* Open session logged in by wolfSSL  */
     byte              keyGenOnToken:1;  /* Generate keys as token objects     */
+    byte              pinDropped:1;     /* PIN discarded after logging in     */
     int               version;          /* Pkcs11InterfaceVersionType         */
     void*             heap;             /* Heap for the copy of the PIN       */
 } Pkcs11Token;
