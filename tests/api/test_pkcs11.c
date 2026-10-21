@@ -1154,7 +1154,7 @@ int test_wc_Pkcs11_LoginShared(void)
     ExpectIntEQ(test_pkcs11_closes, 1);
 
     ExpectIntEQ(test_pkcs11_store_login(&token, &key, CKR_OK), 0);
-    ExpectIntEQ(test_pkcs11_logouts, 1);
+    ExpectIntEQ(test_pkcs11_logouts, 0);
     ExpectIntEQ(test_pkcs11_closes, 1);
 
     ExpectIntEQ(test_pkcs11_store_login(&token, &key, TEST_CKR_GENERAL_ERROR),
@@ -1169,7 +1169,7 @@ int test_wc_Pkcs11_LoginShared(void)
     test_pkcs11_login_rv = CKR_OK;
     ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
     wc_Pkcs11Token_Close(&token);
-    ExpectIntEQ(test_pkcs11_logouts, 1);
+    ExpectIntEQ(test_pkcs11_logouts, 0);
 
     wc_ecc_free(&key);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
@@ -1398,13 +1398,12 @@ int test_wc_Pkcs11_TokenOpenDropsPin(void)
     ExpectIntEQ(token.userPinSz, 0);
     ExpectIntEQ(token.userPinLogin, 0);
     wc_Pkcs11Token_Close(&token);
-    ExpectIntEQ(test_pkcs11_logouts, 1);
+    ExpectIntEQ(test_pkcs11_logouts, 0);
 
     /* Without the PIN no further login is attempted. */
     ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
     ExpectIntEQ(test_pkcs11_logins, 1);
     wc_Pkcs11Token_Close(&token);
-    ExpectIntEQ(test_pkcs11_logouts, 1);
     wc_Pkcs11Token_Final(&token);
 
     return EXPECT_RESULT();

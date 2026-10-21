@@ -1193,6 +1193,7 @@ static int Pkcs11OpenSession(Pkcs11Token* token, Pkcs11Session* session,
 /**
  * Close a session on a token.
  * Won't close a session created externally.
+ * The login ends with the application's last session, so there is no logout.
  *
  * @param  [in]  token    Token object.
  * @param  [in]  session  Session object.
@@ -1200,8 +1201,6 @@ static int Pkcs11OpenSession(Pkcs11Token* token, Pkcs11Session* session,
 static void Pkcs11CloseSession(Pkcs11Token* token, Pkcs11Session* session)
 {
     if (token != NULL && session != NULL && token->handle != session->handle) {
-        if (session->loggedIn)
-            session->func->C_Logout(session->handle);
         session->func->C_CloseSession(session->handle);
     }
 }
@@ -1249,7 +1248,6 @@ void wc_Pkcs11Token_Close(Pkcs11Token* token)
     if (token != NULL) {
         session.func = token->func;
         session.handle = token->handle;
-        session.loggedIn = token->loggedIn;
         token->handle = NULL_PTR;
         token->loggedIn = 0;
         Pkcs11CloseSession(token, &session);
