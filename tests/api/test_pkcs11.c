@@ -665,6 +665,36 @@ int test_wc_Pkcs11_FreeKeepsTokenKey(void)
     return EXPECT_RESULT();
 }
 
+#if defined(TEST_PKCS11_EC_KEYGEN) && defined(HAVE_ECC_KEY_IMPORT) && \
+    !defined(NO_PKCS11_ECDH)
+static int test_pkcs11_make_ecc(ecc_key* key, WC_RNG* rng, const byte* id,
+    int idLen)
+{
+    int ret = wc_ecc_init_id(key, (unsigned char*)id, idLen, NULL,
+        INVALID_DEVID);
+    if (ret == 0)
+        ret = wc_ecc_make_key(rng, 32, key);
+#ifdef WOLFSSL_ASYNC_CRYPT
+    if (ret == WC_NO_ERR_TRACE(WC_PENDING_E))
+        ret = wc_AsyncWait(ret, &key->asyncDev, WC_ASYNC_FLAG_NONE);
+#endif
+    return ret;
+}
+
+static CK_OBJECT_HANDLE test_pkcs11_find_obj(CK_OBJECT_CLASS cls,
+    CK_BBOOL onToken)
+{
+    int i;
+
+    for (i = 0; i < TEST_PKCS11_MAX_OBJS; i++) {
+        if (test_pkcs11_objs[i].used && test_pkcs11_objs[i].cls == cls &&
+                test_pkcs11_objs[i].onToken == onToken)
+            return (CK_OBJECT_HANDLE)(i + 1);
+    }
+    return 0;
+}
+#endif
+
 #if !defined(NO_RSA) && !defined(NO_PKCS11_RSA) && \
     defined(HAVE_WOLF_BIGINT) && \
     defined(USE_WOLFSSL_MEMORY) && !defined(WOLFSSL_STATIC_MEMORY) && \
@@ -766,6 +796,163 @@ int test_wc_Pkcs11_RsaIdNoLeak(void)
         (void)wolfSSL_SetAllocators(test_pkcs11_mf, test_pkcs11_ff,
             test_pkcs11_rf);
     }
+#endif
+    return EXPECT_RESULT();
+}
+
+#define TEST_PKCS11_DEVID 0x7031
+
+#if defined(TEST_PKCS11_EC_KEYGEN) && defined(HAVE_ECC_KEY_IMPORT) && \
+    !defined(NO_PKCS11_ECDH)
+static int test_pkcs11_ec_usage(Pkcs11Token* token, WC_RNG* rng, int flags,
+    CK_BBOOL sign, CK_BBOOL derive, CK_BBOOL decrypt)
+{
+    EXPECT_DECLS;
+    ecc_key key;
+    TestPkcs11Obj* obj = NULL;
+    CK_OBJECT_HANDLE h = 0;
+
+    test_pkcs11_reset();
+    XMEMSET(&key, 0, sizeof(key));
+    ExpectIntEQ(wc_ecc_init_ex(&key, NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_ecc_make_key_ex2(rng, 32, &key, ECC_SECP256R1, flags), 0);
+    if (EXPECT_SUCCESS())
+        h = (CK_OBJECT_HANDLE)(wc_ptr_t)key.devCtx;
+    ExpectNotNull(obj = test_pkcs11_obj(h));
+    if (obj != NULL) {
+        ExpectIntEQ(obj->cls, CKO_PRIVATE_KEY);
+        ExpectIntEQ(obj->sign, sign);
+        ExpectIntEQ(obj->derive, derive);
+        ExpectIntEQ(obj->decrypt, decrypt);
+    }
+    wc_ecc_free(&key);
+    (void)token;
+
+    return EXPECT_RESULT();
+}
+
+static int test_pkcs11_store_private_only(Pkcs11Token* token, ecc_key* src)
+{
+    static unsigned char id[] = { 0x13 };
+    byte priv[MAX_ECC_BYTES];
+    word32 privSz = sizeof(priv);
+    ecc_key key;
+    int ret;
+
+    ret = wc_ecc_export_private_only(src, priv, &privSz);
+    if (ret == 0)
+        ret = wc_ecc_init_id(&key, id, (int)sizeof(id), NULL, INVALID_DEVID);
+    if (ret == 0) {
+        ret = wc_ecc_import_private_key_ex(priv, privSz, NULL, 0, &key,
+            ECC_SECP256R1);
+        if (ret == 0)
+            ret = wc_Pkcs11StoreKey(token, PKCS11_KEY_TYPE_EC, 0, &key);
+        wc_ecc_free(&key);
+    }
+    wc_ForceZero(priv, sizeof(priv));
+    return ret;
+}
+#endif
+
+int test_wc_Pkcs11_EcKeyUsage(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_PKCS11_EC_KEYGEN) && defined(HAVE_ECC_KEY_IMPORT) && \
+    !defined(NO_PKCS11_ECDH)
+    static const byte id[] = { 0x11 };
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    ecc_key soft;
+    ecc_key gen;
+    WC_RNG rng;
+    word32 len = sizeof(test_pkcs11_ec_point) - 2;
+    TestPkcs11Obj* priv = NULL;
+
+    test_pkcs11_store_setup(&token, &func);
+    XMEMSET(&soft, 0, sizeof(soft));
+    XMEMSET(&gen, 0, sizeof(gen));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(test_pkcs11_make_ecc(&soft, &rng, id, (int)sizeof(id)), 0);
+    test_pkcs11_ec_point[0] = ASN_OCTET_STRING;
+    test_pkcs11_ec_point[1] = (byte)len;
+    ExpectIntEQ(wc_ecc_export_x963(&soft, test_pkcs11_ec_point + 2, &len), 0);
+    ExpectIntEQ(wc_CryptoCb_RegisterDevice(TEST_PKCS11_DEVID,
+        wc_Pkcs11_CryptoDevCb, &token), 0);
+
+    ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_NONE, CK_TRUE,
+        CK_TRUE, CK_FALSE), TEST_SUCCESS);
+    ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_DEC_SIGN,
+        CK_TRUE, CK_FALSE, CK_TRUE), TEST_SUCCESS);
+    ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_DERIVE,
+        CK_FALSE, CK_TRUE, CK_FALSE), TEST_SUCCESS);
+    ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng,
+        WC_ECC_FLAG_DEC_SIGN | WC_ECC_FLAG_DERIVE, CK_TRUE, CK_TRUE, CK_TRUE),
+        TEST_SUCCESS);
+    test_pkcs11_no_ecdh = 1;
+    ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_NONE, CK_TRUE,
+        CK_FALSE, CK_FALSE), TEST_SUCCESS);
+
+    /* A usage needs a mechanism that can do it. */
+    test_pkcs11_reset();
+    soft.flags = WC_ECC_FLAG_DERIVE;
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_EC, 0, &soft),
+        WC_NO_ERR_TRACE(NOT_COMPILED_IN));
+    test_pkcs11_no_ecdh = 0;
+    test_pkcs11_ecdsa_verify_only = 1;
+    ExpectIntEQ(test_pkcs11_ec_usage(&token, &rng, WC_ECC_FLAG_NONE, CK_FALSE,
+        CK_TRUE, CK_FALSE), TEST_SUCCESS);
+    ExpectIntEQ(wc_ecc_init_ex(&gen, NULL, TEST_PKCS11_DEVID), 0);
+    ExpectIntEQ(wc_ecc_make_key_ex2(&rng, 32, &gen, ECC_SECP256R1,
+        WC_ECC_FLAG_DEC_SIGN), WC_NO_ERR_TRACE(WC_HW_E));
+    ExpectNull(gen.devCtx);
+    wc_ecc_free(&gen);
+    soft.flags = WC_ECC_FLAG_DEC_SIGN;
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_EC, 0, &soft),
+        WC_NO_ERR_TRACE(NOT_COMPILED_IN));
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    test_pkcs11_ecdsa_verify_only = 0;
+    soft.flags = 0;
+
+    /* An import makes one private object, plus the public one for signing. */
+    test_pkcs11_no_ecdh = 0;
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_EC, 0, &soft), 0);
+    ExpectNotNull(priv = test_pkcs11_obj(test_pkcs11_find_obj(CKO_PRIVATE_KEY,
+        CK_FALSE)));
+    if (priv != NULL) {
+        ExpectIntEQ(priv->sign, CK_TRUE);
+        ExpectIntEQ(priv->derive, CK_TRUE);
+    }
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 2);
+
+    /* A failed public object takes the private one with it. */
+    test_pkcs11_reset();
+    test_pkcs11_fail_pub_create = 1;
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_EC, 0, &soft),
+        WC_NO_ERR_TRACE(WC_HW_E));
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    test_pkcs11_fail_pub_create = 0;
+
+    test_pkcs11_reset();
+    soft.flags = WC_ECC_FLAG_DERIVE;
+    ExpectIntEQ(wc_Pkcs11StoreKey(&token, PKCS11_KEY_TYPE_EC, 0, &soft), 0);
+    ExpectNotNull(priv = test_pkcs11_obj(test_pkcs11_find_obj(CKO_PRIVATE_KEY,
+        CK_FALSE)));
+    if (priv != NULL) {
+        ExpectIntEQ(priv->sign, CK_FALSE);
+        ExpectIntEQ(priv->derive, CK_TRUE);
+    }
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 1);
+
+    /* A key with only its private half gets no public object. */
+    test_pkcs11_reset();
+    soft.flags = 0;
+    ExpectIntEQ(test_pkcs11_store_private_only(&token, &soft), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 1);
+
+    wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
+    wc_ecc_free(&soft);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
 #endif
     return EXPECT_RESULT();
 }
