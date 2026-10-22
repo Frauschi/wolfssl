@@ -11,10 +11,24 @@ void wc_Pkcs11_Finalize(Pkcs11Dev* dev);
 
 /*!
     \ingroup PKCS11
+
+    \brief Sets up a token by slot id or name. A user PIN is copied into
+    memory the token owns. Call wc_Pkcs11Token_Final before initializing the
+    same token again, so that the copy is zeroized and freed.
 */
 int wc_Pkcs11Token_Init(Pkcs11Token* token, Pkcs11Dev* dev,
     int slotId, const char* tokenName, const unsigned char *userPin,
     int userPinSz);
+
+/*!
+    \ingroup PKCS11
+
+    \brief Sets up a token by name. A user PIN is copied as by
+    wc_Pkcs11Token_Init.
+*/
+int wc_Pkcs11Token_InitName(Pkcs11Token* token, Pkcs11Dev* dev,
+    const char* tokenName, int tokenNameSz,
+    const unsigned char* userPin, int userPinSz);
 
 /*!
     \ingroup PKCS11

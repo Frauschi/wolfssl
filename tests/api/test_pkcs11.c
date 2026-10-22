@@ -1015,6 +1015,21 @@ static CK_RV test_pkcs11_close_session(CK_SESSION_HANDLE session)
     return CKR_OK;
 }
 
+static CK_RV test_pkcs11_slot_info(CK_SLOT_ID slotId, CK_SLOT_INFO_PTR info)
+{
+    (void)slotId;
+
+    XMEMSET(info, 0, sizeof(*info));
+    return CKR_OK;
+}
+
+static CK_RV test_pkcs11_close_all(CK_SLOT_ID slotId)
+{
+    (void)slotId;
+
+    return CKR_OK;
+}
+
 static int test_pkcs11_store_login(Pkcs11Token* token, ecc_key* key,
     CK_RV loginRv)
 {
@@ -1039,6 +1054,7 @@ int test_wc_Pkcs11_LoginShared(void)
     func.C_Login = test_pkcs11_login;
     func.C_Logout = test_pkcs11_logout;
     func.C_CloseSession = test_pkcs11_close_session;
+    func.C_CloseAllSessions = test_pkcs11_close_all;
     token.handle = 0;
     ExpectNotNull(token.userPin = (CK_UTF8CHAR_PTR)XMALLOC(4, NULL,
         DYNAMIC_TYPE_TMP_BUFFER));
@@ -1073,6 +1089,7 @@ int test_wc_Pkcs11_LoginShared(void)
     wc_Pkcs11Token_Close(&token);
     ExpectIntEQ(test_pkcs11_logouts, 0);
 
+    wc_Pkcs11Token_Final(&token);
     wc_ecc_free(&key);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
 
@@ -1214,6 +1231,48 @@ int test_wc_Pkcs11_RsaKeyGenExponent(void)
     wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
 #endif
+    return EXPECT_RESULT();
+}
+
+int test_wc_Pkcs11_TokenPinCopy(void)
+{
+    static const unsigned char pin[] = "1234";
+    unsigned char pin2[4] = { '5', '6', '7', '8' };
+    Pkcs11Dev dev;
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    EXPECT_DECLS;
+
+    XMEMSET(&dev, 0, sizeof(dev));
+    XMEMSET(&func, 0, sizeof(func));
+    func.C_GetSlotInfo = test_pkcs11_slot_info;
+    func.C_CloseAllSessions = test_pkcs11_close_all;
+    dev.func = &func;
+
+    /* A read-only PIN must not be written to on finalize. */
+    ExpectIntEQ(wc_Pkcs11Token_Init(&token, &dev, 1, NULL, pin, 4), 0);
+    ExpectPtrNE(token.userPin, pin);
+    if (EXPECT_SUCCESS())
+        ExpectBufEQ(token.userPin, pin, 4);
+    wc_Pkcs11Token_Final(&token);
+    ExpectNull(token.userPin);
+    ExpectBufEQ(pin, "1234", 4);
+
+    ExpectIntEQ(wc_Pkcs11Token_Init(&token, &dev, 1, NULL, pin2,
+        (int)sizeof(pin2)), 0);
+    XMEMSET(pin2, 0, sizeof(pin2));
+    if (EXPECT_SUCCESS())
+        ExpectBufEQ(token.userPin, "5678", 4);
+    wc_Pkcs11Token_Final(&token);
+
+    ExpectIntEQ(wc_Pkcs11Token_Init(&token, &dev, 1, NULL, pin, 0), 0);
+    ExpectNotNull(token.userPin);
+    ExpectIntEQ(token.userPinSz, 0);
+    wc_Pkcs11Token_Final(&token);
+
+    ExpectIntEQ(wc_Pkcs11Token_Init(&token, &dev, 1, NULL, pin, -1),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+
     return EXPECT_RESULT();
 }
 
