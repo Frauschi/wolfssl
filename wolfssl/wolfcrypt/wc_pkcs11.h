@@ -61,6 +61,7 @@ typedef struct Pkcs11Token {
     CK_UTF8CHAR_PTR   userPin;          /* User's PIN to login with           */
     CK_ULONG          userPinSz;        /* Size of user's PIN in bytes        */
     byte              userPinLogin:1;   /* Login with User's PIN              */
+    byte              pinDropped:1;     /* PIN discarded after logging in     */
     int               version;          /* Pkcs11InterfaceVersionType         */
     void*             heap;             /* Heap for the copy of the PIN       */
 } Pkcs11Token;

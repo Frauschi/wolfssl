@@ -37,7 +37,29 @@ void wc_Pkcs11Token_Final(Pkcs11Token* token);
 
 /*!
     \ingroup PKCS11
- */
+
+    \brief Opens a session on the token that is used for all operations until
+    wc_Pkcs11Token_Close.
+
+    Once this session is logged in, by its own login with the user PIN or
+    because another token already logged the application in, the token's
+    copy of the PIN is zeroized and freed, as the login lasts while the
+    session is open. A later session then needs wc_Pkcs11Token_Final and a
+    new init with the PIN. Calling this again while the session is open
+    does nothing and keeps the session's read/write mode. Open the session
+    before the token is used from other threads.
+
+    \return 0 on success.
+    \return BAD_FUNC_ARG when token is NULL.
+    \return BAD_STATE_E when the PIN was discarded by an earlier open.
+    \return WC_HW_E when opening the session or logging in fails. A session
+    whose login failed is closed again.
+
+    \param token Token object.
+    \param readWrite Open a read/write session when non-zero.
+
+    \sa wc_Pkcs11Token_Close
+*/
 int wc_Pkcs11Token_Open(Pkcs11Token* token, int readWrite);
 
 /*!

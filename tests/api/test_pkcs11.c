@@ -1084,11 +1084,6 @@ int test_wc_Pkcs11_LoginShared(void)
     wc_Pkcs11Token_Close(&token);
     ExpectIntEQ(test_pkcs11_logouts, 0);
 
-    test_pkcs11_login_rv = CKR_OK;
-    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
-    wc_Pkcs11Token_Close(&token);
-    ExpectIntEQ(test_pkcs11_logouts, 0);
-
     wc_Pkcs11Token_Final(&token);
     wc_ecc_free(&key);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
@@ -1324,6 +1319,76 @@ int test_wc_Pkcs11_RsaKeyGenError(void)
     wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
 #endif
+    return EXPECT_RESULT();
+}
+
+int test_wc_Pkcs11_TokenOpenDropsPin(void)
+{
+    static const unsigned char pin[] = "1234";
+    Pkcs11Dev dev;
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    EXPECT_DECLS;
+
+    XMEMSET(&dev, 0, sizeof(dev));
+    XMEMSET(&func, 0, sizeof(func));
+    func.C_GetSlotInfo = test_pkcs11_slot_info;
+    func.C_CloseAllSessions = test_pkcs11_close_all;
+    func.C_OpenSession = test_pkcs11_open_session;
+    func.C_Login = test_pkcs11_login;
+    func.C_Logout = test_pkcs11_logout;
+    func.C_CloseSession = test_pkcs11_close_session;
+    dev.func = &func;
+    ExpectIntEQ(wc_Pkcs11Token_Init(&token, &dev, 1, NULL, pin, 4), 0);
+
+    /* A login shared with another token also lasts while the session is
+     * open. */
+    test_pkcs11_login_rv = CKR_USER_ALREADY_LOGGED_IN;
+    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
+    ExpectNull(token.userPin);
+    ExpectIntEQ(token.pinDropped, 1);
+    wc_Pkcs11Token_Close(&token);
+    wc_Pkcs11Token_Final(&token);
+    ExpectIntEQ(wc_Pkcs11Token_Init(&token, &dev, 1, NULL, pin, 4), 0);
+
+    test_pkcs11_login_rv = CKR_OK;
+    test_pkcs11_logins = 0;
+    test_pkcs11_logouts = 0;
+    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
+    ExpectIntEQ(test_pkcs11_logins, 1);
+    ExpectNull(token.userPin);
+    ExpectIntEQ(token.userPinSz, 0);
+    ExpectIntEQ(token.userPinLogin, 0);
+    wc_Pkcs11Token_Close(&token);
+    ExpectIntEQ(test_pkcs11_logouts, 0);
+
+    /* Without the PIN no session can be opened until the token is set up
+     * again. */
+    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), WC_NO_ERR_TRACE(BAD_STATE_E));
+    ExpectIntEQ(test_pkcs11_logins, 1);
+    ExpectIntEQ(token.handle, 0);
+    wc_Pkcs11Token_Final(&token);
+    ExpectIntEQ(token.pinDropped, 0);
+
+    /* A failed login closes the session and keeps no handle. */
+    ExpectIntEQ(wc_Pkcs11Token_Init(&token, &dev, 1, NULL, pin, 4), 0);
+    test_pkcs11_login_rv = TEST_CKR_GENERAL_ERROR;
+    test_pkcs11_closes = 0;
+    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), WC_NO_ERR_TRACE(WC_HW_E));
+    ExpectIntEQ(token.handle, 0);
+    ExpectIntEQ(test_pkcs11_closes, 1);
+    ExpectNotNull(token.userPin);
+
+    /* A second open keeps the first session and its login. */
+    test_pkcs11_login_rv = CKR_OK;
+    test_pkcs11_logins = 0;
+    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
+    ExpectIntEQ(token.pinDropped, 1);
+    ExpectIntEQ(wc_Pkcs11Token_Open(&token, 1), 0);
+    ExpectIntEQ(test_pkcs11_logins, 1);
+    wc_Pkcs11Token_Close(&token);
+    wc_Pkcs11Token_Final(&token);
+
     return EXPECT_RESULT();
 }
 
