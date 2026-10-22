@@ -69,6 +69,7 @@ typedef struct Pkcs11Session {
     CK_SLOT_ID        slotId;           /* Id of slot to use                  */
     CK_SESSION_HANDLE handle;           /* Handle to active session           */
     int               version;          /* Pkcs11InterfaceVersionType         */
+    byte              tokenObjects:1;   /* Create keys with CKA_TOKEN set     */
     byte              closes:1;         /* Closed after this operation        */
 } Pkcs11Session;
 
@@ -108,6 +109,8 @@ WOLFSSL_API void wc_Pkcs11Token_Close(Pkcs11Token* token);
 
 WOLFSSL_API int wc_Pkcs11StoreKey(Pkcs11Token* token, int type, int clear,
     void* key);
+WOLFSSL_API int wc_Pkcs11StoreKey_ex(Pkcs11Token* token, int type, int clear,
+    void* key, int persistent);
 
 WOLFSSL_API int wc_Pkcs11_CryptoDevCb(int devId, wc_CryptoInfo* info,
     void* ctx);
