@@ -971,10 +971,27 @@ int test_wc_Pkcs11_RsaKeyGenError(void)
     ExpectIntEQ(wc_CryptoCb_RegisterDevice(TEST_PKCS11_DEVID,
         wc_Pkcs11_CryptoDevCb, &token), 0);
 
+#if defined(HAVE_WOLF_BIGINT) && defined(USE_WOLFSSL_MEMORY) && \
+    !defined(WOLFSSL_STATIC_MEMORY) && !defined(WOLFSSL_DEBUG_MEMORY)
+    /* Freeing the key on the device must still free its software parts. */
+    ExpectIntEQ(wolfSSL_GetAllocators(&test_pkcs11_mf, &test_pkcs11_ff,
+        &test_pkcs11_rf), 0);
+    test_pkcs11_live = 0;
+    ExpectIntEQ(wolfSSL_SetAllocators(test_pkcs11_malloc, test_pkcs11_free,
+        test_pkcs11_realloc), 0);
+#endif
     ExpectIntEQ(wc_InitRsaKey_ex(&key, NULL, TEST_PKCS11_DEVID), 0);
     ExpectIntEQ(wc_MakeRsaKey(&key, 2048, WC_RSA_EXPONENT, &rng), 0);
     ExpectIntEQ(test_pkcs11_count(CK_FALSE), 1);
+    ExpectNotNull(key.devCtx);
     ExpectIntEQ(wc_FreeRsaKey(&key), 0);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+#if defined(HAVE_WOLF_BIGINT) && defined(USE_WOLFSSL_MEMORY) && \
+    !defined(WOLFSSL_STATIC_MEMORY) && !defined(WOLFSSL_DEBUG_MEMORY)
+    (void)wolfSSL_SetAllocators(test_pkcs11_mf, test_pkcs11_ff,
+        test_pkcs11_rf);
+    ExpectIntEQ(test_pkcs11_live, 0);
+#endif
 
     /* A failed read of the public key fails keygen and leaves no object. */
     test_pkcs11_reset();
