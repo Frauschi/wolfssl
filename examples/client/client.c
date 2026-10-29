@@ -484,6 +484,12 @@ static void SetKeyShare(WOLFSSL* ssl, int onlyKeyShare, int useX25519,
                 group = WOLFSSL_SECP384R1MLKEM1024;
             }
             else
+            #ifdef HAVE_CURVE448
+            if (XSTRCMP(pqcAlg, "MLKEM1024X448") == 0) {
+                group = WOLFSSL_MLKEM1024X448;
+            }
+            else
+            #endif /* HAVE_CURVE448 */
             #endif /* WOLFSSL_PQC_HYBRIDS */
         #endif
         #if !defined(WOLFSSL_NO_ML_KEM_512) && defined(HAVE_CURVE25519) && \
@@ -1528,7 +1534,8 @@ static const char* client_usage_msg[][81] = {
             "            SecP384r1MLKEM1024,\n"
             "            X25519MLKEM512,\n"
             "            X25519MLKEM768,\n"
-            "            X448MLKEM768\n"
+            "            X448MLKEM768,\n"
+            "            MLKEM1024X448\n"
 #endif
 #ifdef WOLFSSL_MLKEM_KYBER
             "            KYBER_LEVEL1, KYBER_LEVEL3, KYBER_LEVEL5, "
@@ -1798,7 +1805,8 @@ static const char* client_usage_msg[][81] = {
             "            SecP384r1MLKEM1024,\n"
             "            X25519MLKEM512,\n"
             "            X25519MLKEM768,\n"
-            "            X448MLKEM768\n"
+            "            X448MLKEM768,\n"
+            "            MLKEM1024X448\n"
 #endif
 #ifdef WOLFSSL_MLKEM_KYBER
             "            KYBER_LEVEL1, KYBER_LEVEL3, KYBER_LEVEL5, "

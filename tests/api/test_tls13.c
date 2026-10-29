@@ -5787,6 +5787,60 @@ int test_tls13_multi_pqc_key_share(void)
     return EXPECT_RESULT();
 }
 
+/* Negotiate MLKEM1024X448 with only that group allowed and look it up by
+ * name. */
+int test_tls13_mlkem1024x448_group(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_TLS13) && defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && \
+    defined(WOLFSSL_HAVE_MLKEM) && !defined(WOLFSSL_NO_ML_KEM) && \
+    defined(WOLFSSL_PQC_HYBRIDS) && !defined(WOLFSSL_NO_ML_KEM_1024) && \
+    !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) && \
+    !defined(WOLFSSL_MLKEM_NO_DECAPSULATE) && \
+    !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) && \
+    defined(HAVE_CURVE448) && ECC_MIN_KEY_SZ <= 448 && \
+    !defined(NO_WOLFSSL_CLIENT) && !defined(NO_WOLFSSL_SERVER)
+    WOLFSSL_CTX *ctx_c = NULL;
+    WOLFSSL_CTX *ctx_s = NULL;
+    WOLFSSL *ssl_c = NULL;
+    WOLFSSL *ssl_s = NULL;
+    struct test_memio_ctx test_ctx;
+#if !defined(OPENSSL_EXTRA) || !defined(HAVE_SUPPORTED_CURVES)
+    int groups[1] = { WOLFSSL_MLKEM1024X448 };
+#endif
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfTLSv1_3_client_method, wolfTLSv1_3_server_method), 0);
+
+#if defined(OPENSSL_EXTRA) && defined(HAVE_SUPPORTED_CURVES)
+    ExpectIntEQ(wolfSSL_set1_groups_list(ssl_c, "MLKEM1024X448"),
+        WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_set1_groups_list(ssl_s, "MLKEM1024X448"),
+        WOLFSSL_SUCCESS);
+#else
+    ExpectIntEQ(wolfSSL_set_groups(ssl_c, groups, 1), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_set_groups(ssl_s, groups, 1), WOLFSSL_SUCCESS);
+#endif
+
+    ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
+
+    ExpectStrEQ(wolfSSL_get_curve_name(ssl_c), "MLKEM1024X448");
+    ExpectStrEQ(wolfSSL_get_curve_name(ssl_s), "MLKEM1024X448");
+#if defined(OPENSSL_EXTRA) || defined(HAVE_CURL)
+    ExpectIntEQ(wolfSSL_get_negotiated_group(ssl_c), WOLFSSL_MLKEM1024X448);
+    ExpectStrEQ(wolfSSL_group_to_name(ssl_c, WOLFSSL_MLKEM1024X448),
+        "MLKEM1024X448");
+#endif
+
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
+#endif
+    return EXPECT_RESULT();
+}
+
 /* RFC 8446 4.2.8 and the ML-KEM TLS drafts require an illegal_parameter alert
  * when an ML-KEM key share fails the FIPS 203 input checks. Tamper with the
  * key_share of the ClientHello or ServerHello on the wire and check that the
@@ -5815,6 +5869,10 @@ int test_tls13_multi_pqc_key_share(void)
         ECC_MIN_KEY_SZ <= 384
         #define TEST_TLS13_BAD_KS_SECP384R1MLKEM1024
     #endif
+    #if defined(WOLFSSL_PQC_HYBRIDS) && !defined(WOLFSSL_NO_ML_KEM_1024) && \
+        defined(HAVE_CURVE448) && ECC_MIN_KEY_SZ <= 448
+        #define TEST_TLS13_BAD_KS_MLKEM1024X448
+    #endif
     #if defined(WOLFSSL_EXTRA_PQC_HYBRIDS) && \
         !defined(WOLFSSL_NO_ML_KEM_768) && defined(HAVE_CURVE448) && \
         ECC_MIN_KEY_SZ <= 448
@@ -5824,6 +5882,7 @@ int test_tls13_multi_pqc_key_share(void)
         defined(TEST_TLS13_BAD_KS_X25519MLKEM768) || \
         defined(TEST_TLS13_BAD_KS_SECP256R1MLKEM768) || \
         defined(TEST_TLS13_BAD_KS_SECP384R1MLKEM1024) || \
+        defined(TEST_TLS13_BAD_KS_MLKEM1024X448) || \
         defined(TEST_TLS13_BAD_KS_X448MLKEM768)
         #define TEST_TLS13_MLKEM_BAD_KEY_SHARE_ENABLED
     #endif
@@ -6108,6 +6167,16 @@ static int test_tls13_x448_low_order_key_share(void)
             WOLFSSL_X448MLKEM768, 0, -1, 0, 1088, lowOrder[i],
             CURVE448_PUB_KEY_SIZE, INVALID_DEVID, bad), TEST_SUCCESS);
     #endif
+    #ifdef TEST_TLS13_BAD_KS_MLKEM1024X448
+        /* The X448 part follows the 1568 byte ML-KEM-1024 encapsulation key
+         * or ciphertext. */
+        ExpectIntEQ(test_tls13_mlkem_bad_key_share_once_ex(
+            WOLFSSL_MLKEM1024X448, 1, -1, 0, 1568, lowOrder[i],
+            CURVE448_PUB_KEY_SIZE, INVALID_DEVID, bad), TEST_SUCCESS);
+        ExpectIntEQ(test_tls13_mlkem_bad_key_share_once_ex(
+            WOLFSSL_MLKEM1024X448, 0, -1, 0, 1568, lowOrder[i],
+            CURVE448_PUB_KEY_SIZE, INVALID_DEVID, bad), TEST_SUCCESS);
+    #endif
         /* A plain X448 ServerHello takes the same path. */
         ExpectIntEQ(test_tls13_mlkem_bad_key_share_once_ex(WOLFSSL_ECC_X448,
             0, -1, 0, 0, lowOrder[i], CURVE448_PUB_KEY_SIZE, INVALID_DEVID,
@@ -6191,6 +6260,10 @@ int test_tls13_mlkem_bad_key_share(void)
 #ifdef TEST_TLS13_BAD_KS_SECP384R1MLKEM1024
     ExpectIntEQ(test_tls13_mlkem_bad_key_share_group(
         WOLFSSL_SECP384R1MLKEM1024, 97, 97), TEST_SUCCESS);
+#endif
+#ifdef TEST_TLS13_BAD_KS_MLKEM1024X448
+    ExpectIntEQ(test_tls13_mlkem_bad_key_share_group(WOLFSSL_MLKEM1024X448, 0,
+        CURVE448_PUB_KEY_SIZE), TEST_SUCCESS);
 #endif
 #ifdef TEST_TLS13_BAD_KS_X448MLKEM768
     ExpectIntEQ(test_tls13_mlkem_bad_key_share_group(WOLFSSL_X448MLKEM768, 0,

@@ -40286,6 +40286,7 @@ const byte* MaskCurve25519PeerKey(const byte* pub, word32 pubSz,
             case WOLFSSL_SECP256R1MLKEM768:
             case WOLFSSL_X25519MLKEM768:
             case WOLFSSL_SECP384R1MLKEM1024:
+            case WOLFSSL_MLKEM1024X448:
             /* Additional experimental hybrids */
             case WOLFSSL_SECP256R1MLKEM512:
             case WOLFSSL_SECP384R1MLKEM768:

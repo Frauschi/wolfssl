@@ -4867,6 +4867,9 @@ int TLSX_IsGroupSupported(int namedGroup, int side)
             #endif /* !WOLFSSL_TLS_NO_MLKEM_STANDALONE */
             #ifdef WOLFSSL_PQC_HYBRIDS
             case WOLFSSL_SECP384R1MLKEM1024:
+            #if defined(HAVE_CURVE448) && ECC_MIN_KEY_SZ <= 448
+            case WOLFSSL_MLKEM1024X448:
+            #endif /* HAVE_CURVE448 */
             #endif /* WOLFSSL_PQC_HYBRIDS */
             #ifdef WOLFSSL_EXTRA_PQC_HYBRIDS
             case WOLFSSL_SECP521R1MLKEM1024:
@@ -9098,6 +9101,9 @@ static const PqcHybridMapping pqc_hybrid_mapping[] = {
 #endif /* WOLFSSL_EXTRA_PQC_HYBRIDS */
 #endif /* HAVE_CURVE25519 */
 #ifdef HAVE_CURVE448
+#ifdef WOLFSSL_PQC_HYBRIDS
+    {WOLFSSL_MLKEM1024X448, WOLFSSL_ECC_X448, WOLFSSL_ML_KEM_1024, 1},
+#endif /* WOLFSSL_PQC_HYBRIDS */
 #ifdef WOLFSSL_EXTRA_PQC_HYBRIDS
     {WOLFSSL_X448MLKEM768, WOLFSSL_ECC_X448, WOLFSSL_ML_KEM_768, 1},
 #endif /* WOLFSSL_EXTRA_PQC_HYBRIDS */
@@ -11695,6 +11701,10 @@ static const word16 preferredGroup[] = {
         (defined(HAVE_ECC384) || defined(HAVE_ALL_CURVES)) && \
         ECC_MIN_KEY_SZ <= 384
     WOLFSSL_SECP384R1MLKEM1024,
+    #endif
+    #if !defined(WOLFSSL_NO_ML_KEM_1024) && defined(HAVE_CURVE448) && \
+        ECC_MIN_KEY_SZ <= 448
+    WOLFSSL_MLKEM1024X448,
     #endif
     #if !defined(WOLFSSL_NO_ML_KEM_768) && defined(HAVE_ECC) && \
         (!defined(NO_ECC256) || defined(HAVE_ALL_CURVES)) && \
@@ -16385,6 +16395,12 @@ static int TLSX_PopulateSupportedGroups(WOLFSSL* ssl, TLSX** extensions)
         (defined(HAVE_ECC384) || defined(HAVE_ALL_CURVES)) && \
         ECC_MIN_KEY_SZ <= 384
         ret = TLSX_UseSupportedCurve(extensions, WOLFSSL_SECP384R1MLKEM1024,
+            ssl->heap, ssl->options.side);
+        if (ret != WOLFSSL_SUCCESS) return ret;
+    #endif
+    #if !defined(WOLFSSL_NO_ML_KEM_1024) && defined(HAVE_CURVE448) && \
+        ECC_MIN_KEY_SZ <= 448
+        ret = TLSX_UseSupportedCurve(extensions, WOLFSSL_MLKEM1024X448,
             ssl->heap, ssl->options.side);
         if (ret != WOLFSSL_SUCCESS) return ret;
     #endif

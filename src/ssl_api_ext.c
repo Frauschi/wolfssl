@@ -551,6 +551,7 @@ static int isValidCurveGroup(word16 name)
         case WOLFSSL_SECP384R1MLKEM1024:
         case WOLFSSL_X25519MLKEM768:
         case WOLFSSL_SECP256R1MLKEM768:
+        case WOLFSSL_MLKEM1024X448:
         #endif /* WOLFSSL_PQC_HYBRIDS */
         #ifdef WOLFSSL_EXTRA_PQC_HYBRIDS
         case WOLFSSL_SECP256R1MLKEM512:

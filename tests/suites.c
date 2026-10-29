@@ -231,6 +231,12 @@ static int IsKyberLevelAvailable(const char* line)
                 available = 1;
             }
         #endif
+        #if !defined(WOLFSSL_NO_ML_KEM_1024) && defined(HAVE_CURVE448) && \
+            ECC_MIN_KEY_SZ <= 448
+            if (MATCH_PQC(begin, "MLKEM1024X448", len)) {
+                available = 1;
+            }
+        #endif
     #endif /* WOLFSSL_PQC_HYBRIDS */
     #ifdef WOLFSSL_EXTRA_PQC_HYBRIDS
         #if !defined(WOLFSSL_NO_ML_KEM_512) && defined(HAVE_ECC)

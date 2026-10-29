@@ -5201,6 +5201,9 @@ enum {
     WOLFSSL_X25519MLKEM768        = 4588,
     WOLFSSL_SECP384R1MLKEM1024    = 4589,
 
+    /* Taken from draft-preussmattsson-tls-mlkem1024-x448 */
+    WOLFSSL_MLKEM1024X448         = 4591,
+
     /* Taken from OQS's openssl provider, see:
      * https://github.com/open-quantum-safe/oqs-provider/blob/main/oqs-template/
      *      oqs-kem-info.md
