@@ -4967,6 +4967,9 @@ int TLSX_IsGroupSupported(int namedGroup, int side)
             #ifdef TLSX_HAVE_SECP384R1
             case WOLFSSL_SECP384R1MLKEM1024:
             #endif
+            #if defined(HAVE_CURVE448) && ECC_MIN_KEY_SZ <= 448
+            case WOLFSSL_MLKEM1024X448:
+            #endif /* HAVE_CURVE448 */
             #endif /* WOLFSSL_PQC_HYBRIDS */
             #ifdef WOLFSSL_EXTRA_PQC_HYBRIDS
             #ifdef TLSX_HAVE_SECP521R1
@@ -9212,6 +9215,9 @@ static const PqcHybridMapping pqc_hybrid_mapping[] = {
 #endif /* WOLFSSL_EXTRA_PQC_HYBRIDS */
 #endif /* HAVE_CURVE25519 */
 #ifdef HAVE_CURVE448
+#ifdef WOLFSSL_PQC_HYBRIDS
+    {WOLFSSL_MLKEM1024X448, WOLFSSL_ECC_X448, WOLFSSL_ML_KEM_1024, 1},
+#endif /* WOLFSSL_PQC_HYBRIDS */
 #ifdef WOLFSSL_EXTRA_PQC_HYBRIDS
     {WOLFSSL_X448MLKEM768, WOLFSSL_ECC_X448, WOLFSSL_ML_KEM_768, 1},
 #endif /* WOLFSSL_EXTRA_PQC_HYBRIDS */
@@ -11807,6 +11813,10 @@ static const word16 preferredGroup[] = {
     #endif
     #if !defined(WOLFSSL_NO_ML_KEM_1024) && defined(TLSX_HAVE_SECP384R1)
     WOLFSSL_SECP384R1MLKEM1024,
+    #endif
+    #if !defined(WOLFSSL_NO_ML_KEM_1024) && defined(HAVE_CURVE448) && \
+        ECC_MIN_KEY_SZ <= 448
+    WOLFSSL_MLKEM1024X448,
     #endif
     #if !defined(WOLFSSL_NO_ML_KEM_768) && defined(TLSX_HAVE_SECP256R1)
     WOLFSSL_SECP256R1MLKEM768,
@@ -16479,6 +16489,12 @@ static int TLSX_PopulateSupportedGroups(WOLFSSL* ssl, TLSX** extensions)
     #endif
     #if !defined(WOLFSSL_NO_ML_KEM_1024) && defined(TLSX_HAVE_SECP384R1)
         ret = TLSX_UseSupportedCurve(extensions, WOLFSSL_SECP384R1MLKEM1024,
+            ssl->heap, ssl->options.side);
+        if (ret != WOLFSSL_SUCCESS) return ret;
+    #endif
+    #if !defined(WOLFSSL_NO_ML_KEM_1024) && defined(HAVE_CURVE448) && \
+        ECC_MIN_KEY_SZ <= 448
+        ret = TLSX_UseSupportedCurve(extensions, WOLFSSL_MLKEM1024X448,
             ssl->heap, ssl->options.side);
         if (ret != WOLFSSL_SUCCESS) return ret;
     #endif

@@ -215,6 +215,10 @@ int test_wolfSSL_dtls13_null_cipher(void)
         ECC_MIN_KEY_SZ <= 384
         #define TEST_DTLS13_PQ_GROUP      WOLFSSL_SECP384R1MLKEM1024
         #define TEST_DTLS13_PQ_GROUP_NAME "SecP384r1MLKEM1024"
+    #elif defined(HAVE_CURVE448) && !defined(WOLFSSL_NO_ML_KEM_1024) && \
+        ECC_MIN_KEY_SZ <= 448
+        #define TEST_DTLS13_PQ_GROUP      WOLFSSL_MLKEM1024X448
+        #define TEST_DTLS13_PQ_GROUP_NAME "MLKEM1024X448"
     #endif
 #endif
 #endif /* WOLFSSL_HAVE_MLKEM */
