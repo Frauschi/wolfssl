@@ -36,6 +36,10 @@ int test_wolfSSL_BIO_datagram_peer_kept(void);
 int test_wolfSSL_BIO_datagram_dtls_empty(void);
 int test_wolfSSL_BIO_datagram_dtls_rtx(void);
 int test_wolfSSL_BIO_datagram_dtls_app_timeout(void);
+int test_wolfSSL_BIO_datagram_dtls_cookie(void);
+int test_wolfSSL_BIO_datagram_dtls_peer_filter(void);
+int test_wolfSSL_BIO_datagram_dtls_client_peer(void);
+int test_wolfSSL_BIO_datagram_dtls_cid_migration(void);
 int test_wolfSSL_BIO_s_null(void);
 int test_wolfSSL_BIO_accept(void);
 int test_wolfSSL_BIO_write(void);
@@ -90,6 +94,10 @@ int test_wolfSSL_BIO_get_new_index_threaded(void);
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram_dtls_empty), \
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram_dtls_rtx), \
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram_dtls_app_timeout), \
+    TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram_dtls_cookie), \
+    TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram_dtls_peer_filter), \
+    TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram_dtls_client_peer), \
+    TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram_dtls_cid_migration), \
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram)
 
 #endif

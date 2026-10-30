@@ -1017,6 +1017,399 @@ int test_wolfSSL_BIO_datagram_dtls_app_timeout(void)
     return EXPECT_RESULT();
 }
 
+#if defined(TEST_BIO_DGRAM_SOCKETS) && !defined(NO_WOLFSSL_CLIENT) && \
+    !defined(NO_WOLFSSL_SERVER) && !defined(NO_FILESYSTEM) && \
+    !defined(NO_CERTS) && !defined(NO_RSA)
+#define TEST_BIO_DGRAM_SERVER
+
+/* DTLS server over an unconnected datagram BIO on a new socket. */
+static WOLFSSL* test_dgram_server(WOLFSSL_CTX** ctx, method_provider method,
+    SOCKADDR_IN* sin)
+{
+    SOCKET_T fd = test_dgram_socket(sin, 0);
+    WOLFSSL_BIO* bio = NULL;
+    WOLFSSL* ssl = NULL;
+
+    if (fd == SOCKET_INVALID ||
+            (bio = wolfSSL_BIO_new_dgram(fd, 1)) == NULL) {
+        if (fd != SOCKET_INVALID)
+            CloseSocket(fd);
+        return NULL;
+    }
+    if ((*ctx = wolfSSL_CTX_new(method())) != NULL &&
+            wolfSSL_CTX_use_certificate_file(*ctx, svrCertFile,
+                WOLFSSL_FILETYPE_PEM) == WOLFSSL_SUCCESS &&
+            wolfSSL_CTX_use_PrivateKey_file(*ctx, svrKeyFile,
+                WOLFSSL_FILETYPE_PEM) == WOLFSSL_SUCCESS &&
+            (ssl = wolfSSL_new(*ctx)) != NULL) {
+        wolfSSL_set_bio(ssl, bio, bio);
+        wolfSSL_dtls_set_using_nonblock(ssl, 1);
+        bio = NULL;
+    }
+    if (bio != NULL)
+        wolfSSL_BIO_free(bio);
+    return ssl;
+}
+
+static int test_dgram_handshake(WOLFSSL* client, WOLFSSL* server)
+{
+    int cRet = WOLFSSL_FATAL_ERROR;
+    int sRet = WOLFSSL_FATAL_ERROR;
+    int i;
+
+    for (i = 0; i < 100 &&
+            (cRet != WOLFSSL_SUCCESS || sRet != WOLFSSL_SUCCESS); i++) {
+        if (cRet != WOLFSSL_SUCCESS) {
+            cRet = wolfSSL_connect(client);
+            if (cRet != WOLFSSL_SUCCESS && wolfSSL_get_error(client, cRet) !=
+                    WOLFSSL_ERROR_WANT_READ)
+                break;
+        }
+        if (sRet != WOLFSSL_SUCCESS) {
+            sRet = wolfSSL_accept(server);
+            if (sRet != WOLFSSL_SUCCESS && wolfSSL_get_error(server, sRet) !=
+                    WOLFSSL_ERROR_WANT_READ)
+                break;
+        }
+    }
+    return (cRet == WOLFSSL_SUCCESS && sRet == WOLFSSL_SUCCESS) ?
+        TEST_SUCCESS : TEST_FAIL;
+}
+
+static WOLFSSL_CTX* test_dgram_client_ctx(method_provider method)
+{
+    WOLFSSL_CTX* ctx = wolfSSL_CTX_new(method());
+
+    if (ctx != NULL)
+        wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, NULL);
+    return ctx;
+}
+
+static int test_dgram_peer_port(WOLFSSL* ssl, SOCKADDR_IN* sin)
+{
+    SOCKADDR_IN peer;
+    unsigned int peerSz = (unsigned int)sizeof(peer);
+
+    XMEMSET(&peer, 0, sizeof(peer));
+    if (wolfSSL_dtls_get_peer(ssl, &peer, &peerSz) != WOLFSSL_SUCCESS)
+        return 0;
+    return peer.sin_port == sin->sin_port;
+}
+#endif
+
+#if defined(TEST_BIO_DGRAM_SERVER) && (!defined(WOLFSSL_NO_TLS12) || \
+    (defined(WOLFSSL_DTLS13) && defined(WOLFSSL_SEND_HRR_COOKIE)))
+#define TEST_BIO_DGRAM_COOKIE
+
+/* Sends ch from src to a new server on a datagram BIO and reads the reply. */
+static int test_dgram_cookie_reply(method_provider method, int v13,
+    const char* ch, int chSz, SOCKET_T src, char* reply, int* replySz)
+{
+    EXPECT_DECLS;
+    static const byte secret[32] = { 1 };
+    SOCKADDR_IN sin;
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL* ssl = NULL;
+
+    ExpectNotNull(ssl = test_dgram_server(&ctx, method, &sin));
+#if defined(WOLFSSL_DTLS13) && defined(WOLFSSL_SEND_HRR_COOKIE)
+    if (v13) {
+        ExpectIntEQ(wolfSSL_send_hrr_cookie(ssl, secret, sizeof(secret)),
+            WOLFSSL_SUCCESS);
+    }
+    else
+#endif
+    {
+        ExpectIntEQ(wolfSSL_DTLS_SetCookieSecret(ssl, secret, sizeof(secret)),
+            0);
+    }
+    (void)v13;
+
+    ExpectIntEQ((int)sendto(src, ch, (size_t)chSz, 0,
+        (const struct sockaddr*)&sin, sizeof(sin)), chSz);
+    ExpectIntEQ(wolfSSL_accept(ssl), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(ssl, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_READ);
+    ExpectIntGT(*replySz = (int)recv(src, reply, (size_t)*replySz, 0), 0);
+
+    wolfSSL_free(ssl);
+    wolfSSL_CTX_free(ctx);
+    return EXPECT_RESULT();
+}
+#endif
+
+int test_wolfSSL_BIO_datagram_dtls_cookie(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_BIO_DGRAM_COOKIE
+    static const struct {
+        method_provider client;
+        method_provider server;
+        int v13;
+    } params[] = {
+#ifndef WOLFSSL_NO_TLS12
+        { wolfDTLSv1_2_client_method, wolfDTLSv1_2_server_method, 0 },
+#endif
+#if defined(WOLFSSL_DTLS13) && defined(WOLFSSL_SEND_HRR_COOKIE)
+        { wolfDTLSv1_3_client_method, wolfDTLSv1_3_server_method, 1 },
+#endif
+    };
+    size_t i;
+
+    for (i = 0; i < XELEM_CNT(params) && EXPECT_SUCCESS(); i++) {
+        SOCKET_T fdc = SOCKET_INVALID;
+        SOCKET_T cap = SOCKET_INVALID;
+        SOCKET_T src1 = SOCKET_INVALID;
+        SOCKET_T src2 = SOCKET_INVALID;
+        SOCKADDR_IN sinc, sinCap, sin1, sin2;
+        WOLFSSL_CTX* ctx = NULL;
+        WOLFSSL* ssl = NULL;
+        char ch[1500];
+        char reply1[1500];
+        char reply2[1500];
+        int chSz = 0;
+        int sz1 = (int)sizeof(reply1);
+        int sz2 = (int)sizeof(reply2);
+
+        ExpectIntNE(fdc = test_dgram_socket(&sinc, 1), SOCKET_INVALID);
+        ExpectIntNE(cap = test_dgram_socket(&sinCap, 0), SOCKET_INVALID);
+        ExpectIntNE(src1 = test_dgram_socket(&sin1, 0), SOCKET_INVALID);
+        ExpectIntNE(src2 = test_dgram_socket(&sin2, 0), SOCKET_INVALID);
+        ExpectNotNull(ctx = wolfSSL_CTX_new(params[i].client()));
+        ExpectNotNull(ssl = test_dgram_client(ctx, fdc, &sinCap, 1));
+        wolfSSL_dtls_set_using_nonblock(ssl, 1);
+        ExpectIntEQ(wolfSSL_connect(ssl), WOLFSSL_FATAL_ERROR);
+        ExpectIntGT(chSz = (int)recv(cap, ch, sizeof(ch), 0), 0);
+
+        ExpectIntEQ(test_dgram_cookie_reply(params[i].server, params[i].v13,
+            ch, chSz, src1, reply1, &sz1), TEST_SUCCESS);
+        ExpectIntEQ(test_dgram_cookie_reply(params[i].server, params[i].v13,
+            ch, chSz, src2, reply2, &sz2), TEST_SUCCESS);
+        ExpectIntEQ(sz1, sz2);
+        ExpectIntNE(XMEMCMP(reply1, reply2, (size_t)sz1), 0);
+
+        wolfSSL_free(ssl);
+        wolfSSL_CTX_free(ctx);
+        if (cap != SOCKET_INVALID)
+            CloseSocket(cap);
+        if (src1 != SOCKET_INVALID)
+            CloseSocket(src1);
+        if (src2 != SOCKET_INVALID)
+            CloseSocket(src2);
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
+int test_wolfSSL_BIO_datagram_dtls_peer_filter(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_BIO_DGRAM_SERVER
+#ifndef WOLFSSL_NO_TLS12
+    method_provider clientMethod = wolfDTLSv1_2_client_method;
+    method_provider serverMethod = wolfDTLSv1_2_server_method;
+#else
+    method_provider clientMethod = wolfDTLS_client_method;
+    method_provider serverMethod = wolfDTLS_server_method;
+#endif
+    SOCKET_T fdc = SOCKET_INVALID, fdo = SOCKET_INVALID;
+    int fds = SOCKET_INVALID;
+    SOCKADDR_IN sinc, sins, sino;
+    WOLFSSL_CTX* ctxc = NULL;
+    WOLFSSL_CTX* ctxs = NULL;
+    WOLFSSL* client = NULL;
+    WOLFSSL* server = NULL;
+    char buf[16];
+    char rec[1500];
+    int recSz = 0;
+    int i;
+
+    ExpectNotNull(server = test_dgram_server(&ctxs, serverMethod, &sins));
+    ExpectIntNE(wolfSSL_BIO_get_fd(wolfSSL_SSL_get_rbio(server), &fds),
+        WOLFSSL_FATAL_ERROR);
+    ExpectIntNE(fdc = test_dgram_socket(&sinc, 0), SOCKET_INVALID);
+    ExpectIntNE(fdo = test_dgram_socket(&sino, 0), SOCKET_INVALID);
+    ExpectNotNull(ctxc = test_dgram_client_ctx(clientMethod));
+    ExpectNotNull(client = test_dgram_client(ctxc, fdc, &sins, 1));
+    wolfSSL_dtls_set_using_nonblock(client, 1);
+    ExpectIntEQ(test_dgram_handshake(client, server), TEST_SUCCESS);
+
+    ExpectIntEQ(wolfSSL_write(client, "ping", 4), 4);
+    ExpectIntGT(recSz = (int)recv(fds, rec, sizeof(rec), 0), 0);
+    ExpectIntEQ((int)sendto(fdo, rec, (size_t)recSz, 0,
+        (const struct sockaddr*)&sins, sizeof(sins)), recSz);
+    ExpectIntEQ(wolfSSL_read(server, buf, sizeof(buf)), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(server, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_READ);
+    ExpectIntEQ(wolfSSL_write(server, "hello", 5), 5);
+    ExpectIntEQ(wolfSSL_read(client, buf, sizeof(buf)), 5);
+    ExpectIntEQ(test_dgram_count(fdo), 0);
+
+    /* A blocking read outlasts any number of foreign datagrams. */
+    wolfSSL_dtls_set_using_nonblock(server, 0);
+    for (i = 0; i < 20; i++) {
+        ExpectIntEQ((int)sendto(fdo, "x", 1, 0,
+            (const struct sockaddr*)&sins, sizeof(sins)), 1);
+    }
+    ExpectIntEQ(wolfSSL_write(client, "pong", 4), 4);
+    ExpectIntEQ(wolfSSL_read(server, buf, sizeof(buf)), 4);
+    ExpectIntEQ(test_dgram_peer_port(server, &sinc), 1);
+
+    wolfSSL_free(client);
+    wolfSSL_free(server);
+    wolfSSL_CTX_free(ctxc);
+    wolfSSL_CTX_free(ctxs);
+    if (fdo != SOCKET_INVALID)
+        CloseSocket(fdo);
+#endif
+    return EXPECT_RESULT();
+}
+
+int test_wolfSSL_BIO_datagram_dtls_client_peer(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_BIO_DGRAM_SERVER
+    SOCKET_T fdc = SOCKET_INVALID, fdc2 = SOCKET_INVALID;
+    SOCKET_T fdo = SOCKET_INVALID;
+    SOCKADDR_IN sinc, sinc2, sinA, sinB, sino;
+    WOLFSSL_CTX* ctxc = NULL;
+    WOLFSSL_CTX* ctxA = NULL;
+    WOLFSSL_CTX* ctxB = NULL;
+    WOLFSSL* client = NULL;
+    WOLFSSL* client2 = NULL;
+    WOLFSSL* serverA = NULL;
+    WOLFSSL* serverB = NULL;
+    WOLFSSL_BIO* bio = NULL;
+    WOLFSSL_BIO_ADDR addr;
+
+    ExpectNotNull(serverA = test_dgram_server(&ctxA, wolfDTLS_server_method,
+        &sinA));
+    ExpectNotNull(serverB = test_dgram_server(&ctxB, wolfDTLS_server_method,
+        &sinB));
+    ExpectIntNE(fdc = test_dgram_socket(&sinc, 0), SOCKET_INVALID);
+    ExpectIntNE(fdo = test_dgram_socket(&sino, 0), SOCKET_INVALID);
+    ExpectNotNull(ctxc = test_dgram_client_ctx(wolfDTLS_client_method));
+
+    /* A stray datagram before the server's reply is not the peer. */
+    ExpectNotNull(client = test_dgram_client(ctxc, fdc, &sinA, 0));
+    wolfSSL_dtls_set_using_nonblock(client, 1);
+    ExpectIntEQ(wolfSSL_connect(client), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ((int)sendto(fdo, "x", 1, 0, (const struct sockaddr*)&sinc,
+        sizeof(sinc)), 1);
+    ExpectIntEQ(test_dgram_handshake(client, serverA), TEST_SUCCESS);
+    ExpectIntEQ(test_dgram_peer_port(client, &sinA), 1);
+
+    /* After wolfSSL_clear the BIO's new peer is used. */
+    ExpectIntEQ(wolfSSL_clear(client), WOLFSSL_SUCCESS);
+    wolfSSL_BIO_ADDR_clear(&addr);
+    XMEMCPY(&addr.sa_in, &sinB, sizeof(sinB));
+    ExpectIntEQ((int)wolfSSL_BIO_ctrl(wolfSSL_SSL_get_rbio(client),
+        BIO_CTRL_DGRAM_SET_PEER, 0, &addr), WOLFSSL_SUCCESS);
+    ExpectIntEQ(test_dgram_handshake(client, serverB), TEST_SUCCESS);
+    ExpectIntEQ(test_dgram_peer_port(client, &sinB), 1);
+
+    /* So is the peer of a BIO set during the handshake. */
+    wolfSSL_free(serverB);
+    serverB = NULL;
+    wolfSSL_CTX_free(ctxB);
+    ctxB = NULL;
+    ExpectNotNull(serverB = test_dgram_server(&ctxB, wolfDTLS_server_method,
+        &sinB));
+    ExpectNotNull(client2 = test_dgram_client(ctxc,
+        test_dgram_socket(&sinc2, 0), &sinA, 0));
+    wolfSSL_dtls_set_using_nonblock(client2, 1);
+    ExpectIntEQ(wolfSSL_connect(client2), WOLFSSL_FATAL_ERROR);
+    ExpectIntNE(fdc2 = test_dgram_socket(&sinc2, 0), SOCKET_INVALID);
+    ExpectNotNull(bio = wolfSSL_BIO_new_dgram(fdc2, 1));
+    if (bio == NULL && fdc2 != SOCKET_INVALID)
+        CloseSocket(fdc2);
+    XMEMCPY(&addr.sa_in, &sinB, sizeof(sinB));
+    ExpectIntEQ((int)wolfSSL_BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_PEER, 0, &addr),
+        WOLFSSL_SUCCESS);
+    if (client2 != NULL) {
+        wolfSSL_set_bio(client2, bio, bio);
+        bio = NULL;
+    }
+    ExpectIntEQ(wolfSSL_dtls_got_timeout(client2), WOLFSSL_SUCCESS);
+    ExpectIntEQ(test_dgram_handshake(client2, serverB), TEST_SUCCESS);
+    ExpectIntEQ(test_dgram_peer_port(client2, &sinB), 1);
+
+    if (bio != NULL)
+        wolfSSL_BIO_free(bio);
+    wolfSSL_free(client);
+    wolfSSL_free(client2);
+    wolfSSL_free(serverA);
+    wolfSSL_free(serverB);
+    wolfSSL_CTX_free(ctxc);
+    wolfSSL_CTX_free(ctxA);
+    wolfSSL_CTX_free(ctxB);
+    if (fdo != SOCKET_INVALID)
+        CloseSocket(fdo);
+#endif
+    return EXPECT_RESULT();
+}
+
+int test_wolfSSL_BIO_datagram_dtls_cid_migration(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_BIO_DGRAM_SERVER) && defined(WOLFSSL_DTLS_CID)
+    unsigned char clientCid[] = { 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
+    unsigned char serverCid[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+    SOCKET_T fdc = SOCKET_INVALID, fdc2 = SOCKET_INVALID;
+    SOCKADDR_IN sinc, sinc2, sins;
+    WOLFSSL_CTX* ctxc = NULL;
+    WOLFSSL_CTX* ctxs = NULL;
+    WOLFSSL* client = NULL;
+    WOLFSSL* server = NULL;
+    WOLFSSL_BIO* bio = NULL;
+    WOLFSSL_BIO_ADDR addr;
+    char buf[16];
+
+    ExpectNotNull(server = test_dgram_server(&ctxs, wolfDTLS_server_method,
+        &sins));
+    ExpectIntNE(fdc = test_dgram_socket(&sinc, 0), SOCKET_INVALID);
+    ExpectNotNull(ctxc = test_dgram_client_ctx(wolfDTLS_client_method));
+    ExpectNotNull(client = test_dgram_client(ctxc, fdc, &sins, 1));
+    wolfSSL_dtls_set_using_nonblock(client, 1);
+    ExpectIntEQ(wolfSSL_dtls_cid_use(client), 1);
+    ExpectIntEQ(wolfSSL_dtls_cid_set(client, serverCid, sizeof(serverCid)), 1);
+    ExpectIntEQ(wolfSSL_dtls_cid_use(server), 1);
+    ExpectIntEQ(wolfSSL_dtls_cid_set(server, clientCid, sizeof(clientCid)), 1);
+    ExpectIntEQ(test_dgram_handshake(client, server), TEST_SUCCESS);
+
+    /* The client moves to a new port that the server stages as its peer. */
+    ExpectIntNE(fdc2 = test_dgram_socket(&sinc2, 0), SOCKET_INVALID);
+    ExpectIntEQ(connect(fdc2, (const struct sockaddr*)&sins, sizeof(sins)), 0);
+    ExpectNotNull(bio = wolfSSL_BIO_new_dgram(fdc2, 1));
+    if (bio == NULL && fdc2 != SOCKET_INVALID)
+        CloseSocket(fdc2);
+    wolfSSL_BIO_ADDR_clear(&addr);
+    XMEMCPY(&addr.sa_in, &sins, sizeof(sins));
+    ExpectIntEQ((int)wolfSSL_BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_CONNECTED, 0,
+        &addr), WOLFSSL_SUCCESS);
+    if (client != NULL) {
+        wolfSSL_set_bio(client, bio, bio);
+        bio = NULL;
+    }
+    ExpectIntEQ(wolfSSL_dtls_set_pending_peer(server, &sinc2, sizeof(sinc2)),
+        WOLFSSL_SUCCESS);
+
+    ExpectIntEQ(wolfSSL_write(client, "ping", 4), 4);
+    ExpectIntEQ(wolfSSL_read(server, buf, sizeof(buf)), 4);
+    ExpectIntEQ(test_dgram_peer_port(server, &sinc2), 1);
+    ExpectIntEQ(wolfSSL_write(server, "hello", 5), 5);
+    ExpectIntEQ(wolfSSL_read(client, buf, sizeof(buf)), 5);
+
+    if (bio != NULL)
+        wolfSSL_BIO_free(bio);
+    wolfSSL_free(client);
+    wolfSSL_free(server);
+    wolfSSL_CTX_free(ctxc);
+    wolfSSL_CTX_free(ctxs);
+#endif
+    return EXPECT_RESULT();
+}
+
 int test_wolfSSL_BIO_s_null(void)
 {
     EXPECT_DECLS;

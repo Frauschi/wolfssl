@@ -4374,6 +4374,12 @@ int wolfSSL_set_compression(WOLFSSL* ssl)
         if (flags & WOLFSSL_BIO_FLAG_WRITE)
             ssl->biowr = wr;
 
+    #ifdef WOLFSSL_DTLS
+        /* A peer learned through the old BIO does not apply to the new one. */
+        if (ssl->options.dtls && !ssl->buffers.dtlsCtx.userSet)
+            (void)wolfSSL_dtls_set_peer(ssl, NULL, 0);
+    #endif
+
         /* set SSL to use BIO callbacks instead */
         if ((flags & WOLFSSL_BIO_FLAG_READ) &&
             (((ssl->cbioFlag & WOLFSSL_CBIO_RECV) == 0)))
@@ -5930,6 +5936,9 @@ size_t wolfSSL_get_client_random(const WOLFSSL* ssl, unsigned char* out,
     #endif
     #ifdef WOLFSSL_DTLS
         ssl->options.dtlsStateful = 0;
+        /* A learned peer belongs to the old connection. */
+        if (ssl->options.dtls && !ssl->buffers.dtlsCtx.userSet)
+            (void)wolfSSL_dtls_set_peer(ssl, NULL, 0);
     #endif
     #ifdef WOLFSSL_TLS13
     #if defined(HAVE_SESSION_TICKET) || !defined(NO_PSK)

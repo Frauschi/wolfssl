@@ -394,6 +394,16 @@ int SslBioSend(WOLFSSL* ssl, char *buf, int sz, void *ctx)
         WOLFSSL_MSG("WOLFSSL biowr not set");
         return WOLFSSL_CBIO_ERR_GENERAL;
     }
+#if defined(USE_WOLFSSL_IO) && defined(WOLFSSL_DTLS) && \
+    defined(WOLFSSL_HAVE_BIO_ADDR)
+    /* Send to the DTLS peer, as EmbedSendTo does. */
+    if (ssl->options.dtls && ssl->biowr->type == WOLFSSL_BIO_DGRAM &&
+            !ssl->biowr->connected && ssl->buffers.dtlsCtx.peer.sa != NULL &&
+            ssl->buffers.dtlsCtx.peer.sz <= sizeof(ssl->biowr->peer_addr)) {
+        XMEMCPY(&ssl->biowr->peer_addr, ssl->buffers.dtlsCtx.peer.sa,
+                ssl->buffers.dtlsCtx.peer.sz);
+    }
+#endif
 
     sent = wolfSSL_BIO_write(ssl->biowr, buf, sz);
     if (sent <= 0) {
@@ -740,6 +750,26 @@ static int DtlsRecvCheckPeer(WOLFSSL* ssl, int newPeer, SOCKADDR_S* peer,
     }
 #endif /* !WOLFSSL_PEER_ADDRESS_CHANGES */
 
+#ifdef WOLFSSL_DTLS_CID
+    if (*ignore) {
+        /* The pending peer becomes the peer once its record verifies. */
+    #ifdef WOLFSSL_RW_THREADED
+        if (wc_LockRwLock_Rd(&dtlsCtx->peerLock) != 0)
+            return WOLFSSL_CBIO_ERR_GENERAL;
+    #endif
+        if (dtlsCtx->pendingPeer.sa != NULL &&
+                sockAddrEqual(peer, peerSz,
+                    (SOCKADDR_S*)dtlsCtx->pendingPeer.sa,
+                    dtlsCtx->pendingPeer.sz)) {
+            *ignore = 0;
+        }
+    #ifdef WOLFSSL_RW_THREADED
+        if (wc_UnLockRwLock(&dtlsCtx->peerLock) != 0)
+            return WOLFSSL_CBIO_ERR_GENERAL;
+    #endif
+    }
+#endif /* WOLFSSL_DTLS_CID */
+
     return 0;
 }
 
@@ -994,8 +1024,6 @@ static int DtlsRecvBio(WOLFSSL* ssl, void* ctx, char* buf, int sz,
     int ownTimeout = 0;
 
     (void)ssl;
-    (void)from;
-    (void)fromSz;
 
 #ifdef XFCNTL
     if (waitMs > 0) {
@@ -1038,7 +1066,48 @@ static int DtlsRecvBio(WOLFSSL* ssl, void* ctx, char* buf, int sz,
         return ownTimeout ? WOLFSSL_CBIO_ERR_TIMEOUT :
                             WOLFSSL_CBIO_ERR_WANT_READ;
     }
+    if (recvd > 0 && from != NULL) {
+        XSOCKLENT addrSz = (XSOCKLENT)wolfSSL_BIO_ADDR_size(&bio->peer_addr);
+
+        if (addrSz > *fromSz)
+            return WOLFSSL_CBIO_ERR_GENERAL;
+        XMEMCPY(from, &bio->peer_addr, (size_t)addrSz);
+        *fromSz = addrSz;
+    }
     return recvd;
+}
+
+/* Peer for an unconnected datagram BIO: a server learns it from the
+ * datagrams of its stateless phase, anything else takes the BIO's peer. */
+static int DtlsBioPeer(WOLFSSL* ssl, WOLFSSL_BIO* bio, int* newPeer)
+{
+    WOLFSSL_DTLS_CTX* dtlsCtx = &ssl->buffers.dtlsCtx;
+    int learn = ssl->options.side == WOLFSSL_SERVER_END &&
+                !ssl->options.dtlsStateful;
+    int havePeer;
+    socklen_t bioPeerSz;
+
+#ifdef WOLFSSL_RW_THREADED
+    if (wc_LockRwLock_Rd(&dtlsCtx->peerLock) != 0)
+        return WOLFSSL_CBIO_ERR_GENERAL;
+#endif
+    havePeer = dtlsCtx->peer.sa != NULL;
+#ifdef WOLFSSL_RW_THREADED
+    if (wc_UnLockRwLock(&dtlsCtx->peerLock) != 0)
+        return WOLFSSL_CBIO_ERR_GENERAL;
+#endif
+
+    bioPeerSz = wolfSSL_BIO_ADDR_size(&bio->peer_addr);
+    if (!havePeer && !learn && bioPeerSz > 0) {
+        if (wolfSSL_dtls_set_peer(ssl, &bio->peer_addr,
+                (unsigned int)bioPeerSz) != WOLFSSL_SUCCESS) {
+            return WOLFSSL_CBIO_ERR_GENERAL;
+        }
+        dtlsCtx->userSet = 0;
+        havePeer = 1;
+    }
+    *newPeer = learn || !havePeer;
+    return 0;
 }
 
 /* DTLS read from a datagram BIO through the loop EmbedReceiveFrom uses. */
@@ -1047,6 +1116,9 @@ static int SslBioReceiveDgram(WOLFSSL* ssl, char* buf, int sz)
     DtlsBioRecvCtx rctx;
     int blocking = !wolfSSL_dtls_get_using_nonblock(ssl);
     int canTimeout = 0;
+    int filter;
+    int newPeer = 0;
+    int ret;
 
     XMEMSET(&rctx, 0, sizeof(rctx));
     rctx.bio = ssl->biord;
@@ -1055,8 +1127,14 @@ static int SslBioReceiveDgram(WOLFSSL* ssl, char* buf, int sz)
         blocking = 0;
     canTimeout = 1;
 #endif
+    filter = !rctx.bio->connected;
+    if (filter) {
+        ret = DtlsBioPeer(ssl, rctx.bio, &newPeer);
+        if (ret != 0)
+            return ret;
+    }
     return DtlsReceive(ssl, DtlsRecvBio, &rctx, buf, sz, blocking, canTimeout,
-                       0, 0);
+                       filter, newPeer);
 }
 #endif /* OPENSSL_EXTRA && !NO_BIO && WOLFSSL_HAVE_BIO_ADDR */
 
