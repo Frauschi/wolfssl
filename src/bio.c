@@ -385,9 +385,13 @@ int wolfSSL_BIO_read(WOLFSSL_BIO* bio, void* buf, int len)
                 if (bio->connected)
                     ret = wolfIO_Recv(bio->num.fd, (char*)buf, len, 0);
                 else {
-                    wolfSSL_BIO_ADDR_clear(&bio->peer_addr);
-                    ret = wolfIO_RecvFrom(bio->num.fd, &bio->peer_addr,
-                                          (char*)buf, len, 0);
+                    WOLFSSL_BIO_ADDR from;
+
+                    wolfSSL_BIO_ADDR_clear(&from);
+                    ret = wolfIO_RecvFrom(bio->num.fd, &from, (char*)buf, len,
+                                          0);
+                    if (ret > 0)
+                        XMEMCPY(&bio->peer_addr, &from, sizeof(from));
                 }
                 if (ret == WC_NO_ERR_TRACE(WOLFSSL_CBIO_ERR_WANT_READ)) {
                     bio->flags |= WOLFSSL_BIO_FLAG_RETRY;

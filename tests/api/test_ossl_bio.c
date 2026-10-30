@@ -779,6 +779,86 @@ int test_wolfSSL_BIO_datagram(void)
     return EXPECT_RESULT();
 }
 
+#if !defined(NO_BIO) && defined(WOLFSSL_DTLS) && \
+    defined(WOLFSSL_HAVE_BIO_ADDR) && defined(OPENSSL_EXTRA) && \
+    defined(USE_WOLFSSL_IO) && !defined(USE_WINDOWS_API)
+#define TEST_BIO_DGRAM_SOCKETS
+
+/* Loopback UDP socket on an ephemeral port, its address returned in sin. */
+static SOCKET_T test_dgram_socket(SOCKADDR_IN* sin, int nonblock)
+{
+    static const struct timeval timeout = { 0, 50000 };
+    SOCKET_T fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    socklen_t slen = (socklen_t)sizeof(*sin);
+
+    XMEMSET(sin, 0, sizeof(*sin));
+    sin->sin_family = AF_INET;
+    sin->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (fd != SOCKET_INVALID &&
+            (bind(fd, (const struct sockaddr*)sin, slen) != 0 ||
+             getsockname(fd, (struct sockaddr*)sin, &slen) != 0 ||
+             (nonblock ? fcntl(fd, F_SETFL, O_NONBLOCK) :
+                 setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO,
+                     (const char*)&timeout, sizeof(timeout))) != 0)) {
+        CloseSocket(fd);
+        fd = SOCKET_INVALID;
+    }
+    return fd;
+}
+
+static int test_dgram_count(SOCKET_T fd)
+{
+    char buf[1500];
+    int n = 0;
+
+    while (recv(fd, buf, sizeof(buf), 0) >= 0)
+        n++;
+    return n;
+}
+
+#endif
+
+int test_wolfSSL_BIO_datagram_peer_kept(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_BIO_DGRAM_SOCKETS
+    SOCKET_T fd1 = SOCKET_INVALID, fd2 = SOCKET_INVALID;
+    SOCKET_T fd3 = SOCKET_INVALID;
+    SOCKADDR_IN sin1, sin2, sin3;
+    WOLFSSL_BIO* bio = NULL;
+    WOLFSSL_BIO_ADDR addr;
+    static const char msg[] = "datagram";
+    char buf[sizeof(msg)];
+
+    ExpectIntNE(fd1 = test_dgram_socket(&sin1, 0), SOCKET_INVALID);
+    ExpectIntNE(fd2 = test_dgram_socket(&sin2, 0), SOCKET_INVALID);
+    ExpectIntNE(fd3 = test_dgram_socket(&sin3, 0), SOCKET_INVALID);
+    ExpectNotNull(bio = wolfSSL_BIO_new_dgram(fd1, 1));
+    if (bio == NULL && fd1 != SOCKET_INVALID)
+        CloseSocket(fd1);
+
+    wolfSSL_BIO_ADDR_clear(&addr);
+    XMEMCPY(&addr.sa_in, &sin2, sizeof(sin2));
+    ExpectIntEQ((int)wolfSSL_BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_PEER, 0, &addr),
+        WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_BIO_read(bio, buf, sizeof(buf)), WOLFSSL_BIO_ERROR);
+    ExpectIntNE(BIO_should_retry(bio), 0);
+    ExpectIntEQ((int)sendto(fd3, "", 0, 0, (const struct sockaddr*)&sin1,
+        sizeof(sin1)), 0);
+    ExpectIntEQ(wolfSSL_BIO_read(bio, buf, sizeof(buf)), 0);
+    ExpectIntEQ(wolfSSL_BIO_write(bio, msg, sizeof(msg)), (int)sizeof(msg));
+    ExpectIntEQ((int)recv(fd2, buf, sizeof(buf), 0), (int)sizeof(msg));
+    ExpectIntEQ(test_dgram_count(fd3), 0);
+
+    wolfSSL_BIO_free(bio);
+    if (fd2 != SOCKET_INVALID)
+        CloseSocket(fd2);
+    if (fd3 != SOCKET_INVALID)
+        CloseSocket(fd3);
+#endif
+    return EXPECT_RESULT();
+}
+
 int test_wolfSSL_BIO_s_null(void)
 {
     EXPECT_DECLS;
