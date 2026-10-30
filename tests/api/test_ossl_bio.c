@@ -929,6 +929,94 @@ int test_wolfSSL_BIO_datagram_dtls_empty(void)
     return EXPECT_RESULT();
 }
 
+int test_wolfSSL_BIO_datagram_dtls_rtx(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_BIO_DGRAM_SOCKETS) && !defined(NO_WOLFSSL_CLIENT)
+    static const struct timeval appTimeout = { 1, 200000 };
+    struct timeval tv;
+    socklen_t tvSz = (socklen_t)sizeof(tv);
+    SOCKET_T fdc = SOCKET_INVALID, fds = SOCKET_INVALID;
+    SOCKADDR_IN sinc, sins;
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL* ssl = NULL;
+
+    ExpectIntNE(fdc = test_dgram_socket(&sinc, 0), SOCKET_INVALID);
+    ExpectIntNE(fds = test_dgram_socket(&sins, 0), SOCKET_INVALID);
+    ExpectIntEQ(setsockopt(fdc, SOL_SOCKET, SO_RCVTIMEO,
+        (const char*)&appTimeout, sizeof(appTimeout)), 0);
+#ifdef WOLFSSL_DTLS13
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfDTLSv1_3_client_method()));
+#else
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfDTLS_client_method()));
+#endif
+    ExpectNotNull(ssl = test_dgram_client(ctx, fdc, &sins, 1));
+    ExpectIntEQ(wolfSSL_dtls_set_timeout_init(ssl, 1), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_dtls_set_timeout_max(ssl, 2), WOLFSSL_SUCCESS);
+
+    /* 1s DTLS timeout, retransmit, then the shorter 1.2s of the socket. */
+    ExpectIntEQ(wolfSSL_connect(ssl), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(ssl, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_READ);
+    ExpectIntEQ(test_dgram_count(fds), 2);
+    ExpectIntEQ(getsockopt(fdc, SOL_SOCKET, SO_RCVTIMEO, (char*)&tv, &tvSz),
+        0);
+    ExpectIntEQ((int)tv.tv_sec, (int)appTimeout.tv_sec);
+    ExpectIntEQ((int)tv.tv_usec, (int)appTimeout.tv_usec);
+
+    wolfSSL_free(ssl);
+    wolfSSL_CTX_free(ctx);
+    if (fds != SOCKET_INVALID)
+        CloseSocket(fds);
+#endif
+    return EXPECT_RESULT();
+}
+
+int test_wolfSSL_BIO_datagram_dtls_app_timeout(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_BIO_DGRAM_SOCKETS) && !defined(NO_WOLFSSL_CLIENT)
+    static const struct timeval appTimeout = { 0, 200000 };
+    SOCKET_T fdc = SOCKET_INVALID, fds = SOCKET_INVALID;
+    SOCKADDR_IN sinc, sins;
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL* ssl = NULL;
+    int i;
+    int n = 0;
+
+    ExpectIntNE(fdc = test_dgram_socket(&sinc, 0), SOCKET_INVALID);
+    ExpectIntNE(fds = test_dgram_socket(&sins, 0), SOCKET_INVALID);
+    ExpectIntEQ(setsockopt(fdc, SOL_SOCKET, SO_RCVTIMEO,
+        (const char*)&appTimeout, sizeof(appTimeout)), 0);
+#ifndef WOLFSSL_NO_TLS12
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfDTLSv1_2_client_method()));
+#else
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfDTLS_client_method()));
+#endif
+    ExpectNotNull(ssl = test_dgram_client(ctx, fdc, &sins, 1));
+    ExpectIntEQ(wolfSSL_dtls_set_timeout_init(ssl, 1), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_dtls_set_timeout_max(ssl, 2), WOLFSSL_SUCCESS);
+
+    ExpectIntEQ(wolfSSL_connect(ssl), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(ssl, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_READ);
+    ExpectIntEQ(test_dgram_count(fds), 1);
+    for (i = 0; i < 15 && n == 0 && EXPECT_SUCCESS(); i++) {
+        ExpectIntEQ(wolfSSL_connect(ssl), WOLFSSL_FATAL_ERROR);
+        ExpectIntEQ(wolfSSL_get_error(ssl, WOLFSSL_FATAL_ERROR),
+            WOLFSSL_ERROR_WANT_READ);
+        n = test_dgram_count(fds);
+    }
+    ExpectIntEQ(n, 1);
+
+    wolfSSL_free(ssl);
+    wolfSSL_CTX_free(ctx);
+    if (fds != SOCKET_INVALID)
+        CloseSocket(fds);
+#endif
+    return EXPECT_RESULT();
+}
+
 int test_wolfSSL_BIO_s_null(void)
 {
     EXPECT_DECLS;

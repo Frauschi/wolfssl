@@ -743,28 +743,69 @@ static int DtlsRecvCheckPeer(WOLFSSL* ssl, int newPeer, SOCKADDR_S* peer,
     return 0;
 }
 
+/* Milliseconds left on the DTLS timers that run, or on the whole timeout
+ * counted from callStart when none runs. */
+static int DtlsRecvWaitMs(WOLFSSL* ssl, int running, word32 callStart)
+{
+    word32 timeout = (word32)ssl->dtls_timeout;
+    word32 left;
+#ifndef NO_ASN_TIME
+    word32 elapsed;
+#endif
+
+    if (timeout > DTLS_TIMEOUT_MAX)
+        timeout = DTLS_TIMEOUT_MAX;
+    timeout *= 1000;
+    left = timeout;
+#ifndef NO_ASN_TIME
+    elapsed = DtlsTimerElapsedMs((running & DTLS_TIMER_RTX) ?
+                                 ssl->dtls_timer_start : callStart);
+    left = (elapsed < timeout) ? timeout - elapsed : 0;
+#endif
+#ifdef WOLFSSL_DTLS13
+    /* A throttled DTLS 1.3 retransmission would only be put off again. */
+    if ((running & DTLS_TIMER_RTX) && IsAtLeastTLSv1_3(ssl->version) &&
+            Dtls13RtxWaitMs(ssl) > left) {
+        left = Dtls13RtxWaitMs(ssl);
+    }
+    if (running & DTLS_TIMER_ACK) {
+        word32 ackLeft = timeout / 4;
+    #ifndef NO_ASN_TIME
+        elapsed = DtlsTimerElapsedMs(ssl->dtls_ack_timer_start);
+        ackLeft = (elapsed < ackLeft) ? ackLeft - elapsed : 0;
+    #endif
+        if (ackLeft < left || !(running & DTLS_TIMER_RTX))
+            left = ackLeft;
+    }
+#endif
+    (void)running;
+    (void)callStart;
+    return (int)left;
+}
+
 /* Receive loop of the socket and datagram BIO paths: bounds a blocking read
- * by the DTLS timeout and drops empty datagrams and those of other peers. */
+ * by the DTLS timers and drops empty datagrams and those of other peers. */
 static int DtlsReceive(WOLFSSL* ssl, DtlsRecvCb recvCb, void* cbCtx,
                        char* buf, int sz, int blocking, int canTimeout,
                        int filter, int newPeer)
 {
     int recvd;
     int ret;
+    int running;
     int ignored = 0;
-    int dtls_timeout = wolfSSL_dtls_get_current_timeout(ssl);
     byte doDtlsTimeout;
-#ifndef NO_ASN_TIME
-    word32 start = 0;
-#endif
+    word32 callStart = 0;
 
+#ifndef NO_ASN_TIME
+    callStart = DtlsTimerNowMs();
+#endif
     /* Don't use ssl->options.handShakeDone since it is true even if
      * we are in the process of renegotiation */
-    ret = DtlsTimersRunning(ssl);
-    if (ret < 0)
-        return ret;
-    doDtlsTimeout = canTimeout &&
-        (ssl->options.handShakeState != HANDSHAKE_DONE || ret != 0);
+    running = DtlsTimersRunning(ssl);
+    if (running < 0)
+        return running;
+    doDtlsTimeout = canTimeout && ssl->dtls_timeout > 0 &&
+        (ssl->options.handShakeState != HANDSHAKE_DONE || running != 0);
 
     do {
         int ignore = 0;
@@ -772,29 +813,13 @@ static int DtlsReceive(WOLFSSL* ssl, DtlsRecvCb recvCb, void* cbCtx,
         SOCKADDR_S from;
         XSOCKLENT fromSz = (XSOCKLENT)sizeof(from);
 
-        if (!doDtlsTimeout) {
-            dtls_timeout = 0;
-        }
-        else {
-#ifndef NO_ASN_TIME
-            if (start == 0) {
-                start = LowResTimer();
-            }
-            else {
-                dtls_timeout -= (int) (LowResTimer() - start);
-                start = LowResTimer();
-                if (dtls_timeout < 0 || dtls_timeout > DTLS_TIMEOUT_MAX)
+        if (blocking) {
+            waitMs = 0;
+            if (doDtlsTimeout) {
+                waitMs = DtlsRecvWaitMs(ssl, running, callStart);
+                if (waitMs <= 0)
                     return WOLFSSL_CBIO_ERR_TIMEOUT;
             }
-#endif
-        }
-        if (blocking) {
-            waitMs = dtls_timeout * 1000;
-        #ifdef WOLFSSL_DTLS13
-            if (wolfSSL_dtls13_use_quick_timeout(ssl) &&
-                IsAtLeastTLSv1_3(ssl->version))
-                waitMs /= 4;
-        #endif
         }
 
         XMEMSET(&from, 0, sizeof(from));
@@ -952,22 +977,66 @@ int EmbedReceiveFrom(WOLFSSL *ssl, char *buf, int sz, void *ctx)
 
 #if defined(OPENSSL_EXTRA) && !defined(NO_BIO) && \
     defined(WOLFSSL_HAVE_BIO_ADDR)
+typedef struct DtlsBioRecvCtx {
+    WOLFSSL_BIO* bio;
+#ifdef XFCNTL
+    int haveOrig;           /* 1 when orig holds the socket's timeout */
+    struct timeval orig;
+#endif
+} DtlsBioRecvCtx;
+
 static int DtlsRecvBio(WOLFSSL* ssl, void* ctx, char* buf, int sz,
                        int waitMs, SOCKADDR_S* from, XSOCKLENT* fromSz)
 {
-    WOLFSSL_BIO* bio = (WOLFSSL_BIO*)ctx;
+    DtlsBioRecvCtx* rctx = (DtlsBioRecvCtx*)ctx;
+    WOLFSSL_BIO* bio = rctx->bio;
     int recvd;
+    int ownTimeout = 0;
 
     (void)ssl;
-    (void)waitMs;
     (void)from;
     (void)fromSz;
 
+#ifdef XFCNTL
+    if (waitMs > 0) {
+        struct timeval timeout;
+
+        if (rctx->haveOrig == 0) {
+            XSOCKLENT origSz = (XSOCKLENT)sizeof(rctx->orig);
+
+            rctx->haveOrig = (XSOCKET_GETSOCKOPT(bio->num.fd, SOL_SOCKET,
+                SO_RCVTIMEO, (XSOCKOPT_TYPE_OPTVAL_TYPE)&rctx->orig,
+                &origSz) == 0) ? 1 : -1;
+        }
+        XMEMSET(&timeout, 0, sizeof(timeout));
+        timeout.tv_sec = waitMs / 1000;
+        timeout.tv_usec = (waitMs % 1000) * 1000;
+        /* Keep a shorter receive timeout the application set. */
+        if (rctx->haveOrig == 1 &&
+                ((rctx->orig.tv_sec == 0 && rctx->orig.tv_usec == 0) ||
+                 rctx->orig.tv_sec > timeout.tv_sec ||
+                 (rctx->orig.tv_sec == timeout.tv_sec &&
+                  rctx->orig.tv_usec >= timeout.tv_usec))) {
+            ownTimeout = XSOCKET_SETSOCKOPT(bio->num.fd, SOL_SOCKET,
+                SO_RCVTIMEO, (char*)&timeout, sizeof(timeout)) == 0;
+        }
+    }
+#else
+    (void)waitMs;
+#endif
+
     recvd = wolfSSL_BIO_read(bio, buf, sz);
+#ifdef XFCNTL
+    if (ownTimeout) {
+        (void)XSOCKET_SETSOCKOPT(bio->num.fd, SOL_SOCKET, SO_RCVTIMEO,
+            (char*)&rctx->orig, sizeof(rctx->orig));
+    }
+#endif
     if (recvd < 0) {
         if ((bio->flags & WOLFSSL_BIO_FLAG_RETRY) == 0)
             return WOLFSSL_CBIO_ERR_GENERAL;
-        return WOLFSSL_CBIO_ERR_WANT_READ;
+        return ownTimeout ? WOLFSSL_CBIO_ERR_TIMEOUT :
+                            WOLFSSL_CBIO_ERR_WANT_READ;
     }
     return recvd;
 }
@@ -975,14 +1044,19 @@ static int DtlsRecvBio(WOLFSSL* ssl, void* ctx, char* buf, int sz,
 /* DTLS read from a datagram BIO through the loop EmbedReceiveFrom uses. */
 static int SslBioReceiveDgram(WOLFSSL* ssl, char* buf, int sz)
 {
-    WOLFSSL_BIO* bio = ssl->biord;
+    DtlsBioRecvCtx rctx;
     int blocking = !wolfSSL_dtls_get_using_nonblock(ssl);
+    int canTimeout = 0;
 
+    XMEMSET(&rctx, 0, sizeof(rctx));
+    rctx.bio = ssl->biord;
 #ifdef XFCNTL
-    if (blocking && (XFCNTL(bio->num.fd, F_GETFL, 0) & O_NONBLOCK) != 0)
+    if (blocking && (XFCNTL(rctx.bio->num.fd, F_GETFL, 0) & O_NONBLOCK) != 0)
         blocking = 0;
+    canTimeout = 1;
 #endif
-    return DtlsReceive(ssl, DtlsRecvBio, bio, buf, sz, blocking, 0, 0, 0);
+    return DtlsReceive(ssl, DtlsRecvBio, &rctx, buf, sz, blocking, canTimeout,
+                       0, 0);
 }
 #endif /* OPENSSL_EXTRA && !NO_BIO && WOLFSSL_HAVE_BIO_ADDR */
 
