@@ -215,18 +215,23 @@ static int IsKyberLevelAvailable(const char* line)
     #endif /* WOLFSSL_TLS_NO_MLKEM_STANDALONE */
     #ifdef WOLFSSL_PQC_HYBRIDS
         #if !defined(WOLFSSL_NO_ML_KEM_768) && defined(HAVE_ECC) && \
-            (!defined(WOLFSSL_SP_MATH) || !defined(WOLFSSL_SP_NO_256))
+            (!defined(WOLFSSL_SP_MATH) || !defined(WOLFSSL_SP_NO_256)) && \
+            (!defined(NO_ECC256) || defined(HAVE_ALL_CURVES)) && \
+            ECC_MIN_KEY_SZ <= 256
             if (MATCH_PQC(begin, "SecP256r1MLKEM768", len)) {
                 available = 1;
             }
         #endif
-        #if !defined(WOLFSSL_NO_ML_KEM_768) && defined(HAVE_CURVE25519)
+        #if !defined(WOLFSSL_NO_ML_KEM_768) && defined(HAVE_CURVE25519) && \
+            ECC_MIN_KEY_SZ <= 256
             if (MATCH_PQC(begin, "X25519MLKEM768", len)) {
                 available = 1;
             }
         #endif
         #if !defined(WOLFSSL_NO_ML_KEM_1024) && defined(HAVE_ECC) && \
-            (!defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_384))
+            (!defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_384)) && \
+            (defined(HAVE_ECC384) || defined(HAVE_ALL_CURVES)) && \
+            ECC_MIN_KEY_SZ <= 384
             if (MATCH_PQC(begin, "SecP384r1MLKEM1024", len)) {
                 available = 1;
             }
@@ -239,7 +244,9 @@ static int IsKyberLevelAvailable(const char* line)
         #endif
     #endif /* WOLFSSL_PQC_HYBRIDS */
     #ifdef WOLFSSL_EXTRA_PQC_HYBRIDS
-        #if !defined(WOLFSSL_NO_ML_KEM_512) && defined(HAVE_ECC)
+        #if !defined(WOLFSSL_NO_ML_KEM_512) && defined(HAVE_ECC) && \
+            (!defined(NO_ECC256) || defined(HAVE_ALL_CURVES)) && \
+            ECC_MIN_KEY_SZ <= 256
             if (MATCH_PQC(begin, "SecP256r1MLKEM512", len)) {
                 available = 1;
             }
@@ -249,13 +256,16 @@ static int IsKyberLevelAvailable(const char* line)
             }
         #endif
         #endif
-        #if !defined(WOLFSSL_NO_ML_KEM_512) && defined(HAVE_CURVE25519)
+        #if !defined(WOLFSSL_NO_ML_KEM_512) && defined(HAVE_CURVE25519) && \
+            ECC_MIN_KEY_SZ <= 256
             if (MATCH_PQC(begin, "X25519MLKEM512", len)) {
                 available = 1;
             }
         #endif
         #if !defined(WOLFSSL_NO_ML_KEM_768) && defined(HAVE_ECC) && \
-            (!defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_384))
+            (!defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_384)) && \
+            (defined(HAVE_ECC384) || defined(HAVE_ALL_CURVES)) && \
+            ECC_MIN_KEY_SZ <= 384
             if (MATCH_PQC(begin, "SecP384r1MLKEM768", len)) {
                 available = 1;
             }
@@ -265,13 +275,16 @@ static int IsKyberLevelAvailable(const char* line)
             }
         #endif
         #endif
-        #if !defined(WOLFSSL_NO_ML_KEM_768) && defined(HAVE_CURVE448)
+        #if !defined(WOLFSSL_NO_ML_KEM_768) && defined(HAVE_CURVE448) && \
+            ECC_MIN_KEY_SZ <= 448
             if (MATCH_PQC(begin, "X448MLKEM768", len)) {
                 available = 1;
             }
         #endif
         #if !defined(WOLFSSL_NO_ML_KEM_1024) && defined(HAVE_ECC) && \
-            (!defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_521))
+            (!defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_521)) && \
+            (defined(HAVE_ECC521) || defined(HAVE_ALL_CURVES)) && \
+            ECC_MIN_KEY_SZ <= 521
             if (MATCH_PQC(begin, "SecP521r1MLKEM1024", len)) {
                 available = 1;
             }
@@ -289,7 +302,9 @@ static int IsKyberLevelAvailable(const char* line)
             if (MATCH_PQC(begin, "KYBER_LEVEL1", len)) {
                 available = 1;
             }
-        #ifdef HAVE_ECC
+        #if defined(HAVE_ECC) && \
+            (!defined(NO_ECC256) || defined(HAVE_ALL_CURVES)) && \
+            ECC_MIN_KEY_SZ <= 256
             if (MATCH_PQC(begin, "P256_KYBER_LEVEL1", len)) {
                 available = 1;
             }
@@ -300,14 +315,19 @@ static int IsKyberLevelAvailable(const char* line)
                 available = 1;
             }
         #ifdef HAVE_ECC
-            #if !defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_384)
+            #if (!defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_384)) && \
+                (defined(HAVE_ECC384) || defined(HAVE_ALL_CURVES)) && \
+                ECC_MIN_KEY_SZ <= 384
             if (MATCH_PQC(begin, "P384_KYBER_LEVEL3", len)) {
                 available = 1;
             }
             #endif
+            #if (!defined(NO_ECC256) || defined(HAVE_ALL_CURVES)) && \
+                ECC_MIN_KEY_SZ <= 256
             if (MATCH_PQC(begin, "P256_KYBER_LEVEL3", len)) {
                 available = 1;
             }
+            #endif
         #endif
         #endif
         #ifndef WOLFSSL_NO_KYBER1024
@@ -315,24 +335,29 @@ static int IsKyberLevelAvailable(const char* line)
                 available = 1;
             }
         #ifdef HAVE_ECC
-            #if !defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_521)
+            #if (!defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_521)) && \
+                (defined(HAVE_ECC521) || defined(HAVE_ALL_CURVES)) && \
+                ECC_MIN_KEY_SZ <= 521
             if (MATCH_PQC(begin, "P521_KYBER_LEVEL5", len)) {
                 available = 1;
             }
             #endif
         #endif
         #endif
-        #if !defined(WOLFSSL_NO_KYBER512) && defined(HAVE_CURVE25519)
+        #if !defined(WOLFSSL_NO_KYBER512) && defined(HAVE_CURVE25519) && \
+            ECC_MIN_KEY_SZ <= 256
             if (MATCH_PQC(begin, "X25519_KYBER_LEVEL1", len)) {
                 available = 1;
             }
         #endif
-        #if !defined(WOLFSSL_NO_KYBER768) && defined(HAVE_CURVE25519)
+        #if !defined(WOLFSSL_NO_KYBER768) && defined(HAVE_CURVE25519) && \
+            ECC_MIN_KEY_SZ <= 256
             if (MATCH_PQC(begin, "X25519_KYBER_LEVEL3", len)) {
                 available = 1;
             }
         #endif
-        #if !defined(WOLFSSL_NO_KYBER768) && defined(HAVE_CURVE448)
+        #if !defined(WOLFSSL_NO_KYBER768) && defined(HAVE_CURVE448) && \
+            ECC_MIN_KEY_SZ <= 448
             if (MATCH_PQC(begin, "X448_KYBER_LEVEL3", len)) {
                 available = 1;
             }
