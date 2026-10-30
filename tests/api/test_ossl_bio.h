@@ -33,6 +33,7 @@ int test_wolfSSL_BIO_connect(void);
 int test_wolfSSL_BIO_tls(void);
 int test_wolfSSL_BIO_datagram(void);
 int test_wolfSSL_BIO_datagram_peer_kept(void);
+int test_wolfSSL_BIO_datagram_dtls_empty(void);
 int test_wolfSSL_BIO_s_null(void);
 int test_wolfSSL_BIO_accept(void);
 int test_wolfSSL_BIO_write(void);
@@ -84,6 +85,7 @@ int test_wolfSSL_BIO_get_new_index_threaded(void);
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_accept),     \
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_tls),        \
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram_peer_kept), \
+    TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram_dtls_empty), \
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram)
 
 #endif

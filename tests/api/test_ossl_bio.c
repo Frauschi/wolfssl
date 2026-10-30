@@ -816,6 +816,38 @@ static int test_dgram_count(SOCKET_T fd)
     return n;
 }
 
+#ifndef NO_WOLFSSL_CLIENT
+/* DTLS client over a datagram BIO whose peer is sin, connected or set with
+ * BIO_CTRL_DGRAM_SET_PEER. Takes ownership of fd. */
+static WOLFSSL* test_dgram_client(WOLFSSL_CTX* ctx, SOCKET_T fd,
+    SOCKADDR_IN* sin, int connected)
+{
+    WOLFSSL* ssl = NULL;
+    WOLFSSL_BIO* bio = NULL;
+    WOLFSSL_BIO_ADDR addr;
+
+    wolfSSL_BIO_ADDR_clear(&addr);
+    XMEMCPY(&addr.sa_in, sin, sizeof(*sin));
+    if (fd == SOCKET_INVALID ||
+            (bio = wolfSSL_BIO_new_dgram(fd, 1)) == NULL) {
+        if (fd != SOCKET_INVALID)
+            CloseSocket(fd);
+        return NULL;
+    }
+    if ((!connected || connect(fd, (const struct sockaddr*)sin,
+                sizeof(*sin)) == 0) &&
+            wolfSSL_BIO_ctrl(bio, connected ? BIO_CTRL_DGRAM_SET_CONNECTED :
+                BIO_CTRL_DGRAM_SET_PEER, 0, &addr) == WOLFSSL_SUCCESS &&
+            (ssl = wolfSSL_new(ctx)) != NULL) {
+        wolfSSL_set_bio(ssl, bio, bio);
+        bio = NULL;
+    }
+    if (bio != NULL)
+        wolfSSL_BIO_free(bio);
+    return ssl;
+}
+
+#endif /* !NO_WOLFSSL_CLIENT */
 #endif
 
 int test_wolfSSL_BIO_datagram_peer_kept(void)
@@ -855,6 +887,44 @@ int test_wolfSSL_BIO_datagram_peer_kept(void)
         CloseSocket(fd2);
     if (fd3 != SOCKET_INVALID)
         CloseSocket(fd3);
+#endif
+    return EXPECT_RESULT();
+}
+
+int test_wolfSSL_BIO_datagram_dtls_empty(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_BIO_DGRAM_SOCKETS) && !defined(NO_WOLFSSL_CLIENT)
+    SOCKET_T fdc = SOCKET_INVALID, fds = SOCKET_INVALID;
+    SOCKADDR_IN sinc, sins;
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL* ssl = NULL;
+
+    ExpectIntNE(fdc = test_dgram_socket(&sinc, 0), SOCKET_INVALID);
+    ExpectIntNE(fds = test_dgram_socket(&sins, 0), SOCKET_INVALID);
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfDTLS_client_method()));
+    ExpectNotNull(ssl = test_dgram_client(ctx, fdc, &sins, 1));
+    wolfSSL_dtls_set_using_nonblock(ssl, 1);
+
+    ExpectIntEQ(wolfSSL_connect(ssl), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(ssl, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_READ);
+    ExpectIntEQ((int)sendto(fds, "", 0, 0, (const struct sockaddr*)&sinc,
+        sizeof(sinc)), 0);
+    ExpectIntEQ(wolfSSL_connect(ssl), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(ssl, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_READ);
+
+    /* A socket shut down for reading returns 0 on every read. */
+    ExpectIntEQ(shutdown(fdc, SHUT_RD), 0);
+    ExpectIntEQ(wolfSSL_connect(ssl), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(ssl, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_READ);
+
+    wolfSSL_free(ssl);
+    wolfSSL_CTX_free(ctx);
+    if (fds != SOCKET_INVALID)
+        CloseSocket(fds);
 #endif
     return EXPECT_RESULT();
 }
