@@ -873,12 +873,31 @@ void FreeWriteDup(WOLFSSL* ssl)
             }
         }
 #endif /* WOLFSSL_TLS13 && WOLFSSL_POST_HANDSHAKE_AUTH */
+#ifdef WOLFSSL_DTLS
+        XFREE(ssl->dupWrite->peer.sa, ssl->dupWrite->heap,
+              DYNAMIC_TYPE_SOCKADDR);
+#endif
         wc_FreeMutex(&ssl->dupWrite->dupMutex);
         XFREE(ssl->dupWrite, ssl->heap, DYNAMIC_TYPE_WRITEDUP);
         ssl->dupWrite = NULL;
         WOLFSSL_MSG("Did WriteDup full free, count to zero");
     }
 }
+
+
+#if defined(WOLFSSL_DTLS) || \
+    (defined(HAVE_ONE_TIME_AUTH) && defined(HAVE_POLY1305))
+/* Free the dupWrite DupSSL set up on ssl before handing it to the dup. */
+static void FreeNewWriteDup(WOLFSSL* ssl)
+{
+#ifdef WOLFSSL_DTLS
+    XFREE(ssl->dupWrite->peer.sa, ssl->dupWrite->heap, DYNAMIC_TYPE_SOCKADDR);
+#endif
+    wc_FreeMutex(&ssl->dupWrite->dupMutex);
+    XFREE(ssl->dupWrite, ssl->heap, DYNAMIC_TYPE_WRITEDUP);
+    ssl->dupWrite = NULL;
+}
+#endif
 
 
 /*
@@ -917,15 +936,43 @@ static int DupSSL(WOLFSSL* dup, WOLFSSL* ssl)
      * with a zeroed encrypt context and a poisoned dupWrite.
      * dup->heap == ssl->heap here because dup was initialised with ssl->ctx;
      * use ssl->heap consistently for cleanup symmetry. */
+#ifdef WOLFSSL_DTLS
+    ssl->dupWrite->heap = ssl->heap;
+    if (ssl->options.dtls) {
+        int peerRet;
+
+    #ifdef WOLFSSL_RW_THREADED
+        if (wc_LockRwLock_Rd(&ssl->buffers.dtlsCtx.peerLock) != 0) {
+            FreeNewWriteDup(ssl);
+            return BAD_MUTEX_E;
+        }
+    #endif
+        peerRet = wolfssl_local_SockAddrSet(&ssl->dupWrite->peer,
+            ssl->buffers.dtlsCtx.peer.sa, ssl->buffers.dtlsCtx.peer.sz,
+            ssl->dupWrite->heap);
+        if (peerRet == WOLFSSL_SUCCESS &&
+                ssl->IOCB_WriteCtx == &ssl->buffers.dtlsCtx) {
+            peerRet = wolfssl_local_SockAddrSet(&dup->buffers.dtlsCtx.peer,
+                ssl->buffers.dtlsCtx.peer.sa, ssl->buffers.dtlsCtx.peer.sz,
+                dup->heap);
+        }
+    #ifdef WOLFSSL_RW_THREADED
+        (void)wc_UnLockRwLock(&ssl->buffers.dtlsCtx.peerLock);
+    #endif
+        if (peerRet != WOLFSSL_SUCCESS) {
+            FreeNewWriteDup(ssl);
+            return MEMORY_E;
+        }
+    }
+#endif
+
 #ifdef HAVE_ONE_TIME_AUTH
 #ifdef HAVE_POLY1305
     if (ssl->auth.setup && ssl->auth.poly1305 != NULL) {
         tmp_poly1305 = (Poly1305*)XMALLOC(sizeof(Poly1305), ssl->heap,
             DYNAMIC_TYPE_CIPHER);
         if (tmp_poly1305 == NULL) {
-            wc_FreeMutex(&ssl->dupWrite->dupMutex);
-            XFREE(ssl->dupWrite, ssl->heap, DYNAMIC_TYPE_WRITEDUP);
-            ssl->dupWrite = NULL;
+            FreeNewWriteDup(ssl);
             return MEMORY_E;
         }
     }
@@ -995,7 +1042,23 @@ static int DupSSL(WOLFSSL* dup, WOLFSSL* ssl)
 #endif /* WOLFSSL_TLS13 */
 
 
-    dup->IOCB_WriteCtx = ssl->IOCB_WriteCtx;
+    /* The default write contexts live in ssl, which may be freed first. */
+    if (ssl->IOCB_WriteCtx == &ssl->wfd) {
+        dup->IOCB_WriteCtx = &dup->wfd;
+    }
+#ifdef WOLFSSL_DTLS
+    else if (ssl->IOCB_WriteCtx == &ssl->buffers.dtlsCtx) {
+        dup->buffers.dtlsCtx.wfd        = ssl->buffers.dtlsCtx.wfd;
+        dup->buffers.dtlsCtx.wfdIsDGram = ssl->buffers.dtlsCtx.wfdIsDGram;
+        dup->buffers.dtlsCtx.connected  = ssl->buffers.dtlsCtx.connected;
+        dup->buffers.dtlsCtx.userSet    = ssl->buffers.dtlsCtx.userSet;
+        dup->buffers.dtlsCtx.sendto     = ssl->buffers.dtlsCtx.sendto;
+        dup->IOCB_WriteCtx = &dup->buffers.dtlsCtx;
+    }
+#endif
+    else {
+        dup->IOCB_WriteCtx = ssl->IOCB_WriteCtx;
+    }
     dup->CBIOSend = ssl->CBIOSend;
 #ifdef OPENSSL_EXTRA
     dup->cbioFlag = ssl->cbioFlag;
@@ -1052,6 +1115,13 @@ WOLFSSL* wolfSSL_write_dup(WOLFSSL* ssl)
         return NULL;
     }
 
+#if defined(OPENSSL_EXTRA) && !defined(NO_BIO)
+    if (ssl->CBIOSend == SslBioSend) {
+        WOLFSSL_MSG("wolfSSL_write_dup not supported with a write BIO");
+        return NULL;
+    }
+#endif
+
     dup = (WOLFSSL*) XMALLOC(sizeof(WOLFSSL), ssl->ctx->heap, DYNAMIC_TYPE_SSL);
     if (dup) {
         if ( (ret = InitSSL(dup, ssl->ctx, 1)) < 0) {
@@ -1091,6 +1161,67 @@ int NotifyWriteSide(WOLFSSL* ssl, int err)
 
     return ret;
 }
+
+#ifdef WOLFSSL_DTLS
+/*
+ * Publish the DTLS peer of ssl to the other side of the write duplicate
+ *
+ * ssl WOLFSSL object whose peer changed
+ *
+ * 0 on success
+*/
+int WriteDupSetPeer(WOLFSSL* ssl)
+{
+    int ret;
+
+    if (wc_LockMutex(&ssl->dupWrite->dupMutex) != 0) {
+        return BAD_MUTEX_E;
+    }
+    ret = wolfssl_local_SockAddrSet(&ssl->dupWrite->peer,
+        ssl->buffers.dtlsCtx.peer.sa, ssl->buffers.dtlsCtx.peer.sz,
+        ssl->dupWrite->heap) == WOLFSSL_SUCCESS ? 0 : MEMORY_E;
+    wc_UnLockMutex(&ssl->dupWrite->dupMutex);
+
+    return ret;
+}
+
+/*
+ * Take the DTLS peer published by the read side on the write side
+ *
+ * ssl WOLFSSL object of the write side
+ *
+ * 0 on success
+*/
+int WriteDupSyncPeer(WOLFSSL* ssl)
+{
+    int ret = 0;
+    WOLFSSL_SOCKADDR* shared = &ssl->dupWrite->peer;
+    WOLFSSL_SOCKADDR* own = &ssl->buffers.dtlsCtx.peer;
+
+#ifdef WOLFSSL_RW_THREADED
+    if (wc_LockRwLock_Wr(&ssl->buffers.dtlsCtx.peerLock) != 0) {
+        return BAD_MUTEX_E;
+    }
+#endif
+    if (wc_LockMutex(&ssl->dupWrite->dupMutex) != 0) {
+        ret = BAD_MUTEX_E;
+    }
+    else {
+        if (shared->sz != 0 && (shared->sz != own->sz ||
+                XMEMCMP(shared->sa, own->sa, shared->sz) != 0) &&
+                wolfssl_local_SockAddrSet(own, shared->sa, shared->sz,
+                    ssl->heap) != WOLFSSL_SUCCESS) {
+            ret = MEMORY_E;
+        }
+        wc_UnLockMutex(&ssl->dupWrite->dupMutex);
+    }
+#ifdef WOLFSSL_RW_THREADED
+    (void)wc_UnLockRwLock(&ssl->buffers.dtlsCtx.peerLock);
+#endif
+
+    return ret;
+}
+#endif /* WOLFSSL_DTLS */
 
 
 #endif /* HAVE_WRITE_DUP */

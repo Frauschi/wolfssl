@@ -6637,6 +6637,10 @@ typedef struct BuildMsgArgs {
         wolfSSL_Mutex   dupMutex;       /* field access mutex */
         int             dupCount;       /* reference count */
         int             dupErr;         /* under dupMutex, pass to other side */
+#ifdef WOLFSSL_DTLS
+        WOLFSSL_SOCKADDR peer;          /* under dupMutex, current DTLS peer */
+        void*           heap;           /* heap hint of peer */
+#endif
 #ifdef WOLFSSL_DTLS13
         struct Dtls13RecordNumber* sendAckList; /* ownership transferred */
         /* Key update ACK tracking: write side stores the (epoch, seq) of its
@@ -6686,6 +6690,10 @@ typedef struct BuildMsgArgs {
 
     WOLFSSL_LOCAL void FreeWriteDup(WOLFSSL* ssl);
     WOLFSSL_LOCAL int  NotifyWriteSide(WOLFSSL* ssl, int err);
+#ifdef WOLFSSL_DTLS
+    WOLFSSL_LOCAL int  WriteDupSetPeer(WOLFSSL* ssl);
+    WOLFSSL_LOCAL int  WriteDupSyncPeer(WOLFSSL* ssl);
+#endif
 #endif /* HAVE_WRITE_DUP */
 
 #if defined(WOLFSSL_TLS13) && defined(WOLFSSL_POST_HANDSHAKE_AUTH)

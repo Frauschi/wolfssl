@@ -13010,6 +13010,15 @@ int SendBuffered(WOLFSSL* ssl)
     }
 #endif
 
+#if defined(HAVE_WRITE_DUP) && defined(WOLFSSL_DTLS)
+    if (ssl->dupWrite != NULL && ssl->dupSide == WRITE_DUP_SIDE &&
+            ssl->IOCB_WriteCtx == &ssl->buffers.dtlsCtx) {
+        int ret = WriteDupSyncPeer(ssl);
+        if (ret != 0)
+            return ret;
+    }
+#endif
+
     while (ssl->buffers.outputBuffer.length > 0) {
         int sent = 0;
 retry:
@@ -25947,6 +25956,10 @@ static void dtlsProcessPendingPeer(WOLFSSL* ssl, int deprotected, int isNewest)
                 if (wolfssl_local_SockAddrSet(&ssl->buffers.dtlsCtx.peer,
                         from->sa, from->sz, ssl->heap) == WOLFSSL_SUCCESS) {
                     ssl->buffers.dtlsCtx.userSet = 1;
+                #ifdef HAVE_WRITE_DUP
+                    if (ssl->dupWrite != NULL)
+                        (void)WriteDupSetPeer(ssl);
+                #endif
                 }
                 else {
                     /* wolfSSL_dtls_set_peer clears this when it fails to store

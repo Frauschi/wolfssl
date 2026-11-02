@@ -1729,6 +1729,287 @@ int test_wolfSSL_write_dup_err(void)
     return EXPECT_RESULT();
 }
 
+/* Test that the write duplicate keeps writing to the socket after the read
+ * side is freed, with the default fd write context of TLS and DTLS.
+ *
+ * @return  TEST_SUCCESS on success.
+ */
+int test_wolfSSL_write_dup_free_read_side(void)
+{
+    EXPECT_DECLS;
+#if defined(HAVE_WRITE_DUP) && \
+    defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && !defined(NO_TLS) && \
+    defined(USE_WOLFSSL_IO) && (defined(__unix__) || defined(__APPLE__))
+    struct {
+        method_provider client_meth;
+        method_provider server_meth;
+        int dtls;
+    } methods[] = {
+#ifndef WOLFSSL_NO_TLS12
+        { wolfTLSv1_2_client_method, wolfTLSv1_2_server_method, 0 },
+#ifdef WOLFSSL_DTLS
+        { wolfDTLSv1_2_client_method, wolfDTLSv1_2_server_method, 1 },
+#endif
+#endif
+#ifdef WOLFSSL_TLS13
+        { wolfTLSv1_3_client_method, wolfTLSv1_3_server_method, 0 },
+#ifdef WOLFSSL_DTLS13
+        { wolfDTLSv1_3_client_method, wolfDTLSv1_3_server_method, 1 },
+#endif
+#endif
+    };
+    static const struct timeval timeout = { 2, 0 };
+    const char msg[] = "hello";
+    char buf[256];
+    size_t i;
+
+    for (i = 0; i < XELEM_CNT(methods) && EXPECT_SUCCESS(); i++) {
+        WOLFSSL_CTX* ctx_c = NULL;
+        WOLFSSL_CTX* ctx_s = NULL;
+        WOLFSSL* ssl_c = NULL;
+        WOLFSSL* ssl_s = NULL;
+        WOLFSSL* ssl_w = NULL;
+        struct test_memio_ctx test_ctx;
+        int sv[2] = { -1, -1 };
+        int n = 0;
+
+        XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+        ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+            methods[i].client_meth, methods[i].server_meth), 0);
+        ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
+
+        if (methods[i].dtls) {
+#ifdef WOLFSSL_DTLS
+            struct sockaddr_in addr;
+            socklen_t addrSz = (socklen_t)sizeof(addr);
+
+            XMEMSET(&addr, 0, sizeof(addr));
+            addr.sin_family = AF_INET;
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            ExpectIntGE(sv[0] = socket(AF_INET, SOCK_DGRAM, 0), 0);
+            ExpectIntGE(sv[1] = socket(AF_INET, SOCK_DGRAM, 0), 0);
+            ExpectIntEQ(bind(sv[1], (struct sockaddr*)&addr, addrSz), 0);
+            ExpectIntEQ(getsockname(sv[1], (struct sockaddr*)&addr, &addrSz),
+                0);
+            wolfSSL_SSLSetIOSend(ssl_c, EmbedSendTo);
+            ExpectIntEQ(wolfSSL_set_write_fd(ssl_c, sv[0]), WOLFSSL_SUCCESS);
+            ExpectIntEQ(wolfSSL_dtls_set_peer(ssl_c, &addr, addrSz),
+                WOLFSSL_SUCCESS);
+#endif
+        }
+        else {
+            ExpectIntEQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+            wolfSSL_SSLSetIOSend(ssl_c, EmbedSend);
+            ExpectIntEQ(wolfSSL_set_write_fd(ssl_c, sv[0]), WOLFSSL_SUCCESS);
+        }
+        if (sv[1] >= 0) {
+            ExpectIntEQ(setsockopt(sv[1], SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                sizeof(timeout)), 0);
+        }
+
+        ExpectNotNull(ssl_w = wolfSSL_write_dup(ssl_c));
+        if (ssl_w != NULL) {
+#ifdef WOLFSSL_DTLS
+            if (methods[i].dtls) {
+                ExpectPtrEq(wolfSSL_GetIOWriteCtx(ssl_w),
+                    &ssl_w->buffers.dtlsCtx);
+            }
+            else
+#endif
+            {
+                ExpectPtrEq(wolfSSL_GetIOWriteCtx(ssl_w), &ssl_w->wfd);
+            }
+        }
+
+        wolfSSL_free(ssl_c);
+        ssl_c = NULL;
+        ExpectIntEQ(wolfSSL_write(ssl_w, msg, (int)sizeof(msg)),
+            (int)sizeof(msg));
+
+        if (EXPECT_SUCCESS()) {
+            n = (int)recv(sv[1], buf, sizeof(buf), 0);
+        }
+        ExpectIntGT(n, 0);
+        ExpectIntEQ(test_memio_inject_message(&test_ctx, 0, buf, n), 0);
+        ExpectIntEQ(wolfSSL_read(ssl_s, buf, (int)sizeof(buf)),
+            (int)sizeof(msg));
+        ExpectBufEQ(buf, msg, sizeof(msg));
+
+        wolfSSL_free(ssl_w);
+        wolfSSL_free(ssl_s);
+        wolfSSL_CTX_free(ctx_c);
+        wolfSSL_CTX_free(ctx_s);
+        if (sv[0] >= 0)
+            close(sv[0]);
+        if (sv[1] >= 0)
+            close(sv[1]);
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
+/* Test that a DTLS write duplicate sends to the peer set on the read side
+ * after the split.
+ *
+ * @return  TEST_SUCCESS on success.
+ */
+int test_wolfSSL_write_dup_dtls_peer_change(void)
+{
+    EXPECT_DECLS;
+#if defined(HAVE_WRITE_DUP) && defined(WOLFSSL_DTLS) && \
+    defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && !defined(NO_TLS) && \
+    defined(USE_WOLFSSL_IO) && (defined(__unix__) || defined(__APPLE__)) && \
+    (!defined(WOLFSSL_NO_TLS12) || defined(WOLFSSL_DTLS13))
+    struct {
+        method_provider client_meth;
+        method_provider server_meth;
+    } methods[] = {
+#ifndef WOLFSSL_NO_TLS12
+        { wolfDTLSv1_2_client_method, wolfDTLSv1_2_server_method },
+#endif
+#ifdef WOLFSSL_DTLS13
+        { wolfDTLSv1_3_client_method, wolfDTLSv1_3_server_method },
+#endif
+    };
+    static const struct timeval timeout = { 2, 0 };
+    const char msg[] = "hello";
+    char buf[256];
+    size_t i;
+
+    for (i = 0; i < XELEM_CNT(methods) && EXPECT_SUCCESS(); i++) {
+        WOLFSSL_CTX* ctx_c = NULL;
+        WOLFSSL_CTX* ctx_s = NULL;
+        WOLFSSL* ssl_c = NULL;
+        WOLFSSL* ssl_s = NULL;
+        WOLFSSL* ssl_w = NULL;
+        struct test_memio_ctx test_ctx;
+        struct sockaddr_in addrA;
+        struct sockaddr_in addrB;
+        socklen_t addrSz = (socklen_t)sizeof(addrA);
+        int fd = -1;
+        int fdA = -1;
+        int fdB = -1;
+        int n = 0;
+
+        XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+        XMEMSET(&addrA, 0, sizeof(addrA));
+        addrA.sin_family = AF_INET;
+        addrA.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        XMEMCPY(&addrB, &addrA, sizeof(addrB));
+
+        ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+            methods[i].client_meth, methods[i].server_meth), 0);
+        ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
+
+        ExpectIntGE(fd = socket(AF_INET, SOCK_DGRAM, 0), 0);
+        ExpectIntGE(fdA = socket(AF_INET, SOCK_DGRAM, 0), 0);
+        ExpectIntGE(fdB = socket(AF_INET, SOCK_DGRAM, 0), 0);
+        ExpectIntEQ(bind(fdA, (struct sockaddr*)&addrA, addrSz), 0);
+        ExpectIntEQ(getsockname(fdA, (struct sockaddr*)&addrA, &addrSz), 0);
+        ExpectIntEQ(bind(fdB, (struct sockaddr*)&addrB, addrSz), 0);
+        ExpectIntEQ(getsockname(fdB, (struct sockaddr*)&addrB, &addrSz), 0);
+        ExpectIntEQ(setsockopt(fdB, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+            sizeof(timeout)), 0);
+
+        wolfSSL_SSLSetIOSend(ssl_c, EmbedSendTo);
+        ExpectIntEQ(wolfSSL_set_write_fd(ssl_c, fd), WOLFSSL_SUCCESS);
+        ExpectIntEQ(wolfSSL_dtls_set_peer(ssl_c, &addrA, addrSz),
+            WOLFSSL_SUCCESS);
+
+        ExpectNotNull(ssl_w = wolfSSL_write_dup(ssl_c));
+        ExpectIntEQ(wolfSSL_dtls_set_peer(ssl_c, &addrB, addrSz),
+            WOLFSSL_SUCCESS);
+        ExpectIntEQ(wolfSSL_write(ssl_w, msg, (int)sizeof(msg)),
+            (int)sizeof(msg));
+
+        if (EXPECT_SUCCESS()) {
+            n = (int)recv(fdB, buf, sizeof(buf), 0);
+        }
+        ExpectIntGT(n, 0);
+        ExpectIntEQ(test_memio_inject_message(&test_ctx, 0, buf, n), 0);
+        ExpectIntEQ(wolfSSL_read(ssl_s, buf, (int)sizeof(buf)),
+            (int)sizeof(msg));
+        ExpectBufEQ(buf, msg, sizeof(msg));
+
+        /* An empty shared peer leaves the duplicate's peer in place. */
+        ExpectIntEQ(wolfSSL_dtls_set_peer(ssl_c, NULL, 0), WOLFSSL_SUCCESS);
+        ExpectIntEQ(wolfSSL_write(ssl_w, msg, (int)sizeof(msg)),
+            (int)sizeof(msg));
+        n = 0;
+        if (EXPECT_SUCCESS()) {
+            n = (int)recv(fdB, buf, sizeof(buf), 0);
+        }
+        ExpectIntGT(n, 0);
+        ExpectIntEQ(test_memio_inject_message(&test_ctx, 0, buf, n), 0);
+        ExpectIntEQ(wolfSSL_read(ssl_s, buf, (int)sizeof(buf)),
+            (int)sizeof(msg));
+        ExpectBufEQ(buf, msg, sizeof(msg));
+
+        wolfSSL_free(ssl_w);
+        wolfSSL_free(ssl_c);
+        wolfSSL_free(ssl_s);
+        wolfSSL_CTX_free(ctx_c);
+        wolfSSL_CTX_free(ctx_s);
+        if (fd >= 0)
+            close(fd);
+        if (fdA >= 0)
+            close(fdA);
+        if (fdB >= 0)
+            close(fdB);
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
+/* Test that wolfSSL_write_dup() refuses an object that writes to a BIO.
+ *
+ * The duplicate would have no BIO of its own to write to.
+ *
+ * @return  TEST_SUCCESS on success.
+ */
+int test_wolfSSL_write_dup_bio(void)
+{
+    EXPECT_DECLS;
+#if defined(HAVE_WRITE_DUP) && defined(OPENSSL_EXTRA) && !defined(NO_BIO) && \
+    defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && !defined(NO_TLS) && \
+    !defined(WOLFSSL_NO_TLS12)
+    WOLFSSL_CTX* ctx_c = NULL;
+    WOLFSSL_CTX* ctx_s = NULL;
+    WOLFSSL* ssl_c = NULL;
+    WOLFSSL* ssl_s = NULL;
+    WOLFSSL* ssl_w = NULL;
+    WOLFSSL_BIO* bio = NULL;
+    struct test_memio_ctx test_ctx;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfTLSv1_2_client_method, wolfTLSv1_2_server_method), 0);
+    ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
+
+    ExpectNotNull(bio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem()));
+    if (EXPECT_SUCCESS()) {
+        /* Let wolfSSL_set_bio() replace the memio callbacks. */
+        ssl_c->cbioFlag = 0;
+        wolfSSL_set_bio(ssl_c, bio, bio);
+    }
+    else {
+        wolfSSL_BIO_free(bio);
+    }
+    ExpectNull(ssl_w = wolfSSL_write_dup(ssl_c));
+    if (ssl_c != NULL) {
+        ExpectPtrEq(ssl_c->biowr, bio);
+        ExpectNull(ssl_c->dupWrite);
+    }
+
+    wolfSSL_free(ssl_w);
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
+#endif
+    return EXPECT_RESULT();
+}
+
 /* Test the wolfSSL_set_max_send_fragment() setters.
  *
  * As in OpenSSL: 512 to 16384 is accepted, 1 is returned on success and 0 on

@@ -186,6 +186,12 @@ int wolfSSL_dtls_set_peer(WOLFSSL* ssl, void* peer, unsigned int peerSz)
         ssl->buffers.dtlsCtx.userSet = 1;
     else
         ssl->buffers.dtlsCtx.userSet = 0;
+#ifdef HAVE_WRITE_DUP
+    if (ret == WOLFSSL_SUCCESS && ssl->dupWrite != NULL &&
+            WriteDupSetPeer(ssl) != 0) {
+        WOLFSSL_MSG("Failed to share the peer with the write duplicate");
+    }
+#endif
 #ifdef WOLFSSL_RW_THREADED
     if (wc_UnLockRwLock(&ssl->buffers.dtlsCtx.peerLock) != 0)
         ret = WOLFSSL_FAILURE;
