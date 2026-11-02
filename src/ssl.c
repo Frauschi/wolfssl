@@ -1115,34 +1115,8 @@ int wolfSSL_use_old_poly(WOLFSSL* ssl, int value)
 #endif
 
 
-WOLFSSL_ABI
-int wolfSSL_set_fd(WOLFSSL* ssl, int fd)
+static void SetReadFd(WOLFSSL* ssl, int fd)
 {
-    int ret;
-
-    WOLFSSL_ENTER("wolfSSL_set_fd");
-
-    if (ssl == NULL) {
-        return BAD_FUNC_ARG;
-    }
-
-    ret = wolfSSL_set_read_fd(ssl, fd);
-    if (ret == WOLFSSL_SUCCESS) {
-        ret = wolfSSL_set_write_fd(ssl, fd);
-    }
-
-    return ret;
-}
-
-
-int wolfSSL_set_read_fd(WOLFSSL* ssl, int fd)
-{
-    WOLFSSL_ENTER("wolfSSL_set_read_fd");
-
-    if (ssl == NULL) {
-        return BAD_FUNC_ARG;
-    }
-
     ssl->rfd = fd;      /* not used directly to allow IO callbacks */
     ssl->IOCB_ReadCtx  = &ssl->rfd;
 
@@ -1157,20 +1131,11 @@ int wolfSSL_set_read_fd(WOLFSSL* ssl, int fd)
         #endif
         }
     #endif
-
-    WOLFSSL_LEAVE("wolfSSL_set_read_fd", WOLFSSL_SUCCESS);
-    return WOLFSSL_SUCCESS;
 }
 
 
-int wolfSSL_set_write_fd(WOLFSSL* ssl, int fd)
+static void SetWriteFd(WOLFSSL* ssl, int fd)
 {
-    WOLFSSL_ENTER("wolfSSL_set_write_fd");
-
-    if (ssl == NULL) {
-        return BAD_FUNC_ARG;
-    }
-
     ssl->wfd = fd;      /* not used directly to allow IO callbacks */
     ssl->IOCB_WriteCtx  = &ssl->wfd;
 
@@ -1185,6 +1150,137 @@ int wolfSSL_set_write_fd(WOLFSSL* ssl, int fd)
         #endif
         }
     #endif
+}
+
+
+/* Set the read and write fd without replacing a BIO set on the object.
+ *
+ * @param [in] ssl  SSL/TLS object.
+ * @param [in] fd   File descriptor.
+ * @return  WOLFSSL_SUCCESS on success.
+ * @return  BAD_FUNC_ARG when ssl is NULL.
+ */
+int wolfssl_local_set_fd(WOLFSSL* ssl, int fd)
+{
+    if (ssl == NULL) {
+        return BAD_FUNC_ARG;
+    }
+
+    SetReadFd(ssl, fd);
+    SetWriteFd(ssl, fd);
+
+    return WOLFSSL_SUCCESS;
+}
+
+
+#if defined(OPENSSL_EXTRA) && !defined(NO_BIO)
+static void ReleaseReadBio(WOLFSSL* ssl)
+{
+    if (ssl->biord != NULL) {
+        if (ssl->biord != ssl->biowr && ssl->biord->prev == NULL)
+            wolfSSL_BIO_free(ssl->biord);
+        ssl->biord = NULL;
+    }
+    if (ssl->CBIORecv == SslBioReceive)
+        ssl->CBIORecv = ssl->ctx->CBIORecv;
+}
+
+
+static void ReleaseWriteBio(WOLFSSL* ssl)
+{
+    if (ssl->biowr != NULL) {
+        if (ssl->biowr != ssl->biord && ssl->biowr->prev == NULL)
+            wolfSSL_BIO_free(ssl->biowr);
+        ssl->biowr = NULL;
+    }
+    if (ssl->CBIOSend == SslBioSend)
+        ssl->CBIOSend = ssl->ctx->CBIOSend;
+}
+
+
+static int IsSocketBioFd(const WOLFSSL_BIO* bio, int fd)
+{
+    return bio != NULL && bio->type == WOLFSSL_BIO_SOCKET &&
+           (int)bio->num.fd == fd;
+}
+#endif
+
+
+WOLFSSL_ABI
+int wolfSSL_set_fd(WOLFSSL* ssl, int fd)
+{
+    WOLFSSL_ENTER("wolfSSL_set_fd");
+
+    if (ssl == NULL) {
+        return BAD_FUNC_ARG;
+    }
+
+#if defined(OPENSSL_EXTRA) && !defined(NO_BIO)
+    /* an fd replaces both BIOs, as in OpenSSL */
+    ReleaseReadBio(ssl);
+    ReleaseWriteBio(ssl);
+#endif
+
+    return wolfssl_local_set_fd(ssl, fd);
+}
+
+
+int wolfSSL_set_read_fd(WOLFSSL* ssl, int fd)
+{
+    WOLFSSL_ENTER("wolfSSL_set_read_fd");
+
+    if (ssl == NULL) {
+        return BAD_FUNC_ARG;
+    }
+
+#if defined(OPENSSL_EXTRA) && !defined(NO_BIO)
+    /* an fd replaces the read BIO unless the write socket BIO has that fd,
+     * as in OpenSSL */
+    if (IsSocketBioFd(ssl->biowr, fd)) {
+        if (ssl->biord != ssl->biowr) {
+            ReleaseReadBio(ssl);
+            ssl->biord = ssl->biowr;
+        }
+        if ((ssl->cbioFlag & WOLFSSL_CBIO_RECV) == 0)
+            ssl->CBIORecv = SslBioReceive;
+    }
+    else {
+        ReleaseReadBio(ssl);
+    }
+#endif
+
+    SetReadFd(ssl, fd);
+
+    WOLFSSL_LEAVE("wolfSSL_set_read_fd", WOLFSSL_SUCCESS);
+    return WOLFSSL_SUCCESS;
+}
+
+
+int wolfSSL_set_write_fd(WOLFSSL* ssl, int fd)
+{
+    WOLFSSL_ENTER("wolfSSL_set_write_fd");
+
+    if (ssl == NULL) {
+        return BAD_FUNC_ARG;
+    }
+
+#if defined(OPENSSL_EXTRA) && !defined(NO_BIO)
+    /* an fd replaces the write BIO unless the read socket BIO has that fd,
+     * as in OpenSSL */
+    if (IsSocketBioFd(ssl->biord, fd)) {
+        if (ssl->biowr != ssl->biord) {
+            ReleaseWriteBio(ssl);
+            ssl->biowr = ssl->biord;
+        }
+        if ((ssl->cbioFlag & WOLFSSL_CBIO_SEND) == 0)
+            ssl->CBIOSend = SslBioSend;
+    }
+    else {
+        ReleaseWriteBio(ssl);
+    }
+#endif
+
+    SetWriteFd(ssl, fd);
 
     WOLFSSL_LEAVE("wolfSSL_set_write_fd", WOLFSSL_SUCCESS);
     return WOLFSSL_SUCCESS;
@@ -4347,21 +4443,10 @@ int wolfSSL_set_compression(WOLFSSL* ssl)
 
         /* free any existing WOLFSSL_BIOs in use but don't free those in
          * a chain */
-        if ((flags & WOLFSSL_BIO_FLAG_READ) && (ssl->biord != NULL)) {
-            if ((flags & WOLFSSL_BIO_FLAG_WRITE) && (ssl->biord != ssl->biowr)) {
-                if (ssl->biowr != NULL && ssl->biowr->prev == NULL)
-                    wolfSSL_BIO_free(ssl->biowr);
-                ssl->biowr = NULL;
-            }
-            if (ssl->biord->prev == NULL)
-                wolfSSL_BIO_free(ssl->biord);
-            ssl->biord = NULL;
-        }
-        else if ((flags & WOLFSSL_BIO_FLAG_WRITE) && (ssl->biowr != NULL)) {
-            if (ssl->biowr->prev == NULL)
-                wolfSSL_BIO_free(ssl->biowr);
-            ssl->biowr = NULL;
-        }
+        if (flags & WOLFSSL_BIO_FLAG_READ)
+            ReleaseReadBio(ssl);
+        if (flags & WOLFSSL_BIO_FLAG_WRITE)
+            ReleaseWriteBio(ssl);
 
         /* set flag obviously */
         if (rd && !(rd->flags & WOLFSSL_BIO_FLAG_READ))

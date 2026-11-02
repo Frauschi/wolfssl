@@ -1680,6 +1680,7 @@ enum Misc {
     TLS_EXPORT_OPT_SZ_5      = 66, /* number of bytes used from Options */
     TLS_EXPORT_OPT_SZ_4      = 65, /* number of bytes used from Options */
     DTLS_EXPORT_OPT_SZ_3     = 60, /* number of bytes used from Options */
+    WOLFSSL_EXPORT_OPT_DTLS_IDX = 22, /* offset of dtls flag in Options */
     DTLS_EXPORT_MIN_KEY_SZ   = 85 + (DTLS_SEQ_SZ * 2),
                                    /* min number of bytes used from Keys */
     WOLFSSL_EXPORT_TLS       = 1,
@@ -7596,6 +7597,7 @@ WOLFSSL_LOCAL int  SetSSL_CTX(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup);
 WOLFSSL_LOCAL int  InitSSL(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup);
 WOLFSSL_LOCAL int  ReinitSSL(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup);
 WOLFSSL_LOCAL void FreeSSL(WOLFSSL* ssl, void* heap);
+WOLFSSL_LOCAL int  wolfssl_local_set_fd(WOLFSSL* ssl, int fd);
 WOLFSSL_TEST_VIS   void wolfSSL_ResourceFree(WOLFSSL* ssl);   /* Micrium uses */
 #ifndef OPENSSL_COEXIST
 #define SSL_ResourceFree wolfSSL_ResourceFree

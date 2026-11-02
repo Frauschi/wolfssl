@@ -1764,7 +1764,6 @@ static int ImportOptions(WOLFSSL* ssl, const byte* exp, word32 len, byte ver,
         return BAD_FUNC_ARG;
     }
 
-
     /* these options are kept and sent to indicate verify status and strength
      * of handshake. Decoded into locals and written only once the checks
      * below pass, so a blob they reject leaves ssl->options untouched. Later
@@ -1825,7 +1824,7 @@ static int ImportOptions(WOLFSSL* ssl, const byte* exp, word32 len, byte ver,
     options->haveSessionId    = exp[idx++];
     options->tls              = exp[idx++];
     options->tls1_1           = exp[idx++];
-    options->dtls             = exp[idx++];
+    idx++;
     options->connReset        = exp[idx++];
     options->isClosed         = exp[idx++];
     options->closeNotify      = exp[idx++];
@@ -2214,11 +2213,17 @@ int wolfSSL_session_import_internal(WOLFSSL* ssl, const unsigned char* buf,
     int ret = 0;
     int optSz = 0;
     int rc;
+    byte optImported = 0;
 
     WOLFSSL_ENTER("wolfSSL_session_import_internal");
     /* check at least enough room for protocol and length */
     if (sz < WOLFSSL_EXPORT_LEN * 2 || ssl == NULL) {
         ret = BAD_FUNC_ARG;
+    }
+
+    if (ret == 0 && (type == WOLFSSL_EXPORT_DTLS) != (ssl->options.dtls != 0)) {
+        WOLFSSL_MSG("Session export type does not match the object");
+        ret = VERSION_ERROR;
     }
 
     /* Check if is TLS export protocol */
@@ -2239,11 +2244,11 @@ int wolfSSL_session_import_internal(WOLFSSL* ssl, const unsigned char* buf,
         if (validProto == 0) {
         #ifdef WOLFSSL_DTLS
             /* check if importing state only */
-            return wolfSSL_dtls_import_state_internal(ssl, buf, sz);
-        #else
+            if (type == WOLFSSL_EXPORT_DTLS)
+                return wolfSSL_dtls_import_state_internal(ssl, buf, sz);
+        #endif
             WOLFSSL_MSG("Invalid serialized session protocol value");
             ret = BAD_FUNC_ARG;
-        #endif
         }
         idx += 1;
     }
@@ -2330,7 +2335,14 @@ int wolfSSL_session_import_internal(WOLFSSL* ssl, const unsigned char* buf,
         }
     }
 
+    if (ret == 0 &&
+            buf[idx + WOLFSSL_EXPORT_OPT_DTLS_IDX] != ssl->options.dtls) {
+        WOLFSSL_MSG("Session DTLS flag does not match the object");
+        ret = VERSION_ERROR;
+    }
+
     if (ret == 0) {
+        optImported = 1;
         rc = ImportOptions(ssl, buf + idx, length, version, type);
         if (rc < 0) {
             WOLFSSL_MSG("Import Options struct error");
@@ -2553,6 +2565,13 @@ int wolfSSL_session_import_internal(WOLFSSL* ssl, const unsigned char* buf,
     }
 #endif /* !WOLFSSL_AEAD_ONLY */
 
+    if (ret != 0 && optImported) {
+        /* a partly imported object must not send or receive data */
+        ssl->options.handShakeDone = 0;
+        ssl->options.isClosed = 1;
+        ssl->options.fatalAlert = 1;
+        ssl->error = ret;
+    }
     if (ret != 0) {
         idx = ret;
     }

@@ -533,6 +533,125 @@ int test_wolfSSL_BIO_connect(void)
 }
 
 
+int test_wolfSSL_BIO_set_fd_replaces_bio(void)
+{
+    EXPECT_DECLS;
+#if !defined(NO_BIO) && defined(OPENSSL_EXTRA) && \
+    !defined(NO_WOLFSSL_CLIENT) && !defined(NO_TLS) && \
+    defined(USE_WOLFSSL_IO) && (defined(__unix__) || defined(__APPLE__))
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL* ssl = NULL;
+    WOLFSSL_BIO* rbio = NULL;
+    WOLFSSL_BIO* wbio = NULL;
+    WOLFSSL_BIO* bio = NULL;
+    int sv[2] = { -1, -1 };
+    int fd = -1;
+    byte buf[1] = { 0 };
+    byte drain[512];
+
+    ExpectIntEQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    ExpectIntEQ(fcntl(sv[0], F_SETFL, O_NONBLOCK), 0);
+    ExpectIntEQ(fcntl(sv[1], F_SETFL, O_NONBLOCK), 0);
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfSSLv23_client_method()));
+
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectNotNull(rbio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem()));
+    ExpectNotNull(wbio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem()));
+    ExpectIntEQ(wolfSSL_BIO_up_ref(wbio), WOLFSSL_SUCCESS);
+    wolfSSL_set_bio(ssl, rbio, wbio);
+    ExpectIntEQ(wolfSSL_set_fd(ssl, sv[0]), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(ssl), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(ssl, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_READ);
+    ExpectIntEQ(recv(sv[1], buf, sizeof(buf), 0), 1);
+    ExpectIntEQ((int)wolfSSL_BIO_ctrl_pending(wbio), 0);
+    wolfSSL_BIO_free(wbio);
+    wolfSSL_free(ssl);
+    ssl = NULL;
+
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectNotNull(bio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem()));
+    ExpectIntEQ(wolfSSL_BIO_up_ref(bio), WOLFSSL_SUCCESS);
+    wolfSSL_set_bio(ssl, bio, bio);
+    ExpectIntEQ(wolfSSL_set_fd(ssl, sv[0]), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_BIO_free(bio), 1);
+    wolfSSL_free(ssl);
+    ssl = NULL;
+    bio = NULL;
+
+    /* A socket BIO on the same fd is kept for both directions. */
+    ExpectIntGE(fd = dup(sv[0]), 0);
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectNotNull(bio = wolfSSL_BIO_new_socket(fd, BIO_CLOSE));
+    if (EXPECT_SUCCESS()) {
+        wolfSSL_set_bio(ssl, bio, bio);
+    }
+    else {
+        wolfSSL_BIO_free(bio);
+        bio = NULL;
+    }
+    ExpectIntEQ(wolfSSL_set_rfd(ssl, fd), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_set_wfd(ssl, fd), WOLFSSL_SUCCESS);
+    ExpectIntNE(fcntl(fd, F_GETFD), -1);
+    ExpectPtrEq(wolfSSL_SSL_get_rbio(ssl), bio);
+    ExpectPtrEq(wolfSSL_SSL_get_wbio(ssl), bio);
+    wolfSSL_free(ssl);
+    ssl = NULL;
+    if (bio == NULL && fd >= 0)
+        close(fd);
+    bio = NULL;
+
+    /* Replacing one direction keeps the BIO the other direction shares. */
+    while (recv(sv[1], drain, sizeof(drain), 0) > 0)
+        ;
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectNotNull(bio = wolfSSL_BIO_new_socket(sv[0], BIO_NOCLOSE));
+    ExpectNotNull(rbio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem()));
+    if (EXPECT_SUCCESS()) {
+        wolfSSL_set_wbio(ssl, bio);
+    }
+    else {
+        wolfSSL_BIO_free(bio);
+    }
+    ExpectIntEQ(wolfSSL_set_rfd(ssl, sv[0]), WOLFSSL_SUCCESS);
+    if (EXPECT_SUCCESS()) {
+        wolfSSL_set_rbio(ssl, rbio);
+    }
+    else {
+        wolfSSL_BIO_free(rbio);
+    }
+    ExpectPtrEq(wolfSSL_SSL_get_wbio(ssl), bio);
+    ExpectIntEQ(wolfSSL_connect(ssl), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(recv(sv[1], buf, sizeof(buf), 0), 1);
+    wolfSSL_free(ssl);
+    ssl = NULL;
+    bio = NULL;
+
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectNotNull(bio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem()));
+    ExpectNotNull(rbio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem()));
+    if (EXPECT_SUCCESS()) {
+        wolfSSL_set_bio(ssl, bio, bio);
+        wolfSSL_set_rbio(ssl, rbio);
+    }
+    else {
+        wolfSSL_BIO_free(bio);
+        wolfSSL_BIO_free(rbio);
+    }
+    ExpectPtrEq(wolfSSL_SSL_get_wbio(ssl), bio);
+    ExpectIntEQ(wolfSSL_connect(ssl), WOLFSSL_FATAL_ERROR);
+    ExpectIntGT((int)wolfSSL_BIO_ctrl_pending(bio), 0);
+    wolfSSL_free(ssl);
+
+    wolfSSL_CTX_free(ctx);
+    if (sv[0] >= 0)
+        close(sv[0]);
+    if (sv[1] >= 0)
+        close(sv[1]);
+#endif
+    return EXPECT_RESULT();
+}
+
 int test_wolfSSL_BIO_tls(void)
 {
     EXPECT_DECLS;

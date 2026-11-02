@@ -3769,6 +3769,61 @@ int test_dtls_set_session_min_downgrade(void)
     return EXPECT_RESULT();
 }
 
+int test_dtls_set_session_wrong_protocol(void)
+{
+    EXPECT_DECLS;
+#if defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && defined(WOLFSSL_DTLS) && \
+    !defined(WOLFSSL_NO_TLS12)
+    WOLFSSL_CTX *ctx_c = NULL, *ctx_s = NULL;
+    WOLFSSL *ssl_c = NULL, *ssl_s = NULL;
+    WOLFSSL_SESSION *dtlsSess = NULL;
+    WOLFSSL_SESSION *tlsSess = NULL;
+    struct test_memio_ctx test_ctx;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+                    wolfDTLSv1_2_client_method, wolfDTLSv1_2_server_method), 0);
+    ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
+    ExpectNotNull(dtlsSess = wolfSSL_get1_session(ssl_c));
+    wolfSSL_free(ssl_c); ssl_c = NULL;
+    wolfSSL_free(ssl_s); ssl_s = NULL;
+    wolfSSL_CTX_free(ctx_c); ctx_c = NULL;
+    wolfSSL_CTX_free(ctx_s); ctx_s = NULL;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+                    wolfTLSv1_2_client_method, wolfTLSv1_2_server_method), 0);
+    ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
+    ExpectNotNull(tlsSess = wolfSSL_get1_session(ssl_c));
+    wolfSSL_free(ssl_c); ssl_c = NULL;
+
+    ExpectNotNull(ssl_c = wolfSSL_new(ctx_c));
+    ExpectIntEQ(wolfSSL_set_session(ssl_c, dtlsSess), WOLFSSL_FAILURE);
+    if (ssl_c != NULL) {
+        ExpectIntEQ(ssl_c->version.major, SSLv3_MAJOR);
+        ExpectIntEQ(ssl_c->options.resuming, 0);
+    }
+    wolfSSL_free(ssl_c); ssl_c = NULL;
+    wolfSSL_free(ssl_s); ssl_s = NULL;
+    wolfSSL_CTX_free(ctx_c); ctx_c = NULL;
+    wolfSSL_CTX_free(ctx_s); ctx_s = NULL;
+
+    ExpectNotNull(ctx_c = wolfSSL_CTX_new(wolfDTLSv1_2_client_method()));
+    ExpectNotNull(ssl_c = wolfSSL_new(ctx_c));
+    ExpectIntEQ(wolfSSL_set_session(ssl_c, tlsSess), WOLFSSL_FAILURE);
+    if (ssl_c != NULL) {
+        ExpectIntEQ(ssl_c->version.major, DTLS_MAJOR);
+        ExpectIntEQ(ssl_c->options.resuming, 0);
+    }
+
+    wolfSSL_SESSION_free(dtlsSess);
+    wolfSSL_SESSION_free(tlsSess);
+    wolfSSL_free(ssl_c);
+    wolfSSL_CTX_free(ctx_c);
+#endif
+    return EXPECT_RESULT();
+}
+
 /*----------------------------------------------------------------------------*/
 /* DTLS session export / import                                               */
 /*----------------------------------------------------------------------------*/
@@ -3920,6 +3975,160 @@ int test_wolfSSL_dtls_import_dh_key_sz(void)
 done:
     wolfSSL_free(ssl);
     wolfSSL_CTX_free(ctx);
+#endif
+    return EXPECT_RESULT();
+}
+
+int test_wolfSSL_dtls_import_wrong_protocol(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_DTLS) && defined(WOLFSSL_SESSION_EXPORT) && \
+    !defined(NO_DH) && !defined(NO_WOLFSSL_SERVER) && \
+    !defined(WOLFSSL_NO_TLS12)
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL_CTX* tlsCtx = NULL;
+    WOLFSSL* ssl = NULL;
+    byte blob[sizeof(version_3)];
+    byte* state = NULL;
+    unsigned int stateSz = 0;
+    char buf[16];
+
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfDTLSv1_2_server_method()));
+    ExpectNotNull(tlsCtx = wolfSSL_CTX_new(wolfTLSv1_2_server_method()));
+
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectIntGE(wolfSSL_dtls_import(ssl, version_3, sizeof(version_3)), 0);
+    if (ssl != NULL)
+        ExpectIntEQ(ssl->options.handShakeDone, 1);
+    wolfSSL_free(ssl);
+    ssl = NULL;
+
+    /* Options byte 22 of the blob, after its 6 byte header, is the DTLS flag */
+    XMEMCPY(blob, version_3, sizeof(blob));
+    ExpectIntEQ(blob[28], 1);
+    blob[28] = 0;
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectIntEQ(wolfSSL_dtls_import(ssl, blob, sizeof(blob)),
+        WC_NO_ERR_TRACE(VERSION_ERROR));
+    if (ssl != NULL) {
+        ExpectIntEQ(ssl->options.dtls, 1);
+        ExpectIntEQ(ssl->options.handShakeDone, 0);
+    }
+    wolfSSL_free(ssl);
+    ssl = NULL;
+
+    /* A bad key state length fails after the options are imported */
+    XMEMCPY(blob, version_3, sizeof(blob));
+    blob[66] = 0xFF;
+    blob[67] = 0xFF;
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectIntEQ(wolfSSL_dtls_import(ssl, blob, sizeof(blob)),
+        WC_NO_ERR_TRACE(BUFFER_E));
+    if (ssl != NULL)
+        ExpectIntEQ(ssl->options.handShakeDone, 0);
+    ExpectIntEQ(wolfSSL_write(ssl, "x", 1), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(ssl, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(BUFFER_E));
+    ExpectIntEQ(wolfSSL_read(ssl, buf, (int)sizeof(buf)), WOLFSSL_FATAL_ERROR);
+    wolfSSL_free(ssl);
+    ssl = NULL;
+
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectIntEQ(wolfSSL_dtls_export_state_only(ssl, NULL, &stateSz), 0);
+    ExpectNotNull(state = (byte*)XMALLOC(stateSz, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntGT(wolfSSL_dtls_export_state_only(ssl, state, &stateSz), 0);
+    wolfSSL_free(ssl);
+    ssl = NULL;
+
+    ExpectNotNull(ssl = wolfSSL_new(tlsCtx));
+    ExpectIntLT(wolfSSL_tls_import(ssl, version_3, sizeof(version_3)), 0);
+    ExpectIntLT(wolfSSL_dtls_import(ssl, version_3, sizeof(version_3)), 0);
+    if (ssl != NULL) {
+        ExpectIntEQ(ssl->options.dtls, 0);
+        ExpectIntEQ(ssl->options.handShakeDone, 0);
+    }
+    ExpectIntLT(wolfSSL_tls_import(ssl, state, stateSz), 0);
+    ExpectIntLT(wolfSSL_dtls_import(ssl, state, stateSz), 0);
+    wolfSSL_free(ssl);
+
+    XFREE(state, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    wolfSSL_CTX_free(tlsCtx);
+    wolfSSL_CTX_free(ctx);
+#endif
+    return EXPECT_RESULT();
+}
+
+int test_wolfSSL_tls_import_keeps_bio(void)
+{
+    EXPECT_DECLS;
+#if defined(WOLFSSL_SESSION_EXPORT) && \
+    !defined(WOLFSSL_SESSION_EXPORT_NOPEER) && defined(OPENSSL_EXTRA) && \
+    !defined(NO_BIO) && defined(USE_WOLFSSL_IO) && \
+    defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && \
+    !defined(WOLFSSL_NO_TLS12)
+    WOLFSSL_CTX *ctx_c = NULL, *ctx_s = NULL;
+    WOLFSSL *ssl_c = NULL, *ssl_s = NULL;
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL* ssl = NULL;
+    WOLFSSL_BIO* rbio = NULL;
+    WOLFSSL_BIO* wbio = NULL;
+    struct test_memio_ctx test_ctx;
+    byte* session = NULL;
+    unsigned int sessionSz = 0;
+    const char msg[] = "hello";
+    char buf[256];
+    int n = 0;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+                    wolfTLSv1_2_client_method, wolfTLSv1_2_server_method), 0);
+    ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
+    ExpectIntEQ(wolfSSL_tls_export(ssl_c, NULL, &sessionSz),
+        WC_NO_ERR_TRACE(LENGTH_ONLY_E));
+    ExpectNotNull(session = (byte*)XMALLOC(sessionSz, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntGT(wolfSSL_tls_export(ssl_c, session, &sessionSz), 0);
+
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method()));
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    ExpectNotNull(rbio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem()));
+    ExpectNotNull(wbio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem()));
+    if (EXPECT_SUCCESS()) {
+        wolfSSL_set_bio(ssl, rbio, wbio);
+    }
+    else {
+        wolfSSL_BIO_free(rbio);
+        wolfSSL_BIO_free(wbio);
+    }
+    ExpectIntEQ(wolfSSL_tls_import(ssl, session, sessionSz), (int)sessionSz);
+    if (ssl != NULL) {
+        ExpectPtrEq(ssl->biord, rbio);
+        ExpectPtrEq(ssl->biowr, wbio);
+    }
+
+    ExpectIntEQ(wolfSSL_write(ssl, msg, (int)sizeof(msg)), (int)sizeof(msg));
+    ExpectIntGT(n = wolfSSL_BIO_read(wbio, buf, (int)sizeof(buf)), 0);
+    ExpectIntEQ(test_memio_inject_message(&test_ctx, 0, buf, n), 0);
+    ExpectIntEQ(wolfSSL_read(ssl_s, buf, (int)sizeof(buf)), (int)sizeof(msg));
+    ExpectBufEQ(buf, msg, sizeof(msg));
+
+    wolfSSL_free(ssl);
+    ssl = NULL;
+    ExpectNotNull(ssl = wolfSSL_new(ctx));
+    wolfSSL_SetIOReadCtx(ssl, &n);
+    wolfSSL_SetIOWriteCtx(ssl, &n);
+    ExpectIntEQ(wolfSSL_tls_import(ssl, session, sessionSz), (int)sessionSz);
+    ExpectPtrEq(wolfSSL_GetIOReadCtx(ssl), &n);
+    ExpectPtrEq(wolfSSL_GetIOWriteCtx(ssl), &n);
+
+    XFREE(session, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    wolfSSL_free(ssl);
+    wolfSSL_CTX_free(ctx);
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
 #endif
     return EXPECT_RESULT();
 }
@@ -13398,6 +13607,15 @@ int test_wolfSSL_CTX_mcast_set_member_id(void)
         WC_NO_ERR_TRACE(BAD_FUNC_ARG));
     /* Valid member id succeeds. */
     ExpectIntEQ(wolfSSL_CTX_mcast_set_member_id(ctx, 0), WOLFSSL_SUCCESS);
+    wolfSSL_CTX_free(ctx);
+    ctx = NULL;
+
+    /* A TLS context fails. */
+    ExpectNotNull(ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method()));
+    ExpectIntEQ(wolfSSL_CTX_mcast_set_member_id(ctx, 0),
+        WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    if (ctx != NULL)
+        ExpectIntEQ(ctx->haveMcast, 0);
 
     wolfSSL_CTX_free(ctx);
 #endif

@@ -689,7 +689,8 @@ int wolfSSL_dtls_get_drop_stats(WOLFSSL* ssl,
  * @param [in] ctx  SSL/TLS context object.
  * @param [in] id   Multicast member id.
  * @return  WOLFSSL_SUCCESS on success.
- * @return  BAD_FUNC_ARG when ctx is NULL or id is out of range.
+ * @return  BAD_FUNC_ARG when ctx is NULL or not a DTLS context, or id is out
+ *          of range.
  */
 int wolfSSL_CTX_mcast_set_member_id(WOLFSSL_CTX* ctx, word16 id)
 {
@@ -697,7 +698,8 @@ int wolfSSL_CTX_mcast_set_member_id(WOLFSSL_CTX* ctx, word16 id)
 
     WOLFSSL_ENTER("wolfSSL_CTX_mcast_set_member_id");
 
-    if (ctx == NULL || id > WOLFSSL_MAX_8BIT)
+    if (ctx == NULL || ctx->method == NULL ||
+            ctx->method->version.major != DTLS_MAJOR || id > WOLFSSL_MAX_8BIT)
         ret = BAD_FUNC_ARG;
 
     if (ret == 0) {

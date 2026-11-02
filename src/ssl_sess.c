@@ -1614,6 +1614,13 @@ int wolfSSL_SetSession(WOLFSSL* ssl, WOLFSSL_SESSION* session)
         ret = WOLFSSL_FAILURE;
     }
 
+    if (ret == WOLFSSL_SUCCESS && session->version.major != 0 &&
+            (session->version.major == DTLS_MAJOR) !=
+            (ssl->options.dtls != 0)) {
+        WOLFSSL_MSG("Setting session for wrong protocol");
+        ret = WOLFSSL_FAILURE;
+    }
+
     if (ret == WOLFSSL_SUCCESS) {
         if (ssl->session == session) {
             WOLFSSL_MSG("ssl->session and session same");

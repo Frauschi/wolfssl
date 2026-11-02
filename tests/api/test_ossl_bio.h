@@ -30,6 +30,7 @@ int test_wolfSSL_BIO_puts(void);
 int test_wolfSSL_BIO_dump(void);
 int test_wolfSSL_BIO_should_retry(void);
 int test_wolfSSL_BIO_connect(void);
+int test_wolfSSL_BIO_set_fd_replaces_bio(void);
 int test_wolfSSL_BIO_tls(void);
 int test_wolfSSL_BIO_datagram(void);
 int test_wolfSSL_BIO_s_null(void);
@@ -80,6 +81,7 @@ int test_wolfSSL_BIO_get_new_index_threaded(void);
 
 #define TEST_OSSL_BIO_TLS_DECLS                                   \
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_connect),    \
+    TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_set_fd_replaces_bio), \
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_accept),     \
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_tls),        \
     TEST_DECL_GROUP("ossl_bio_tls", test_wolfSSL_BIO_datagram)

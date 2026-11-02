@@ -1203,7 +1203,14 @@ int EmbedGenerateCookie(WOLFSSL* ssl, byte *buf, int sz, void *ctx)
         #endif
         }
         else {
-            wolfSSL_set_fd(ssl, port);
+            if (ssl->IOCB_ReadCtx == &ssl->rfd &&
+                    ssl->IOCB_WriteCtx == &ssl->wfd
+            #if defined(OPENSSL_EXTRA) && !defined(NO_BIO)
+                    && ssl->biord == NULL && ssl->biowr == NULL
+            #endif
+                    ) {
+                wolfssl_local_set_fd(ssl, port);
+            }
             (void)fam;
             return WOLFSSL_SUCCESS;
         }
