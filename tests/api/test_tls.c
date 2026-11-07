@@ -5068,9 +5068,11 @@ int test_tls12_resume_ticket_decline_fallback(void)
     WOLFSSL_CTX *ctx_c = NULL, *ctx_s = NULL, *ctx_s2 = NULL;
     WOLFSSL *ssl_c = NULL, *ssl_s = NULL;
     WOLFSSL *ssl_c2 = NULL, *ssl_s2 = NULL;
-    WOLFSSL_SESSION *sess = NULL;
+    WOLFSSL *ssl_c3 = NULL, *ssl_s3 = NULL;
+    WOLFSSL_SESSION *sess = NULL, *sess2 = NULL;
     struct test_memio_ctx test_ctx;
     struct test_memio_ctx test_ctx2;
+    struct test_memio_ctx test_ctx3;
 
     /* First handshake: establish a ticket-based TLS 1.2 session on suite A. */
     XMEMSET(&test_ctx, 0, sizeof(test_ctx));
@@ -5090,23 +5092,35 @@ int test_tls12_resume_ticket_decline_fallback(void)
                     wolfTLSv1_2_client_method, wolfTLSv1_2_server_method), 0);
     ExpectIntEQ(wolfSSL_set_cipher_list(ssl_c2, suiteBA), WOLFSSL_SUCCESS);
     ExpectIntEQ(wolfSSL_set_cipher_list(ssl_s2, suiteB), WOLFSSL_SUCCESS);
-    /* Session cache off so the declining server emits an empty session ID and
-     * the client takes the graceful full-handshake fallback (set on the SSL as
-     * the flag is copied from the CTX at wolfSSL_new() time). */
-    if (ssl_s2 != NULL)
-        ssl_s2->options.sessionCacheOff = 1;
     ExpectIntEQ(wolfSSL_UseSessionTicket(ssl_c2), WOLFSSL_SUCCESS);
     ExpectIntEQ(wolfSSL_set_session(ssl_c2, sess), WOLFSSL_SUCCESS);
     /* Fallback must succeed (no MATCH_SUITE_ERROR), not resume, and use B. */
     ExpectIntEQ(test_memio_do_handshake(ssl_c2, ssl_s2, 10, NULL), 0);
     ExpectIntEQ(wolfSSL_session_reused(ssl_c2), 0);
     ExpectStrEQ(wolfSSL_get_cipher_name(ssl_c2), suiteB);
+    /* The declining server offered a session ID for stateful resumption */
+    ExpectIntEQ(wolfSSL_get_session(ssl_s2) != NULL ?
+                wolfSSL_get_session(ssl_s2)->sessionIDSz : 0, ID_LEN);
+
+    /* The client dropped the declined ticket and resumes by session ID. */
+    ExpectNotNull(sess2 = wolfSSL_get1_session(ssl_c2));
+    ExpectIntEQ(sess2 != NULL ? (int)sess2->ticketLen : -1, 0);
+    XMEMSET(&test_ctx3, 0, sizeof(test_ctx3));
+    ExpectIntEQ(test_memio_setup(&test_ctx3, &ctx_c, &ctx_s2, &ssl_c3, &ssl_s3,
+                    wolfTLSv1_2_client_method, wolfTLSv1_2_server_method), 0);
+    ExpectIntEQ(wolfSSL_set_cipher_list(ssl_s3, suiteB), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_set_session(ssl_c3, sess2), WOLFSSL_SUCCESS);
+    ExpectIntEQ(test_memio_do_handshake(ssl_c3, ssl_s3, 10, NULL), 0);
+    ExpectIntEQ(wolfSSL_session_reused(ssl_c3), 1);
 
     wolfSSL_SESSION_free(sess);
+    wolfSSL_SESSION_free(sess2);
     wolfSSL_free(ssl_c);
     wolfSSL_free(ssl_s);
     wolfSSL_free(ssl_c2);
     wolfSSL_free(ssl_s2);
+    wolfSSL_free(ssl_c3);
+    wolfSSL_free(ssl_s3);
     wolfSSL_CTX_free(ctx_c);
     wolfSSL_CTX_free(ctx_s);
     wolfSSL_CTX_free(ctx_s2);
