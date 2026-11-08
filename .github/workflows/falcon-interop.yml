@@ -94,6 +94,7 @@ jobs:
         include:
           - { name: 'default',      opts: '--enable-falcon' }
           - { name: 'smallest-mem', opts: '--enable-falcon=smallest-mem' }
+          - { name: 'fixed',        opts: '--enable-falcon=fixed' }
     steps:
       # Check out wolfSSL first: actions/checkout runs "git clean -ffdx", which
       # would delete an untracked oqs-install/ placed in the workspace by the
@@ -170,6 +171,9 @@ jobs:
           - { name: 'cache-key+small-mem', runner: ubuntu-latest,  opts: '--enable-falcon=cache-key,small-mem', full_suite: true }
           - { name: 'smallest-mem',      runner: ubuntu-latest,    opts: '--enable-falcon=smallest-mem', full_suite: true }
           - { name: 'smallest-mem (32-bit fpr)', runner: ubuntu-latest, opts: '--enable-falcon=smallest-mem', cflags: '-DWC_32BIT_CPU' }
+          - { name: 'fixed',             runner: ubuntu-latest,    opts: '--enable-falcon=fixed', full_suite: true }
+          - { name: 'fixed (32-bit)',    runner: ubuntu-latest,    opts: '--enable-falcon=fixed', cflags: '-DWC_32BIT_CPU' }
+          - { name: 'level1+fixed',      runner: ubuntu-latest,    opts: '--enable-falcon=level1,fixed', full_suite: true }
           - { name: 'asm+smallest-mem',  runner: ubuntu-latest,    opts: '--enable-falcon=asm,smallest-mem' }
           - { name: 'avx2+smallest-mem', runner: ubuntu-latest,    opts: '--enable-falcon=avx2,smallest-mem', avx2: true }
           - { name: 'neon+smallest-mem (ARM64)', runner: ubuntu-24.04-arm, opts: '--enable-falcon=neon,smallest-mem', cflags: '-ffp-contract=off' }
@@ -208,6 +212,10 @@ jobs:
         if: ${{ contains(matrix.opts, 'smallest-mem') }}
         run: python3 scripts/falcon_sm_tables.py --check
 
+      - name: Check the fixed-point constant tables against their generator
+        if: ${{ contains(matrix.opts, 'fixed') }}
+        run: python3 scripts/falcon_fx_tables.py --check
+
       # WC_RNG_SEED_CB makes the DRBG reproducible, which is what lets the
       # deterministic Falcon vector run at all.
       - name: Build wolfSSL (Falcon ${{ matrix.name }})
@@ -228,8 +236,8 @@ jobs:
 
       # The white-box exits 0 either way, as the MC/DC harness expects, and
       # reports a failed check in its closing "done (..., with failures)" line.
-      - name: Run the Falcon white-box (smallest-mem)
-        if: ${{ ! matrix.build_only && contains(matrix.opts, 'smallest-mem') }}
+      - name: Run the Falcon white-box (smallest-mem, fixed)
+        if: ${{ ! matrix.build_only && (contains(matrix.opts, 'smallest-mem') || contains(matrix.opts, 'fixed')) }}
         run: |
           set -o pipefail
           cp src/.libs/libwolfssl.a falcon-wb.a

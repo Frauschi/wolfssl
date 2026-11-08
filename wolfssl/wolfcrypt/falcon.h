@@ -56,6 +56,12 @@
 
 /* This is the native wolfCrypt implementation (no liboqs dependency). */
 
+/* The fixed-point signer is a smallest memory signer. */
+#if defined(WOLFSSL_FALCON_SIGN_FIXED) && \
+    !defined(WOLFSSL_FALCON_SIGN_SMALLEST_MEM)
+    #define WOLFSSL_FALCON_SIGN_SMALLEST_MEM
+#endif
+
 /* The smallest memory signer builds on the small memory one. */
 #if defined(WOLFSSL_FALCON_SIGN_SMALLEST_MEM) && \
     !defined(WOLFSSL_FALCON_SIGN_SMALL_MEM)
