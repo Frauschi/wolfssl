@@ -1,0 +1,45 @@
+name: "AES constant-time flags"
+
+# Check which AES and GHASH configurations aes.h reports as constant time.
+
+# START OF COMMON SECTION
+on:
+  push:
+    branches: [ 'master', 'main', 'release/**' ]
+    paths:
+      - 'wolfcrypt/src/aes.c'
+      - 'wolfcrypt/src/misc.c'
+      - 'wolfssl/wolfcrypt/**'
+      - '.github/scripts/aes-ct-flags.sh'
+      - '.github/workflows/aes-ct-flags.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [ '**' ]
+    paths:
+      - 'wolfcrypt/src/aes.c'
+      - 'wolfcrypt/src/misc.c'
+      - 'wolfssl/wolfcrypt/**'
+      - '.github/scripts/aes-ct-flags.sh'
+      - '.github/workflows/aes-ct-flags.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+# END OF COMMON SECTION
+
+jobs:
+  flags:
+    name: Derived WC_AES_BLOCK_CT / WC_AES_GHASH_CT
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout wolfSSL
+
+      - name: Check the derived flags
+        run: CC=gcc .github/scripts/aes-ct-flags.sh

@@ -57,27 +57,33 @@ block cipher mechanism that uses n-bit binary string parameter key with 128-bits
     #define WC_AES_GCM_GMULT_CACHE_RESIST
 #endif
 
+/* Cores whose multiply may take data-dependent time */
+#if (defined(__arm__) && ((defined(__ARM_ARCH) && __ARM_ARCH < 6) || \
+     defined(__ARM_ARCH_4__) || defined(__ARM_ARCH_4T__) || \
+     defined(__ARM_ARCH_5__) || defined(__ARM_ARCH_5T__) || \
+     defined(__ARM_ARCH_5E__) || defined(__ARM_ARCH_5TE__) || \
+     defined(__ARM_ARCH_5TEJ__))) || \
+    (defined(__riscv) && !defined(__riscv_zkt)) || defined(WC_16BIT_CPU)
+    #define WC_AES_GCM_MUL_NOT_CT
+#endif
+
 /* Default GHASH implementation when none is chosen: the table-free
  * GCM_INT_MUL when cache resistant, otherwise the faster 4-bit table. The
  * PPC and RISC-V assembly GHASH is built on the 4-bit table.
  * GCM_INT_MUL is only as constant time as the CPU multiply, so it is not the
  * default where MUL may take data-dependent time: Armv4/Armv5 (e.g. ARM7TDMI
- * and ARM9TDMI multiplies terminate early on the operand's top bits) and
- * RISC-V without Zkt (data-independent latency is not guaranteed). They get
- * the masked GCM_SMALL, which uses no multiplies or tables. Choosing
- * GCM_INT_MUL explicitly asserts the CPU's multiply is constant time. */
+ * and ARM9TDMI multiplies terminate early on the operand's top bits),
+ * RISC-V without Zkt (data-independent latency is not guaranteed) and 16-bit
+ * CPUs (the 32-bit multiply is a software routine). They get the masked
+ * GCM_SMALL, which uses no multiplies or tables. An explicit GCM_INT_MUL
+ * still builds there but does not set WC_AES_GHASH_CT. */
 #if defined(HAVE_AESGCM) && !defined(GCM_SMALL) && !defined(GCM_TABLE) && \
     !defined(GCM_TABLE_4BIT) && !defined(GCM_WORD32) && !defined(GCM_INT_MUL)
     #if !defined(WC_AES_GCM_GMULT_CACHE_RESIST) || \
         defined(WOLFSSL_PPC64_ASM) || defined(WOLFSSL_PPC32_ASM) || \
         defined(WOLFSSL_RISCV_ASM)
         #define GCM_TABLE_4BIT
-    #elif (defined(__arm__) && ((defined(__ARM_ARCH) && __ARM_ARCH < 6) || \
-            defined(__ARM_ARCH_4__) || defined(__ARM_ARCH_4T__) || \
-            defined(__ARM_ARCH_5__) || defined(__ARM_ARCH_5T__) || \
-            defined(__ARM_ARCH_5E__) || defined(__ARM_ARCH_5TE__) || \
-            defined(__ARM_ARCH_5TEJ__))) || \
-          (defined(__riscv) && !defined(__riscv_zkt))
+    #elif defined(WC_AES_GCM_MUL_NOT_CT)
         #define GCM_SMALL
     #else
         #define GCM_INT_MUL
@@ -110,6 +116,125 @@ block cipher mechanism that uses n-bit binary string parameter key with 128-bits
     #define WOLFSSL_ARM32_AES_HW_FLAGS
 #endif
 
+/* Arm T-table asm (Thumb-2 / NO_HW_CRYPTO, not AArch64) cannot honor
+ * WOLFSSL_AES_TOUCH_LINES, so route AES through the C table core instead. */
+#if defined(WOLFSSL_AES_TOUCH_LINES) && defined(WOLFSSL_ARMASM) && \
+    !defined(__aarch64__) && \
+    (defined(WOLFSSL_ARMASM_THUMB2) || defined(WOLFSSL_ARMASM_NO_HW_CRYPTO))
+    #define WC_AES_TOUCH_LINES_C_CORE
+#endif
+
+/* RISC-V C core defaults touch-lines on. WOLFSSL_AES_NO_TOUCH_LINES clears
+ * only this default and leaves the rest of the hardening in place. */
+#if defined(__riscv) && !defined(WOLFSSL_RISCV_ASM) && \
+    !defined(WC_NO_CACHE_RESISTANT) && !defined(WOLFSSL_AES_NO_TOUCH_LINES) && \
+    !defined(WOLFSSL_AES_TOUCH_LINES) && !defined(WC_AES_BITSLICED)
+    #define WOLFSSL_AES_TOUCH_LINES
+#endif
+
+/* WC_AES_BLOCK_CT and WC_AES_GHASH_CT report that every AES block or GHASH
+ * path this build can take is constant time; they follow aes.c's backends. */
+#if defined(WC_AES_BLOCK_CT) || defined(WC_AES_GHASH_CT)
+    #error "WC_AES_BLOCK_CT and WC_AES_GHASH_CT are derived; do not define them"
+#endif
+
+/* AES or GCM run by a device, kernel or GPU whose timing wolfSSL cannot vouch
+ * for. WC_ASYNC_ENABLE_AES is not defined yet here, so its inputs are used. */
+#undef WC_AES_CT_UNKNOWN
+#if (defined(WOLFSSL_ASYNC_CRYPT) && !defined(WC_ASYNC_NO_CRYPT) && \
+     !defined(WC_ASYNC_NO_AES)) || defined(WOLF_CRYPTO_CB_ONLY_AES) || \
+    defined(WOLF_CRYPTO_CB_FIND) || \
+    defined(HAVE_COLDFIRE_SEC) || defined(FREESCALE_LTC) || \
+    defined(FREESCALE_MMCAU) || defined(WOLFSSL_PIC32MZ_CRYPT) || \
+    defined(WOLFSSL_ESP32_CRYPT) || defined(STM32_CRYPTO) || \
+    (defined(WOLFSSL_IMX6_CAAM) && !defined(NO_IMX6_CAAM_AES)) || \
+    defined(WOLFSSL_QNX_CAAM) || defined(WOLFSSL_SECO_CAAM) || \
+    defined(WOLFSSL_IMXRT_DCP) || defined(WOLFSSL_NXP_HASHCRYPT_AES) || \
+    (defined(WOLFSSL_SE050) && defined(WOLFSSL_SE050_CRYPT)) || \
+    (defined(WOLFSSL_MICROCHIP_TA100) && defined(WOLFSSL_MICROCHIP_AESGCM)) || \
+    defined(WOLFSSL_MAXQ10XX_CRYPTO) || defined(WOLFSSL_MAX3266X) || \
+    defined(WOLFSSL_MAX3266X_OLD) || defined(WOLFSSL_TI_AM64X_R5) || \
+    defined(WOLFSSL_TI_CRYPT) || (defined(WOLFSSL_SCE) && \
+    !defined(WOLFSSL_SCE_NO_AES)) || \
+    defined(WOLFSSL_RENESAS_FSPSM_CRYPTONLY) || \
+    defined(WOLFSSL_RENESAS_FSPSM_TLS) || \
+    defined(WOLFSSL_RENESAS_SCEPROTECT) || defined(WOLFSSL_RENESAS_RSIP) || \
+    defined(WOLFSSL_RENESAS_TSIP_TLS) || \
+    defined(WOLFSSL_RENESAS_TSIP_CRYPTONLY) || defined(HAVE_INTEL_QA_SYNC) || \
+    defined(HAVE_CAVIUM_OCTEON_SYNC) || \
+    (defined(HAVE_ARIA) && defined(WOLF_CRYPTO_CB)) || \
+    defined(WOLFSSL_SILABS_SE_ACCEL) || defined(WOLFSSL_PSOC6_CRYPTO) || \
+    defined(WOLFSSL_XILINX_CRYPT) || defined(WOLFSSL_AFALG) || \
+    defined(WOLFSSL_AFALG_XILINX_AES) || defined(WOLFSSL_DEVCRYPTO_AES) || \
+    defined(WOLFSSL_DEVCRYPTO_CBC) || defined(WOLFSSL_KCAPI_AES) || \
+    (defined(WOLFSSL_HAVE_PSA) && !defined(WOLFSSL_PSA_NO_AES)) || \
+    defined(HAVE_CUDA)
+    #define WC_AES_CT_UNKNOWN
+#endif
+
+/* Touch-lines stride set explicitly, or cores whose cache line and read width
+ * are at least the default stride */
+#undef WC_AES_TOUCH_LINES_STRIDE_OK
+#if defined(WC_CACHE_LINE_SZ) || defined(__x86_64__) || defined(_M_X64) || \
+    defined(__aarch64__) || defined(_M_ARM64) || (defined(__arm__) && \
+    defined(__ARM_ARCH_PROFILE) && __ARM_ARCH_PROFILE == 'A')
+    #define WC_AES_TOUCH_LINES_STRIDE_OK
+#endif
+
+#ifndef NO_AES
+#if defined(WC_AES_CT_UNKNOWN)
+#elif defined(WOLFSSL_AESNI)
+    /* Falls back to the software core on a CPU without AES-NI. */
+    #if defined(WC_AES_BITSLICED) || (defined(WOLFSSL_AES_TOUCH_LINES) && \
+        defined(WC_AES_TOUCH_LINES_STRIDE_OK))
+        #define WC_AES_BLOCK_CT
+    #endif
+#elif defined(WOLFSSL_ARMASM) && !defined(WC_AES_TOUCH_LINES_C_CORE)
+    #if defined(__aarch64__) && !defined(WOLFSSL_ARMASM_NO_NEON) && \
+        defined(WOLFSSL_ARMASM_NEON_NO_TABLE_LOOKUP)
+        #define WC_AES_BLOCK_CT
+    #elif !defined(__aarch64__) && !defined(WOLFSSL_ARMASM_THUMB2) && \
+          !defined(WOLFSSL_ARMASM_NO_HW_CRYPTO) && \
+          defined(WOLFSSL_ARMASM_NO_BASE_IMPL)
+        #define WC_AES_BLOCK_CT
+    #endif
+#elif defined(WOLFSSL_PPC64_ASM) || defined(WOLFSSL_PPC32_ASM)
+#elif defined(WOLFSSL_RISCV_ASM)
+    /* Data-independent latency needs Zkt for scalar and Zvkt for vector. */
+    #if (defined(WOLFSSL_RISCV_SCALAR_CRYPTO_ASM) || \
+         defined(WOLFSSL_RISCV_VECTOR_CRYPTO_ASM)) && \
+        (!defined(WOLFSSL_RISCV_SCALAR_CRYPTO_ASM) || defined(__riscv_zkt)) && \
+        (!defined(WOLFSSL_RISCV_VECTOR_CRYPTO_ASM) || defined(__riscv_zvkt))
+        #define WC_AES_BLOCK_CT
+    #endif
+#elif defined(WC_AES_BITSLICED) || (defined(WOLFSSL_AES_TOUCH_LINES) && \
+      defined(WC_AES_TOUCH_LINES_STRIDE_OK))
+    #define WC_AES_BLOCK_CT
+#endif
+
+#ifdef HAVE_AESGCM
+#if defined(WC_AES_CT_UNKNOWN)
+#elif defined(WOLFSSL_RISCV_ASM)
+    #if defined(WC_AES_BLOCK_CT)
+        #define WC_AES_GHASH_CT
+    #endif
+#elif defined(WOLFSSL_ARMASM)
+    /* PMULL or NEON on H; GCM_SMALL single blocks use the C GMULT. */
+    #if defined(__aarch64__) && !defined(WOLFSSL_ARMASM_NO_NEON) && \
+        (!defined(GCM_SMALL) || defined(WC_AES_GCM_GMULT_CACHE_RESIST))
+        #define WC_AES_GHASH_CT
+    #endif
+#elif defined(WOLFSSL_PPC64_ASM) || defined(WOLFSSL_PPC32_ASM)
+#elif (defined(GCM_INT_MUL) && !defined(WC_AES_GCM_MUL_NOT_CT)) || \
+      (defined(WC_AES_GCM_GMULT_CACHE_RESIST) && (defined(GCM_SMALL) || \
+       (defined(GCM_WORD32) && !defined(GCM_TABLE) && \
+        !defined(GCM_TABLE_4BIT))))
+    #define WC_AES_GHASH_CT
+#endif
+#endif /* HAVE_AESGCM */
+#endif /* !NO_AES */
+#undef WC_AES_CT_UNKNOWN
+
 #if !defined(NO_AES) || defined(WOLFSSL_SM4)
 
 #ifdef GCM_INT_MUL
@@ -119,7 +244,8 @@ block cipher mechanism that uses n-bit binary string parameter key with 128-bits
     #define GCM_IM_64
 #elif !defined(GCM_INT_MUL_32_ONLY) && defined(WORD64_AVAILABLE) && \
       !defined(WC_16BIT_CPU) && !defined(__ARM_ARCH_6M__) && \
-      !defined(__ARM_ARCH_7M__)
+      !defined(__ARM_ARCH_7M__) && !(defined(__ARM_ARCH_PROFILE) && \
+      __ARM_ARCH_PROFILE == 'M' && __ARM_ARCH_ISA_THUMB == 1)
     #define GCM_IM_32W
 #else
     #define GCM_IM_32

@@ -1370,6 +1370,7 @@ __ARM_ARCH_5__
 __ARM_ARCH_6M__
 __ARM_ARCH_7EM__
 __ARM_ARCH_7M__
+__ARM_ARCH_ISA_THUMB
 __ARM_ARCH_PROFILE
 __ARM_FEATURE_CRYPTO
 __ARM_FEATURE_DSP
@@ -1519,6 +1520,7 @@ __riscv
 __riscv_mul
 __riscv_xlen
 __riscv_zkt
+__riscv_zvkt
 __s390x__
 __sparc
 __sparc64__

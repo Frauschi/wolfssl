@@ -169,8 +169,37 @@ Size and side channels:
 | `WOLFSSL_AES_TOUCH_LINES` | Touch every cache line — cache-timing resistance |
 | `WOLFSSL_AES_NO_TOUCH_LINES` | Clear the RISC-V touch-lines default on its own; `WC_NO_CACHE_RESISTANT` also drops the ECC/RSA cache resistance |
 | `WC_AES_BITSLICED` | Bitsliced implementation, constant time by construction |
+| `WC_AES_BLOCK_CT` | Set by `aes.h`, never by hand, when every AES block cipher path is constant time (below) |
+| `WC_AES_GHASH_CT` | Set by `aes.h`, never by hand, when every AES-GCM GHASH path is constant time (below) |
 | `AES_GCM_GMULT_NCT` | Non-constant-time GHASH. Faster, weaker |
 | `WOLFSSL_AESGCM_STREAM` | Streaming GCM API for data that does not fit in memory |
+
+`WC_AES_BLOCK_CT` and `WC_AES_GHASH_CT` count only wolfSSL's own code and
+CPU instructions, run-time fallbacks included. AES engines, kernel offload,
+async crypto, PSA, CUDA, `WOLF_CRYPTO_CB_ONLY_AES` and `WOLF_CRYPTO_CB_FIND`
+leave both unset, as do builds where wolfSSL itself picks an AES device (QNX
+CAAM, ARIA with crypto callbacks, MAXQ10xx TLS, Renesas TSIP and FSPSM, the
+sniffer's QAT and Octeon sync). A crypto callback device set on a single
+object is not covered. An unset flag means wolfSSL cannot vouch for the
+build, which is not the same as a leak.
+
+RISC-V scalar crypto counts only with Zkt and vector crypto only with Zvkt,
+and a build with both needs both. `GCM_INT_MUL` counts except on the cores
+`aes.h` lists as having a variable-time multiply (Armv4/5, RISC-V without
+Zkt, 16-bit CPUs). PowerPC and 32-bit Arm assembly builds never set
+`WC_AES_GHASH_CT`. The flags cover the AES rounds and GHASH; GCM-SIV's
+POLYVAL, the XTS tweak update and CMAC/SIV subkey doubling are not covered.
+
+Touch-lines hides which cache line a lookup reads but not the offset within
+it, and only while `WC_CACHE_LINE_SZ` is no wider than the smaller of the
+core's cache line and memory read width. It also needs the tables aligned to
+that stride, which `XALIGNED` cannot do on Open Watcom or on compilers
+`types.h` does not know. Without an explicit `WC_CACHE_LINE_SZ`, touch-lines
+counts only on x86-64, AArch64 and the Arm A profile, and on Cortex-M where
+`settings.h` lowers the stride to 8.
+
+Both flags follow the compiler flags of the file that includes `aes.h`, so
+build applications with the library's `-march`.
 
 Assembly (`WOLFSSL_AESNI`, `USE_INTEL_SPEEDUP`, `WOLFSSL_ARMASM`, …) is in
 `doc/ASM_AND_MATH_DEFINES.md` § 6.

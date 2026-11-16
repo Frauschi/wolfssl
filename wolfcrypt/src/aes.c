@@ -118,6 +118,10 @@ block cipher mechanism that uses n-bit binary string parameter key with 128-bits
  * WOLFSSL_AES_TABLE_SECTION: Linker section for AES tables,       default: none
  *                           to keep them off the flash read path
  * WC_AES_BITSLICED:        Use bitsliced AES implementation      default: off
+ * WC_AES_BLOCK_CT:         Set by aes.h: every AES block path    derived
+ *                           is constant time
+ * WC_AES_GHASH_CT:         Set by aes.h: every GCM GHASH path    derived
+ *                           is constant time
  * AES_GCM_GMULT_NCT:       GCM GMULT non-constant-time          default: off
  * AES_GCM_GMULT_NO_CACHE_RESIST:
  *                          Turn off WC_AES_GCM_GMULT_CACHE_RESIST: default: off
@@ -468,14 +472,6 @@ int wc_local_AesGcmCheckTagSz(word32 authTagSz) {
     !defined(WOLFSSL_ARMASM_NO_HW_CRYPTO) && \
     !defined(WOLFSSL_ARMASM_NO_BASE_IMPL) && defined(HAVE_CPUID_ARM32)
     #define WOLFSSL_ARM32_AES_DISPATCH
-#endif
-
-/* Arm T-table asm (Thumb-2 / NO_HW_CRYPTO, not AArch64) cannot honor
- * WOLFSSL_AES_TOUCH_LINES, so route AES through the C table core instead. */
-#if defined(WOLFSSL_AES_TOUCH_LINES) && defined(WOLFSSL_ARMASM) && \
-    !defined(__aarch64__) && \
-    (defined(WOLFSSL_ARMASM_THUMB2) || defined(WOLFSSL_ARMASM_NO_HW_CRYPTO))
-    #define WC_AES_TOUCH_LINES_C_CORE
 #endif
 
 /* The Arm base T-table assembly cannot honor WOLFSSL_AES_TOUCH_LINES; fail
@@ -1613,6 +1609,9 @@ static WARN_UNUSED_RESULT int wc_AesDecrypt(Aes* aes, const byte* inBlock,
 #endif /* HAVE_AES_DECRYPT && WOLFSSL_AES_DIRECT */
 
 #elif (defined(WOLFSSL_PPC64_ASM) || defined(WOLFSSL_PPC32_ASM))
+#ifdef WC_AES_BLOCK_CT
+    #error "aes.h set WC_AES_BLOCK_CT for a build with the T-table assembly"
+#endif
 
 #if defined(WOLFSSL_PPC64_ASM) && defined(WOLFSSL_PPC64_ASM_CRYPTO)
 /* POWER8+ has vector AES (vcipher/vncipher...) instructions.  When built in,
@@ -1998,6 +1997,13 @@ static WARN_UNUSED_RESULT int wc_AesDecrypt(Aes* aes, const byte* inBlock,
 /* implemented in wolfcrypt/src/port/psa/psa_aes.c */
 
 #elif defined(WOLFSSL_RISCV_ASM)
+#if defined(WC_AES_BLOCK_CT) && \
+    ((!defined(WOLFSSL_RISCV_SCALAR_CRYPTO_ASM) && \
+      !defined(WOLFSSL_RISCV_VECTOR_CRYPTO_ASM)) || \
+     (defined(WOLFSSL_RISCV_SCALAR_CRYPTO_ASM) && !defined(__riscv_zkt)) || \
+     (defined(WOLFSSL_RISCV_VECTOR_CRYPTO_ASM) && !defined(__riscv_zvkt)))
+    #error "aes.h set WC_AES_BLOCK_CT for RISC-V AES that is not constant time"
+#endif
 /* Block cipher implemented by the generated RISC-V assembly
  * (riscv-64-aes-asm.S / _c.c). The key schedule is wired in wc_AesSetKeyLocal.
  * Vector-crypto overrides the bulk modes (ECB/CBC/CTR/GCM/XTS) with asm; scalar
@@ -2059,6 +2065,12 @@ static WARN_UNUSED_RESULT int wc_AesDecrypt(Aes* aes, const byte* inBlock,
     #define NEED_AES_TABLES
 #endif
 
+#if defined(NEED_AES_TABLES) && defined(WC_AES_BLOCK_CT) && \
+    (defined(HAVE_CUDA) || (!defined(WC_AES_BITSLICED) && \
+     (!defined(WOLFSSL_AES_TOUCH_LINES) || \
+      !defined(WC_AES_TOUCH_LINES_STRIDE_OK))))
+    #error "aes.h set WC_AES_BLOCK_CT for a build that uses the T-table core"
+#endif
 
 
 #if defined(WC_AES_BITSLICED) && !defined(HAVE_AES_ECB)
@@ -2078,8 +2090,8 @@ static WARN_UNUSED_RESULT int wc_AesDecrypt(Aes* aes, const byte* inBlock,
 /* Define the stride before the tables so they can be aligned to it: the masked
  * scan only hides the index when each table base is line-aligned. */
 #ifndef WC_CACHE_LINE_SZ
-    #if defined(__x86_64__) || defined(_M_X64) || \
-       (defined(__ILP32__) && (__ILP32__ >= 1))
+    /* A stride wider than the core's cache line skips lines in the scan. */
+    #if defined(__x86_64__) || defined(_M_X64)
         #define WC_CACHE_LINE_SZ 64
     #else
         /* default cache line size */
@@ -5345,6 +5357,9 @@ static WARN_UNUSED_RESULT int wc_AesDecrypt(Aes* aes, const byte* inBlock,
 #endif /* WOLFSSL_ARM32_AES_DISPATCH */
 #endif /* !WOLFSSL_ARMASM_NO_HW_CRYPTO */
 #if defined(WOLFSSL_ARMASM_NO_HW_CRYPTO) || defined(WOLFSSL_ARM32_AES_DISPATCH)
+#ifdef WC_AES_BLOCK_CT
+    #error "aes.h set WC_AES_BLOCK_CT for a build with the T-table assembly"
+#endif
         {
             AES_set_encrypt_key(userKey, keylen * 8, (byte*)aes->key);
 
@@ -6427,6 +6442,9 @@ static void AesSetKey_C(Aes* aes, const byte* key, word32 keySz, int dir)
         }
     #elif defined(__aarch64__) || defined(WOLFSSL_ARMASM_NO_HW_CRYPTO) || \
           defined(WOLFSSL_ARM32_AES_DISPATCH)
+#ifdef WC_AES_BLOCK_CT
+    #error "aes.h set WC_AES_BLOCK_CT for a build with the T-table assembly"
+#endif
         {
             AES_set_encrypt_key(userKey, keylen * 8, (byte*)aes->key);
         #ifdef HAVE_AES_DECRYPT
@@ -9021,6 +9039,11 @@ static WC_INLINE void IncrementGcmCounter(byte* inOutCtr)
 /* WC_AES_GCM_GMULT_CACHE_RESIST and the default GHASH implementation are
  * decided in aes.h, as the Gcm layout depends on them. */
 
+#if defined(WC_AES_GHASH_CT) && !(defined(WOLFSSL_RISCV_ASM) && \
+    defined(WOLFSSL_RISCV_VECTOR_CRYPTO_ASM))
+    #define WC_AES_GHASH_CT_CHECK
+#endif
+
 #if defined(GCM_INT_MUL) && (defined(GCM_SMALL) || defined(GCM_TABLE) || \
     defined(GCM_TABLE_4BIT) || defined(GCM_WORD32))
     #error "GCM_INT_MUL can't be combined with another GHASH implementation:" \
@@ -9611,6 +9634,9 @@ void AES_GCM_decrypt_vaes(const unsigned char *in, unsigned char *out,
 
 #if defined(WOLFSSL_RISCV_SCALAR_CRYPTO_ASM) && defined(HAVE_AESGCM) && \
     !defined(WOLFSSL_RISCV_VECTOR_CRYPTO_ASM)
+#if defined(WC_AES_GHASH_CT_CHECK) && !defined(__riscv_zkt)
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
 /* GHASH using the RISC-V scalar carryless-multiply (Zbc) helper.  Vector crypto
  * supersedes it (fused vghsh/vgmul), so this scalar path yields when both are on.
  *
@@ -9725,6 +9751,9 @@ static void GMULT(byte* X, byte* Y, GcmScratch* WC_RESTRICT ws)
                 Z[k] ^= (byte)(V[k] & mask);
             }
 #else
+#ifdef WC_AES_GHASH_CT_CHECK
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
             if (y & 0x80) {
                 xorbuf(Z, V, WC_AES_BLOCK_SIZE);
             }
@@ -9855,6 +9884,9 @@ static WC_MAYBE_UNUSED void GCM_gmult_len_armasm_C(
                     Z[k] ^= (byte)(V[k] & mask);
                 }
             #else
+#ifdef WC_AES_GHASH_CT_CHECK
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
                 if (y & 0x80) {
                     xorbuf(Z, V, AES_BLOCK_SIZE);
                 }
@@ -9900,6 +9932,9 @@ static void GCM_gmult_len_armasm_C(
                     Z[k] ^= (byte)(V[k] & mask);
                 }
             #else
+#ifdef WC_AES_GHASH_CT_CHECK
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
                 if (y & 0x80) {
                     xorbuf(Z, V, AES_BLOCK_SIZE);
                 }
@@ -9931,13 +9966,22 @@ static void GCM_gmult_len_armasm_C(
 #define GCM_GMULT_LEN(gcm, x, a, len) \
     GCM_gmult_len_NEON(x, (const byte*)((gcm)->H), a, len)
 #else
+#ifdef WC_AES_GHASH_CT_CHECK
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
 #define GCM_GMULT_LEN(gcm, x, a, len) \
     GCM_gmult_len(x, (const byte**)((gcm)->M0), a, len)
 #endif
 #elif defined(WOLFSSL_PPC64_ASM) || defined(WOLFSSL_PPC32_ASM)
+#ifdef WC_AES_GHASH_CT_CHECK
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
 #define GCM_GMULT_LEN(gcm, x, a, len) \
     GCM_gmult_len(x, (const byte**)((gcm)->M0), a, len)
 #else
+#ifdef WC_AES_GHASH_CT_CHECK
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
 #define GCM_C_GMULT
 ALIGN16 static const byte R[256][2] = {
     {0x00, 0x00}, {0x01, 0xc2}, {0x03, 0x84}, {0x02, 0x46},
@@ -10281,6 +10325,9 @@ void GHASH(Gcm* gcm, const byte* a, word32 aSz, const byte* c,
 #define GMULT(x, m)                                                      \
     GCM_gmult_NEON(x, (const byte**)(m))
 #else
+#ifdef WC_AES_GHASH_CT_CHECK
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
 #define GCM_GMULT_LEN(gcm, x, a, len) \
     GCM_gmult_len(x, (const byte**)((gcm)->M0), a, len)
 #define GMULT(x, m)                                                      \
@@ -10289,12 +10336,18 @@ void GHASH(Gcm* gcm, const byte* a, word32 aSz, const byte* c,
 
 /* PPC64 assembly */
 #elif (defined(WOLFSSL_PPC64_ASM) || defined(WOLFSSL_PPC32_ASM))
+#ifdef WC_AES_GHASH_CT_CHECK
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
 #define GCM_GMULT_LEN(gcm, x, a, len)                                    \
     GCM_gmult_len(x, (const byte**)((gcm)->M0), a, len)
 #define GMULT(x, m)                                                      \
     GCM_gmult(x, (const byte**)(m))
 
 #else
+#ifdef WC_AES_GHASH_CT_CHECK
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
 /* remainder = x^7 + x^2 + x^1 + 1 => 0xe1
  *  R shifts right a reverse bit pair of bytes such that:
  *     R(b0, b1) => b1 = (b1 >> 1) | (b0 << 7); b0 >>= 1
@@ -10773,6 +10826,9 @@ void GHASH(Gcm* gcm, const byte* a, word32 aSz, const byte* c,
 #endif
 #endif /* WOLFSSL_AESGCM_STREAM */
 #elif defined(GCM_INT_MUL)
+#if defined(WC_AES_GHASH_CT_CHECK) && defined(WC_AES_GCM_MUL_NOT_CT)
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
 /* Table-free GHASH multiply using integer multiplies.
  *
  * There are no tables and no branches or memory addresses that depend on H or
@@ -11377,6 +11433,9 @@ static void GMULT(word64* X, word64* Y, GcmScratch* WC_RESTRICT ws)
             Z[0] ^= V[0] & mask;
             Z[1] ^= V[1] & mask;
 #else
+#ifdef WC_AES_GHASH_CT_CHECK
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
             if (y & 0x8000000000000000ULL) {
                 Z[0] ^= V[0];
                 Z[1] ^= V[1];
@@ -11711,6 +11770,9 @@ static void GMULT(word32* X, word32* Y, GcmScratch* WC_RESTRICT ws)
             V[1] = (V[1] >> 1) | (V[0] << 31);
             V[0] = (V[0] >> 1) ^ v3;
 #else
+#ifdef WC_AES_GHASH_CT_CHECK
+    #error "aes.h set WC_AES_GHASH_CT for a GHASH that is not constant time"
+#endif
             if (y & 0x80000000) {
                 Z[0] ^= V[0];
                 Z[1] ^= V[1];

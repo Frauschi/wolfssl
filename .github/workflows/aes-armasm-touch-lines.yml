@@ -47,11 +47,13 @@ jobs:
             touch_lines: ''
             expect_c_core: '0'
             expect_gcmsiv_asm: '1'
+            expect_block_ct: '0'
           # Touch-lines routes AES through the C table core.
           - leg: 'touch-lines routed to C core'
             touch_lines: '-DWOLFSSL_AES_TOUCH_LINES'
             expect_c_core: '1'
             expect_gcmsiv_asm: '0'
+            expect_block_ct: '1'
     steps:
       - uses: actions/checkout@v4
         name: Checkout wolfSSL
@@ -93,5 +95,16 @@ jobs:
           echo "GCM-SIV asm CTR referenced: $siv (expected ${{ matrix.expect_gcmsiv_asm }})"
           if [ "$siv" != "${{ matrix.expect_gcmsiv_asm }}" ]; then
               echo "GCM-SIV routing check failed."
+              exit 1
+          fi
+
+          # aes.h reports the AES block core constant time only when routed.
+          pp=$(printf '%s\n' '#include <wolfssl/wolfcrypt/aes.h>' \
+                  '#ifdef WC_AES_BLOCK_CT' 'block_ct' '#endif' | \
+              arm-none-eabi-gcc $CF ${{ matrix.touch_lines }} -E -P -x c -)
+          ct=$(printf '%s\n' "$pp" | grep -c '^block_ct$' || true)
+          echo "WC_AES_BLOCK_CT: $ct (expected ${{ matrix.expect_block_ct }})"
+          if [ "$ct" != "${{ matrix.expect_block_ct }}" ]; then
+              echo "WC_AES_BLOCK_CT does not match the C-core routing."
               exit 1
           fi
