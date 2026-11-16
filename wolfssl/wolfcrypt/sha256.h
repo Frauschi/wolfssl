@@ -109,17 +109,22 @@
 #define WOLFSSL_NO_HASH_RAW
 #endif
 
+/* STM32 HASH engine with software SHA-256 for wc_InitSha256_Sw() objects */
+#if defined(STM32_HASH_SHA2) && defined(WOLFSSL_STM32_HASH_SHA256_SW)
+    #define WC_SHA256_STM32_SW
+#endif
+
 /* Ports with no software transform or with state outside sha256->digest. */
 #if (defined(WOLFSSL_HAVE_LMS) || \
      (defined(WOLFSSL_HAVE_SLHDSA) && defined(WOLFSSL_SLHDSA_SHA2))) && \
-    !defined(WOLFSSL_NO_HASH_RAW) && \
+    (!defined(WOLFSSL_NO_HASH_RAW) || defined(WC_SHA256_STM32_SW)) && \
     !defined(WOLFSSL_TI_HASH) && \
     !defined(WOLFSSL_CRYPTOCELL) && \
     !defined(WOLFSSL_MAX3266X) && \
     !defined(WOLFSSL_MAX3266X_OLD) && \
     !defined(FREESCALE_LTC_SHA) && \
     !defined(WOLFSSL_PIC32MZ_HASH) && \
-    !defined(STM32_HASH_SHA2) && \
+    (!defined(STM32_HASH_SHA2) || defined(WC_SHA256_STM32_SW)) && \
     !(defined(WOLFSSL_IMX6_CAAM) && !defined(NO_IMX6_CAAM_HASH) && \
       !defined(WOLFSSL_QNX_CAAM)) && \
     !(defined(WOLFSSL_SE050) && defined(WOLFSSL_SE050_HASH)) && \
@@ -224,6 +229,14 @@ struct wc_Sha256 {
     SE050_HASH_Context se050Ctx;
 #elif defined(STM32_HASH_SHA2)
     STM32_HASH_Context stmCtx;
+#ifdef WC_SHA256_STM32_SW
+    word32  digest[WC_SHA256_DIGEST_SIZE / sizeof(word32)];
+    word32  buffer[WC_SHA256_BLOCK_SIZE  / sizeof(word32)];
+    word32  buffLen;   /* in bytes          */
+    word32  loLen;     /* length in bytes   */
+    word32  hiLen;     /* length in bytes   */
+    byte    sw;        /* hashed in software */
+#endif
 #elif defined(WOLFSSL_SILABS_SE_ACCEL)
     wc_silabs_sha_t silabsCtx;
 #elif defined(WOLFSSL_IMXRT_DCP)
@@ -333,6 +346,11 @@ WOLFSSL_API int wc_Sha256Transform(wc_Sha256* sha, const unsigned char* data);
 #ifdef WOLFSSL_HAVE_SHA256_HASH_BLOCK
 WOLFSSL_API int wc_Sha256HashBlock(wc_Sha256* sha, const unsigned char* data,
     unsigned char* hash);
+#endif
+#ifdef WC_SHA256_STM32_SW
+WOLFSSL_LOCAL int wc_InitSha256_Sw(wc_Sha256* sha);
+#else
+    #define wc_InitSha256_Sw(sha)   wc_InitSha256(sha)
 #endif
 
 /* Multi-buffer SHA-256: compress several independent message blocks at once,

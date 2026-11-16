@@ -44,7 +44,9 @@
 
 /* When raw hash access APIs are disabled or unavailable (WOLFSSL_NO_HASH_RAW),
  * fall back to using the full hash API calls. */
-#if defined(WOLFSSL_NO_HASH_RAW) && !defined(WC_XMSS_FULL_HASH)
+#if defined(WOLFSSL_NO_HASH_RAW) && !defined(WC_XMSS_FULL_HASH) && \
+    (!defined(WC_SHA256_STM32_SW) || defined(STM32_HASH_SHA512) || \
+     defined(STM32_HASH_SHA3))
     #define WC_XMSS_FULL_HASH
 #endif
 
