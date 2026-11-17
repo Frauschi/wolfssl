@@ -127,14 +127,6 @@
     #include <wolfcrypt/src/misc.c>
 #endif
 
-#if defined(USE_INTEL_SPEEDUP) || \
-    (defined(__aarch64__) && defined(WOLFSSL_ARMASM))
-    #if defined(WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM) || \
-        defined(WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM)
-        #error "Can't use small memory with assembly optimized code"
-    #endif
-#endif
-
 #if defined(WOLFSSL_MLKEM_NO_MAKE_KEY) && \
     defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) && \
     defined(WOLFSSL_MLKEM_NO_DECAPSULATE)
@@ -179,7 +171,8 @@ static int mlkemkey_nb_begin(MlKemKey* key, byte op, const byte* bind,
 #endif /* WC_MLKEM_NONBLOCK */
 
 #if defined(WOLFSSL_KYBER1024) || defined(WOLFSSL_WC_ML_KEM_1024)
-    #define MLKEM_MAX_COMP_POLY_SZ  MLKEM_POLY_COMPRESSED_SZ(11)
+    /* The AVX2 and AVX-512 11-bit compress store 2 bytes past a polynomial. */
+    #define MLKEM_MAX_COMP_POLY_SZ  (MLKEM_POLY_COMPRESSED_SZ(11) + 2)
 #else
     #define MLKEM_MAX_COMP_POLY_SZ  MLKEM_POLY_COMPRESSED_SZ(10)
 #endif
@@ -1301,7 +1294,7 @@ int wc_MlKemKey_MakeKeyWithRandom(MlKemKey* key, const unsigned char* rand,
         {
             ret = mlkem_get_noise(&key->prf, k, s, NULL, NULL, sigma);
             if (ret == 0) {
-                mlkem_keygen_ntt_priv(s, k);
+                ret = mlkem_keygen_ntt_priv(s, k);
             }
 #ifdef WC_MLKEM_NONBLOCK
             if ((ret == 0) && (key->nb != NULL)) {
@@ -1852,7 +1845,7 @@ static int mlkemkey_encapsulate(MlKemKey* key, const byte* m, byte* r, byte* c,
             ret = mlkem_get_noise(&key->prf, (int)k, y, NULL, NULL, r);
         }
         if (ret == 0) {
-            mlkem_encapsulate_ntt_y(y, (int)k);
+            ret = mlkem_encapsulate_ntt_y(y, (int)k);
         }
 #ifdef WC_MLKEM_NONBLOCK
         if ((ret == 0) && (key->nb != NULL)) {

@@ -135,9 +135,22 @@ static int mlkem_get_noise_i(MLKEM_PRF_T* prf, int k, sword16* vec2,
 static int mlkem_get_noise_eta2_c(MLKEM_PRF_T* prf, sword16* p,
     const byte* seed);
 #endif
+#if defined(WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM) && \
+    !defined(WOLFSSL_MLKEM_NO_DECAPSULATE)
+static int mlkem_cmp_c(const byte* a, const byte* b, int sz);
+#endif
 
 /* Declared in wc_mlkem.c to stop compiler optimizer from simplifying. */
 extern sword16 wc_mlkem_opt_blocker(void);
+
+/* An operation that generates the whole matrix A is compiled in. */
+#if (!defined(WOLFSSL_MLKEM_NO_MAKE_KEY) && \
+     !defined(WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM)) || \
+    ((!defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) || \
+      !defined(WOLFSSL_MLKEM_NO_DECAPSULATE)) && \
+     !defined(WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM))
+    #define MLKEM_FULL_MATRIX
+#endif
 
 #if defined(USE_INTEL_SPEEDUP) || (defined(__aarch64__) && \
     defined(WOLFSSL_ARMASM))
@@ -149,6 +162,29 @@ static WC_INLINE cpuid_flags_t mlkem_poly_cpuid_flags(void)
         cpuid_get_flags_ex(&cpuid_flags);
     return cpuid_flags;
 }
+#endif
+
+/* The small paths call the NEON kernels from C, so they claim the registers. */
+#if defined(__aarch64__) && defined(WOLFSSL_ARMASM)
+    #define MLKEM_NEON_BEGIN()      SAVE_VECTOR_REGISTERS2()
+    #define MLKEM_NEON_END()        RESTORE_VECTOR_REGISTERS()
+    #define MLKEM_SMALL_REJ_UNIFORM mlkem_rej_uniform_neon
+#ifndef WOLFSSL_AARCH64_NO_SQRDMLSH
+    #define MLKEM_SMALL_RDM(f, p)                                   \
+        do {                                                        \
+            if (IS_AARCH64_RDM(mlkem_poly_cpuid_flags()))           \
+                f##_sqrdmlsh(p);                                    \
+            else                                                    \
+                f(p);                                               \
+        } while (0)
+#else
+    #define MLKEM_SMALL_RDM(f, p)   f(p)
+#endif
+#else
+    #define MLKEM_NEON_BEGIN()      0
+    #define MLKEM_NEON_END()        WC_DO_NOTHING
+    #define MLKEM_SMALL_REJ_UNIFORM mlkem_rej_uniform_c
+    #define MLKEM_SMALL_RDM(f, p)   f(p)
 #endif
 
 /* Half of Q plus one. Converted message bit value of 1. */
@@ -183,6 +219,11 @@ static WC_INLINE cpuid_flags_t mlkem_poly_cpuid_flags(void)
     ((12 * MLKEM_N / 8 * (1 << 12) / MLKEM_Q + XOF_BLOCK_SIZE) / XOF_BLOCK_SIZE)
 /* Number of bytes to generate for matrix. */
 #define GEN_MATRIX_SIZE     GEN_MATRIX_NBLOCKS * XOF_BLOCK_SIZE
+
+#if defined(__aarch64__) && defined(WOLFSSL_ARMASM)
+/* mlkem_rej_uniform_neon only stops on a length that is a multiple of 6. */
+wc_static_assert(((GEN_MATRIX_SIZE) % 6 == 0) && (XOF_BLOCK_SIZE % 6 == 0));
+#endif
 
 
 /* Number of random bytes to generate for ETA3. */
@@ -1317,6 +1358,8 @@ void mlkem_init(void)
  */
 #ifdef WOLFSSL_ARMASM_CRYPTO_SHA3
 
+#if defined(MLKEM_FULL_MATRIX) || defined(WOLFSSL_KYBER512) || \
+    defined(WOLFSSL_WC_ML_KEM_512)
 static void mlkem_sha3_blocksx3(word64* state)
 {
     if (IS_AARCH64_SHA3(mlkem_poly_cpuid_flags())) {
@@ -1326,7 +1369,9 @@ static void mlkem_sha3_blocksx3(word64* state)
         sha3_blocksx3_neon(state);
     }
 }
+#endif
 
+#ifdef MLKEM_FULL_MATRIX
 static void mlkem_shake128_blocksx3_seed(word64* state, byte* seed)
 {
     if (IS_AARCH64_SHA3(mlkem_poly_cpuid_flags())) {
@@ -1336,6 +1381,7 @@ static void mlkem_shake128_blocksx3_seed(word64* state, byte* seed)
         sha3_128_blocksx3_seed_neon(state, seed);
     }
 }
+#endif
 
 static void mlkem_shake256_blocksx3_seed(word64* state, byte* seed)
 {
@@ -1355,7 +1401,8 @@ static void mlkem_shake256_blocksx3_seed(word64* state, byte* seed)
 
 #endif /* WOLFSSL_ARMASM_CRYPTO_SHA3 */
 
-#ifndef WOLFSSL_MLKEM_NO_MAKE_KEY
+#if !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) && \
+    !defined(WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM)
 /* Generate a public-private key pair from randomly generated data.
  *
  * FIPS 203, Algorithm 13: K-PKE.KeyGen(d)
@@ -1436,10 +1483,11 @@ int mlkem_keygen(sword16* s, sword16* t, sword16* e, const sword16* a, int k)
     RESTORE_VECTOR_REGISTERS();
     return 0;
 }
-#endif /* WOLFSSL_MLKEM_NO_MAKE_KEY */
+#endif /* !WOLFSSL_MLKEM_NO_MAKE_KEY && !WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM */
 
-#if !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) || \
-    !defined(WOLFSSL_MLKEM_NO_DECAPSULATE)
+#if (!defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) || \
+     !defined(WOLFSSL_MLKEM_NO_DECAPSULATE)) && \
+    !defined(WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM)
 /* Encapsulate message.
  *
  * FIPS 203, Algorithm 14: K-PKE.Encrypt(ek_PKE, m, r)
@@ -1538,7 +1586,8 @@ int mlkem_encapsulate(const sword16* t, sword16* u, sword16* v,
     RESTORE_VECTOR_REGISTERS();
     return 0;
 }
-#endif /* !WOLFSSL_MLKEM_NO_ENCAPSULATE || !WOLFSSL_MLKEM_NO_DECAPSULATE */
+#endif /* (!WOLFSSL_MLKEM_NO_ENCAPSULATE || !WOLFSSL_MLKEM_NO_DECAPSULATE) &&
+        * !WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM */
 
 #ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
 /* Decapsulate message.
@@ -2017,111 +2066,7 @@ int mlkem_keygen(sword16* s, sword16* t, sword16* e, const sword16* a, int k)
     return 0;
 }
 
-#else /* WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM */
-
-/* Generate a public-private key pair from randomly generated data.
- *
- * FIPS 203, Algorithm 13: K-PKE.KeyGen(d)
- *   3: for (i <- 0; i < k; i++)                         > generate matrix A_hat
- *   ... (generate A[i])
- *   7: end for
- *   ...
- *  13:      e[i] <- SamplePolyCBD_eta_1(PRF_eta_1(sigma, N))
- *   ...
- *  16: s_hat <- NTT(s)
- *  17: e_hat <- NTT(e)
- *  18: t_hat <- A_hat o s_hat + e_hat
- *   ...
- *
- * Split into mlkem_keygen_ntt_priv(), run once, and mlkem_keygen_seeds_row(),
- * run for each row of the public vector, so a non-blocking caller can yield
- * between rows. On a row failure the caller wipes t.
- */
-
-/* Transform the private vector in place. All of the result is used in the
- * public key calculation. Step 16: s_hat = NTT(s). Runs once, before the
- * per-row loop; a non-blocking caller must not repeat it.
- *
- * @param  [in, out]  s  Private key vector of polynomials.
- * @param  [in]       k  Number of polynomials in vector.
- */
-void mlkem_keygen_ntt_priv(sword16* s, int k)
-{
-    int i;
-
-    for (i = 0; i < k; ++i) {
-        mlkem_ntt(s + i * MLKEM_N);
-    }
-}
-
-/* One row of public key generation. Step 17, Step 18: calculate public vector
- * polynomial i from A_hat, s_hat and e_hat. s must already be NTT transformed
- * by mlkem_keygen_ntt_priv(). On failure t is left for the caller to wipe.
- *
- * @param  [in]       s      Private key vector of polynomials, NTT form.
- * @param  [out]      t      Public key vector of polynomials.
- * @param  [in, out]  prf    XOF object.
- * @param  [out]      tp     Temporary polynomial. Must not alias s or t.
- * @param  [out]      cacheA Matrix to keep the generated A in. May be NULL.
- * @param  [in]       k      Number of polynomials in vector.
- * @param  [in]       rho    Random seed to generate matrix A from.
- * @param  [in, out]  sigma  Random seed to generate noise from.
- * @param  [in]       i      Row to calculate.
- * @return  0 on success.
- * @return  MEMORY_E when dynamic memory allocation fails. Only possible when
- *          WOLFSSL_SMALL_STACK is defined.
- * @return  Other negative value when a hash error occurred.
- */
-int mlkem_keygen_seeds_row(sword16* s, sword16* t, MLKEM_PRF_T* prf,
-    sword16* tp, sword16* cacheA, int k, byte* rho, byte* sigma, int i)
-{
-    int ret;
-    int j;
-    sword16* e = tp;
-    sword16* a = (cacheA != NULL) ? cacheA : tp;
-    unsigned int aStride = (cacheA != NULL) ? MLKEM_N : 0;
-
-    /* Generate a vector of matrix A, a polynomial at a time, multiplying
-     * each into the public polynomial.
-     * Steps 4-6: generate A[i]
-     * Step 18: ... A_hat o s_hat ... */
-    ret = mlkem_gen_matrix_i_acc(prf, t + i * MLKEM_N,
-        a + (unsigned int)i * (unsigned int)k * aStride, aStride, s, k,
-        rho, i, 0);
-    if (ret == 0) {
-        /* Convert public polynomial to Montgomery form.
-         * Step 18: ... MontRed(A_hat o s_hat) ... */
-        for (j = 0; j < MLKEM_N; ++j) {
-            sword32 n = t[i * MLKEM_N + j] * (sword32)MLKEM_F;
-            t[i * MLKEM_N + j] = MLKEM_MONT_RED(n);
-        }
-
-        /* Generate noise using PRF.
-         * Step 13: e[i] <- SamplePolyCBD_eta_1(PRF_eta_1(sigma, N)) */
-        ret = mlkem_get_noise_i(prf, k, e, sigma, i, 1);
-    }
-    if (ret == 0) {
-        /* Transform error values polynomial.
-         * Step 17: e_hat = NTT(e) */
-#if defined(WOLFSSL_MLKEM_SMALL) || defined(WOLFSSL_MLKEM_NO_LARGE_CODE)
-        mlkem_ntt(e);
-        /* Add errors to public key and reduce.
-         * Step 18: t_hat = BarrettRed(MontRed(A_hat o s_hat) + e_hat) */
-        for (j = 0; j < MLKEM_N; ++j) {
-            sword16 n = (sword16)(t[i * MLKEM_N + j] + e[j]);
-            t[i * MLKEM_N + j] = MLKEM_BARRETT_RED(n);
-        }
-#else
-        /* Add errors to public key and reduce.
-         * Step 18: t_hat = BarrettRed(MontRed(A_hat o s_hat) + e_hat) */
-        mlkem_ntt_add_to(e, t + i * MLKEM_N);
-#endif
-    }
-
-    return ret;
-}
-
-#endif /* WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM */
+#endif /* !WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM */
 #endif /* !WOLFSSL_MLKEM_NO_MAKE_KEY */
 
 #if !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) || \
@@ -2249,328 +2194,7 @@ int mlkem_encapsulate(const sword16* pub, sword16* u, sword16* v,
     return 0;
 }
 
-#else
-
-/* Encapsulate message and encode the cipher text a polynomial of u at a time.
- *
- * Split into mlkem_encapsulate_ntt_y(), run once,
- * mlkem_encapsulate_seeds_row(), run for each polynomial of u, and
- * mlkem_encapsulate_seeds_tail() for v, so a non-blocking caller can yield
- * between rows. With cmp set, the blocks of the cipher text are compared
- * against cmp as they are produced instead of being written out, and the
- * result of every block is accumulated into cmpFail; only the tail may report
- * it through fail.
- */
-
-/* Number of bytes a polynomial of u is compressed into. */
-static unsigned int mlkem_u_block_sz(int k)
-{
-    unsigned int blockSz = MLKEM_POLY_COMPRESSED_SZ(MLKEM_COMP_10BITS);
-
-#if defined(WOLFSSL_KYBER1024) || defined(WOLFSSL_WC_ML_KEM_1024)
-    if (k == WC_ML_KEM_1024_K) {
-        blockSz = MLKEM_POLY_COMPRESSED_SZ(MLKEM_COMP_11BITS);
-    }
-#else
-    (void)k;
-#endif
-
-    return blockSz;
-}
-
-/* Transform the noise vector y in place. All of the result is used in the
- * calculation of u and v. Runs once, before the per-row loop; a non-blocking
- * caller must not repeat it. */
-void mlkem_encapsulate_ntt_y(sword16* y, int k)
-{
-    int i;
-
-    for (i = 0; i < k; ++i) {
-        mlkem_ntt(y + i * MLKEM_N);
-    }
-}
-
-/* One row of the cipher text first component: u[i] = A_hat_trans[i] o y + e1[i]
- * encoded into block i of c, or compared against block i of cmp with the
- * result accumulated into cmpFail. y must already be NTT transformed by
- * mlkem_encapsulate_ntt_y().
- *
- * @param  [in, out]  prf      XOF object.
- * @param  [out]      c        Cipher text, or one block of it when comparing.
- * @param  [in]       cmp      Cipher text to compare against. May be NULL.
- * @param  [in, out]  cmpFail  OR of the block compare results so far.
- * @param  [out]      u        Polynomial.
- * @param  [out]      tp       Temporary polynomial. Must not alias u or y.
- * @param  [in]       y        Vector of polynomials, NTT form.
- * @param  [in]       k        Number of polynomials in vector.
- * @param  [in]       seed     Random seed to generate matrix A from.
- * @param  [in, out]  coins    Random seed to generate noise from.
- * @param  [in]       cacheA   Cached matrix A to transpose in place of
- *                             generating it. May be NULL.
- * @param  [out]      fillA    Matrix to keep the generated polynomials of A
- *                             in, laid out as key generation leaves them. May
- *                             be NULL. Ignored when cacheA is not NULL.
- * @param  [in]       i        Row to calculate.
- * @return  0 on success.
- * @return  MEMORY_E when dynamic memory allocation fails. Only possible when
- *          WOLFSSL_SMALL_STACK is defined.
- * @return  Other negative value when a hash error occurred.
- */
-int mlkem_encapsulate_seeds_row(MLKEM_PRF_T* prf, byte* c, const byte* cmp,
-    int* cmpFail, sword16* u, sword16* tp, sword16* y, int k, byte* seed,
-    byte* coins, const sword16* cacheA, sword16* fillA, int i)
-{
-    int ret = 0;
-    int j;
-    sword16* a = tp;
-    sword16* e1 = tp;
-    unsigned int blockSz = mlkem_u_block_sz(k);
-    byte* cb = c;
-#ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
-    int blockFail = 0;
-#endif
-
-    if ((c == NULL) || ((cmp != NULL) && (cmpFail == NULL))) {
-        ret = BAD_FUNC_ARG;
-    }
-#ifdef WOLFSSL_MLKEM_NO_DECAPSULATE
-    if (cmp != NULL) {
-        ret = BAD_FUNC_ARG;
-    }
-#endif
-    if ((ret == 0) && (cmp == NULL)) {
-        /* Compared cipher text is encoded one block at a time into c. */
-        cb = c + (unsigned int)i * blockSz;
-    }
-
-    if (ret != 0) {
-        /* Bad arguments. */
-    }
-    else if (cacheA != NULL) {
-        /* A_trans[i,j] is A[j,i] of the cached matrix. */
-        for (j = 0; j < k; j++) {
-            const sword16* aij = cacheA +
-                ((unsigned int)j * (unsigned int)k + (unsigned int)i) *
-                MLKEM_N;
-            if (j == 0) {
-                mlkem_basemul_mont(u, aij, y);
-            }
-            else {
-                mlkem_basemul_mont_add(u, aij, y + j * MLKEM_N);
-            }
-        }
-    }
-    else {
-        sword16* arow = a;
-        unsigned int aStride = 0;
-
-        if (fillA != NULL) {
-            arow = fillA + (unsigned int)i * MLKEM_N;
-            aStride = (unsigned int)k * MLKEM_N;
-        }
-        /* Generate a vector of matrix A, a polynomial at a time,
-         * multiplying each into the u polynomial. */
-        ret = mlkem_gen_matrix_i_acc(prf, u, arow, aStride, y, k, seed, i, 1);
-    }
-    if (ret == 0) {
-        /* Inverse transform u polynomial. */
-        mlkem_invntt(u);
-
-        /* Generate noise using PRF. */
-        ret = mlkem_get_noise_i(prf, k, e1, coins, i, 0);
-    }
-    if (ret == 0) {
-        /* Add errors to u and reduce. */
-#if defined(WOLFSSL_MLKEM_SMALL) || defined(WOLFSSL_MLKEM_NO_LARGE_CODE)
-        for (j = 0; j < MLKEM_N; ++j) {
-            sword16 t = (sword16)(u[j] + e1[j]);
-            u[j] = MLKEM_BARRETT_RED(t);
-        }
-#else
-        for (j = 0; j < MLKEM_N; j += 8) {
-            sword16 t0 = (sword16)(u[j + 0] + e1[j + 0]);
-            sword16 t1 = (sword16)(u[j + 1] + e1[j + 1]);
-            sword16 t2 = (sword16)(u[j + 2] + e1[j + 2]);
-            sword16 t3 = (sword16)(u[j + 3] + e1[j + 3]);
-            sword16 t4 = (sword16)(u[j + 4] + e1[j + 4]);
-            sword16 t5 = (sword16)(u[j + 5] + e1[j + 5]);
-            sword16 t6 = (sword16)(u[j + 6] + e1[j + 6]);
-            sword16 t7 = (sword16)(u[j + 7] + e1[j + 7]);
-            u[j + 0] = MLKEM_BARRETT_RED(t0);
-            u[j + 1] = MLKEM_BARRETT_RED(t1);
-            u[j + 2] = MLKEM_BARRETT_RED(t2);
-            u[j + 3] = MLKEM_BARRETT_RED(t3);
-            u[j + 4] = MLKEM_BARRETT_RED(t4);
-            u[j + 5] = MLKEM_BARRETT_RED(t5);
-            u[j + 6] = MLKEM_BARRETT_RED(t6);
-            u[j + 7] = MLKEM_BARRETT_RED(t7);
-        }
-#endif
-
-        /* Encode the polynomial of u into a block of cipher text.
-         * Step 22: c_1 <- ByteEncode_d_u(Compress_d_u(u)) */
-#if defined(WOLFSSL_KYBER512) || defined(WOLFSSL_WC_ML_KEM_512)
-        if (k == WC_ML_KEM_512_K) {
-            ret = mlkem_vec_compress_10(cb, u, 1);
-        }
-#endif
-#if defined(WOLFSSL_KYBER768) || defined(WOLFSSL_WC_ML_KEM_768)
-        if (k == WC_ML_KEM_768_K) {
-            ret = mlkem_vec_compress_10(cb, u, 1);
-        }
-#endif
-#if defined(WOLFSSL_KYBER1024) || defined(WOLFSSL_WC_ML_KEM_1024)
-        if (k == WC_ML_KEM_1024_K) {
-            ret = mlkem_vec_compress_11(cb, u, 1);
-        }
-#endif
-    }
-#ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
-    if ((ret == 0) && (cmp != NULL)) {
-        ret = mlkem_cmp(cb, cmp + (unsigned int)i * blockSz, (int)blockSz,
-            &blockFail);
-        *cmpFail |= blockFail;
-    }
-    ForceZero(&blockFail, sizeof(blockFail));
-#else
-    (void)cmpFail;
-#endif
-
-    return ret;
-}
-
-/* Cipher text second component: v = pub o y + e2 + Decompress(msg), encoded
- * into the last block of c or compared against the last block of cmp. With
- * cmp set, fail is the result of every block compared, including cmpFail from
- * the rows. y must be NTT transformed; it is reused in place to hold the
- * decompressed message.
- *
- * @param  [in]       pub      Public key vector of polynomials.
- * @param  [in, out]  prf      XOF object.
- * @param  [out]      c        Cipher text, or one block of it when comparing.
- * @param  [in]       cmp      Cipher text to compare against. May be NULL.
- * @param  [out]      fail     Set to 0 on a match and -1 on a mismatch of any
- *                             block. Only used when cmp is set.
- * @param  [in]       cmpFail  OR of the row compare results.
- * @param  [in, out]  u        Polynomial. Holds v.
- * @param  [out]      tp       Temporary polynomial. Must not alias u or y.
- * @param  [in, out]  y        Vector of polynomials, NTT form.
- * @param  [in]       k        Number of polynomials in vector.
- * @param  [in]       msg      Message to encapsulate.
- * @param  [in, out]  coins    Random seed to generate noise from.
- * @return  0 on success.
- * @return  Other negative value when a hash error occurred.
- */
-int mlkem_encapsulate_seeds_tail(const sword16* pub, MLKEM_PRF_T* prf,
-    byte* c, const byte* cmp, int* fail, int cmpFail, sword16* u, sword16* tp,
-    sword16* y, int k, const byte* msg, byte* coins)
-{
-    int ret = 0;
-    int i;
-    sword16* e2 = tp;
-    sword16* v = u;
-    sword16* m = y;
-    unsigned int uSz = (unsigned int)k * mlkem_u_block_sz(k);
-    unsigned int blockSz = 0;
-    byte* cb = c;
-#ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
-    int blockFail = 0;
-#endif
-
-    if ((c == NULL) || ((cmp != NULL) && (fail == NULL))) {
-        ret = BAD_FUNC_ARG;
-    }
-#ifdef WOLFSSL_MLKEM_NO_DECAPSULATE
-    if (cmp != NULL) {
-        ret = BAD_FUNC_ARG;
-    }
-#endif
-    if (ret == 0) {
-        if (cmp == NULL) {
-            cb = c + uSz;
-        }
-
-        /* Multiply public key by y into v polynomial. */
-        mlkem_pointwise_acc_mont(v, pub, y, (unsigned int)k);
-        /* Inverse transform v. */
-        mlkem_invntt(v);
-
-        ret = mlkem_from_msg(m, msg);
-    }
-    if (ret == 0) {
-        /* Generate noise using PRF. */
-        coins[WC_ML_KEM_SYM_SZ] = WC_OCTET(2 * k);
-        ret = mlkem_get_noise_eta2_c(prf, e2, coins);
-    }
-    if (ret == 0) {
-        /* Add errors and message to v and reduce. */
-    #if defined(WOLFSSL_MLKEM_SMALL) || defined(WOLFSSL_MLKEM_NO_LARGE_CODE)
-        for (i = 0; i < MLKEM_N; ++i) {
-            sword16 t = (sword16)(v[i] + e2[i] + m[i]);
-            v[i] = MLKEM_BARRETT_RED(t);
-        }
-    #else
-        for (i = 0; i < MLKEM_N; i += 8) {
-            sword16 t0 = (sword16)(v[i + 0] + e2[i + 0] + m[i + 0]);
-            sword16 t1 = (sword16)(v[i + 1] + e2[i + 1] + m[i + 1]);
-            sword16 t2 = (sword16)(v[i + 2] + e2[i + 2] + m[i + 2]);
-            sword16 t3 = (sword16)(v[i + 3] + e2[i + 3] + m[i + 3]);
-            sword16 t4 = (sword16)(v[i + 4] + e2[i + 4] + m[i + 4]);
-            sword16 t5 = (sword16)(v[i + 5] + e2[i + 5] + m[i + 5]);
-            sword16 t6 = (sword16)(v[i + 6] + e2[i + 6] + m[i + 6]);
-            sword16 t7 = (sword16)(v[i + 7] + e2[i + 7] + m[i + 7]);
-            v[i + 0] = MLKEM_BARRETT_RED(t0);
-            v[i + 1] = MLKEM_BARRETT_RED(t1);
-            v[i + 2] = MLKEM_BARRETT_RED(t2);
-            v[i + 3] = MLKEM_BARRETT_RED(t3);
-            v[i + 4] = MLKEM_BARRETT_RED(t4);
-            v[i + 5] = MLKEM_BARRETT_RED(t5);
-            v[i + 6] = MLKEM_BARRETT_RED(t6);
-            v[i + 7] = MLKEM_BARRETT_RED(t7);
-        }
-    #endif
-
-        /* Encode v into the last block of cipher text.
-         * Step 23: c_2 <- ByteEncode_d_v(Compress_d_v(v)) */
-    #if defined(WOLFSSL_KYBER512) || defined(WOLFSSL_WC_ML_KEM_512)
-        if (k == WC_ML_KEM_512_K) {
-            ret = mlkem_compress_4(cb, v);
-            blockSz = MLKEM_POLY_COMPRESSED_SZ(MLKEM_COMP_4BITS);
-        }
-    #endif
-    #if defined(WOLFSSL_KYBER768) || defined(WOLFSSL_WC_ML_KEM_768)
-        if (k == WC_ML_KEM_768_K) {
-            ret = mlkem_compress_4(cb, v);
-            blockSz = MLKEM_POLY_COMPRESSED_SZ(MLKEM_COMP_4BITS);
-        }
-    #endif
-    #if defined(WOLFSSL_KYBER1024) || defined(WOLFSSL_WC_ML_KEM_1024)
-        if (k == WC_ML_KEM_1024_K) {
-            ret = mlkem_compress_5(cb, v);
-            blockSz = MLKEM_POLY_COMPRESSED_SZ(MLKEM_COMP_5BITS);
-        }
-    #endif
-    }
-#ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
-    if ((ret == 0) && (cmp != NULL)) {
-        ret = mlkem_cmp(cb, cmp + uSz, (int)blockSz, &blockFail);
-        if (ret == 0) {
-            /* Only a comparison of every block may clear the caller's fail. */
-            *fail = cmpFail | blockFail;
-        }
-    }
-    ForceZero(&cmpFail, sizeof(cmpFail));
-    ForceZero(&blockFail, sizeof(blockFail));
-#else
-    (void)fail;
-    (void)cmpFail;
-    (void)blockSz;
-#endif
-    /* Step 24: return c <- (c_1||c_2) */
-
-    return ret;
-}
-#endif
+#endif /* !WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM */
 #endif /* !WOLFSSL_MLKEM_NO_ENCAPSULATE || !WOLFSSL_MLKEM_NO_DECAPSULATE */
 
 #ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
@@ -2659,7 +2283,497 @@ int mlkem_decapsulate(const sword16* s, sword16* w, sword16* u,
 }
 
 #endif /* !WOLFSSL_MLKEM_NO_DECAPSULATE */
+#endif /* !(__aarch64__ && WOLFSSL_ARMASM) */
+
+#if !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) && \
+    defined(WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM)
+/* Generate a public-private key pair from randomly generated data.
+ *
+ * FIPS 203, Algorithm 13: K-PKE.KeyGen(d)
+ *   3: for (i <- 0; i < k; i++)                         > generate matrix A_hat
+ *   ... (generate A[i])
+ *   7: end for
+ *   ...
+ *  13:      e[i] <- SamplePolyCBD_eta_1(PRF_eta_1(sigma, N))
+ *   ...
+ *  16: s_hat <- NTT(s)
+ *  17: e_hat <- NTT(e)
+ *  18: t_hat <- A_hat o s_hat + e_hat
+ *   ...
+ *
+ * Split into mlkem_keygen_ntt_priv(), run once, and mlkem_keygen_seeds_row(),
+ * run for each row of the public vector, so a non-blocking caller can yield
+ * between rows. On a row failure the caller wipes t.
+ */
+
+/* Transform the private vector in place. All of the result is used in the
+ * public key calculation. Step 16: s_hat = NTT(s). Runs once, before the
+ * per-row loop; a non-blocking caller must not repeat it.
+ *
+ * @param  [in, out]  s  Private key vector of polynomials.
+ * @param  [in]       k  Number of polynomials in vector.
+ * @return  0 on success.
+ * @return  Error from a refused vector-register save.
+ */
+int mlkem_keygen_ntt_priv(sword16* s, int k)
+{
+    int i;
+    int ret = MLKEM_NEON_BEGIN();
+
+    if (ret == 0) {
+        for (i = 0; i < k; ++i) {
+            MLKEM_SMALL_RDM(mlkem_ntt, s + i * MLKEM_N);
+        }
+        MLKEM_NEON_END();
+    }
+
+    return ret;
+}
+
+/* One row of public key generation. Step 17, Step 18: calculate public vector
+ * polynomial i from A_hat, s_hat and e_hat. s must already be NTT transformed
+ * by mlkem_keygen_ntt_priv(). On failure t is left for the caller to wipe.
+ *
+ * @param  [in]       s      Private key vector of polynomials, NTT form.
+ * @param  [out]      t      Public key vector of polynomials.
+ * @param  [in, out]  prf    XOF object.
+ * @param  [out]      tp     Temporary polynomial. Must not alias s or t.
+ * @param  [out]      cacheA Matrix to keep the generated A in. May be NULL.
+ * @param  [in]       k      Number of polynomials in vector.
+ * @param  [in]       rho    Random seed to generate matrix A from.
+ * @param  [in, out]  sigma  Random seed to generate noise from.
+ * @param  [in]       i      Row to calculate.
+ * @return  0 on success.
+ * @return  MEMORY_E when dynamic memory allocation fails. Only possible when
+ *          WOLFSSL_SMALL_STACK is defined.
+ * @return  Other negative value when a hash error occurred.
+ */
+int mlkem_keygen_seeds_row(sword16* s, sword16* t, MLKEM_PRF_T* prf,
+    sword16* tp, sword16* cacheA, int k, byte* rho, byte* sigma, int i)
+{
+    int ret;
+#if !(defined(__aarch64__) && defined(WOLFSSL_ARMASM))
+    int j;
 #endif
+    sword16* e = tp;
+    sword16* a = (cacheA != NULL) ? cacheA : tp;
+    unsigned int aStride = (cacheA != NULL) ? MLKEM_N : 0;
+
+    /* Generate a vector of matrix A, a polynomial at a time, multiplying
+     * each into the public polynomial.
+     * Steps 4-6: generate A[i]
+     * Step 18: ... A_hat o s_hat ... */
+    ret = mlkem_gen_matrix_i_acc(prf, t + i * MLKEM_N,
+        a + (unsigned int)i * (unsigned int)k * aStride, aStride, s, k,
+        rho, i, 0);
+    if (ret == 0) {
+        /* Convert public polynomial to Montgomery form.
+         * Step 18: ... MontRed(A_hat o s_hat) ... */
+#if defined(__aarch64__) && defined(WOLFSSL_ARMASM)
+        ret = MLKEM_NEON_BEGIN();
+        if (ret == 0) {
+            MLKEM_SMALL_RDM(mlkem_to_mont, t + i * MLKEM_N);
+            MLKEM_NEON_END();
+        }
+#else
+        for (j = 0; j < MLKEM_N; ++j) {
+            sword32 n = t[i * MLKEM_N + j] * (sword32)MLKEM_F;
+            t[i * MLKEM_N + j] = MLKEM_MONT_RED(n);
+        }
+#endif
+    }
+    if (ret == 0) {
+        /* Generate noise using PRF.
+         * Step 13: e[i] <- SamplePolyCBD_eta_1(PRF_eta_1(sigma, N)) */
+        ret = mlkem_get_noise_i(prf, k, e, sigma, i, 1);
+    }
+    if (ret == 0) {
+        /* Transform error values polynomial.
+         * Step 17: e_hat = NTT(e) */
+#if defined(__aarch64__) && defined(WOLFSSL_ARMASM)
+        ret = MLKEM_NEON_BEGIN();
+        if (ret == 0) {
+            MLKEM_SMALL_RDM(mlkem_ntt, e);
+            /* Add errors to public key and reduce.
+             * Step 18: t_hat = BarrettRed(MontRed(A_hat o s_hat) + e_hat) */
+            mlkem_add_reduce(t + i * MLKEM_N, e);
+            MLKEM_NEON_END();
+        }
+#elif defined(WOLFSSL_MLKEM_SMALL) || defined(WOLFSSL_MLKEM_NO_LARGE_CODE)
+        mlkem_ntt(e);
+        /* Add errors to public key and reduce.
+         * Step 18: t_hat = BarrettRed(MontRed(A_hat o s_hat) + e_hat) */
+        for (j = 0; j < MLKEM_N; ++j) {
+            sword16 n = (sword16)(t[i * MLKEM_N + j] + e[j]);
+            t[i * MLKEM_N + j] = MLKEM_BARRETT_RED(n);
+        }
+#else
+        /* Add errors to public key and reduce.
+         * Step 18: t_hat = BarrettRed(MontRed(A_hat o s_hat) + e_hat) */
+        mlkem_ntt_add_to(e, t + i * MLKEM_N);
+#endif
+    }
+
+    return ret;
+}
+#endif /* !WOLFSSL_MLKEM_NO_MAKE_KEY && WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM */
+
+#if (!defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) || \
+     !defined(WOLFSSL_MLKEM_NO_DECAPSULATE)) && \
+    defined(WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM)
+/* Encapsulate message and encode the cipher text a polynomial of u at a time.
+ *
+ * Split into mlkem_encapsulate_ntt_y(), run once,
+ * mlkem_encapsulate_seeds_row(), run for each polynomial of u, and
+ * mlkem_encapsulate_seeds_tail() for v, so a non-blocking caller can yield
+ * between rows. With cmp set, the blocks of the cipher text are compared
+ * against cmp as they are produced instead of being written out, and the
+ * result of every block is accumulated into cmpFail; only the tail may report
+ * it through fail.
+ */
+
+/* Number of bytes a polynomial of u is compressed into. */
+static unsigned int mlkem_u_block_sz(int k)
+{
+    unsigned int blockSz = MLKEM_POLY_COMPRESSED_SZ(MLKEM_COMP_10BITS);
+
+#if defined(WOLFSSL_KYBER1024) || defined(WOLFSSL_WC_ML_KEM_1024)
+    if (k == WC_ML_KEM_1024_K) {
+        blockSz = MLKEM_POLY_COMPRESSED_SZ(MLKEM_COMP_11BITS);
+    }
+#else
+    (void)k;
+#endif
+
+    return blockSz;
+}
+
+/* Transform the noise vector y in place. All of the result is used in the
+ * calculation of u and v. Runs once, before the per-row loop; a non-blocking
+ * caller must not repeat it. */
+int mlkem_encapsulate_ntt_y(sword16* y, int k)
+{
+    int i;
+    int ret = MLKEM_NEON_BEGIN();
+
+    if (ret == 0) {
+        for (i = 0; i < k; ++i) {
+            MLKEM_SMALL_RDM(mlkem_ntt, y + i * MLKEM_N);
+        }
+        MLKEM_NEON_END();
+    }
+
+    return ret;
+}
+
+/* One row of the cipher text first component: u[i] = A_hat_trans[i] o y + e1[i]
+ * encoded into block i of c, or compared against block i of cmp with the
+ * result accumulated into cmpFail. y must already be NTT transformed by
+ * mlkem_encapsulate_ntt_y().
+ *
+ * @param  [in, out]  prf      XOF object.
+ * @param  [out]      c        Cipher text, or one block of it when comparing.
+ * @param  [in]       cmp      Cipher text to compare against. May be NULL.
+ * @param  [in, out]  cmpFail  OR of the block compare results so far.
+ * @param  [out]      u        Polynomial.
+ * @param  [out]      tp       Temporary polynomial. Must not alias u or y.
+ * @param  [in]       y        Vector of polynomials, NTT form.
+ * @param  [in]       k        Number of polynomials in vector.
+ * @param  [in]       seed     Random seed to generate matrix A from.
+ * @param  [in, out]  coins    Random seed to generate noise from.
+ * @param  [in]       cacheA   Cached matrix A to transpose in place of
+ *                             generating it. May be NULL.
+ * @param  [out]      fillA    Matrix to keep the generated polynomials of A
+ *                             in, laid out as key generation leaves them. May
+ *                             be NULL. Ignored when cacheA is not NULL.
+ * @param  [in]       i        Row to calculate.
+ * @return  0 on success.
+ * @return  MEMORY_E when dynamic memory allocation fails. Only possible when
+ *          WOLFSSL_SMALL_STACK is defined.
+ * @return  Other negative value when a hash error occurred.
+ */
+int mlkem_encapsulate_seeds_row(MLKEM_PRF_T* prf, byte* c, const byte* cmp,
+    int* cmpFail, sword16* u, sword16* tp, sword16* y, int k, byte* seed,
+    byte* coins, const sword16* cacheA, sword16* fillA, int i)
+{
+    int ret = 0;
+    int j;
+    sword16* a = tp;
+    sword16* e1 = tp;
+    unsigned int blockSz = mlkem_u_block_sz(k);
+    byte* cb = c;
+#ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
+    int blockFail = 0;
+#endif
+
+    if ((c == NULL) || ((cmp != NULL) && (cmpFail == NULL))) {
+        ret = BAD_FUNC_ARG;
+    }
+#ifdef WOLFSSL_MLKEM_NO_DECAPSULATE
+    if (cmp != NULL) {
+        ret = BAD_FUNC_ARG;
+    }
+#endif
+    if ((ret == 0) && (cmp == NULL)) {
+        /* Compared cipher text is encoded one block at a time into c. */
+        cb = c + (unsigned int)i * blockSz;
+    }
+
+    if (ret != 0) {
+        /* Bad arguments. */
+    }
+    else if (cacheA != NULL) {
+        ret = MLKEM_NEON_BEGIN();
+        if (ret == 0) {
+            /* A_trans[i,j] is A[j,i] of the cached matrix. */
+            for (j = 0; j < k; j++) {
+                const sword16* aij = cacheA +
+                    ((unsigned int)j * (unsigned int)k + (unsigned int)i) *
+                    MLKEM_N;
+                if (j == 0) {
+                    mlkem_basemul_mont(u, aij, y);
+                }
+                else {
+                    mlkem_basemul_mont_add(u, aij, y + j * MLKEM_N);
+                }
+            }
+            MLKEM_NEON_END();
+        }
+    }
+    else {
+        sword16* arow = a;
+        unsigned int aStride = 0;
+
+        if (fillA != NULL) {
+            arow = fillA + (unsigned int)i * MLKEM_N;
+            aStride = (unsigned int)k * MLKEM_N;
+        }
+        /* Generate a vector of matrix A, a polynomial at a time,
+         * multiplying each into the u polynomial. */
+        ret = mlkem_gen_matrix_i_acc(prf, u, arow, aStride, y, k, seed, i, 1);
+    }
+    if (ret == 0) {
+        ret = MLKEM_NEON_BEGIN();
+        if (ret == 0) {
+            /* Inverse transform u polynomial. */
+            MLKEM_SMALL_RDM(mlkem_invntt, u);
+            MLKEM_NEON_END();
+        }
+    }
+    if (ret == 0) {
+        /* Generate noise using PRF. */
+        ret = mlkem_get_noise_i(prf, k, e1, coins, i, 0);
+    }
+    if (ret == 0) {
+        ret = MLKEM_NEON_BEGIN();
+    }
+    if (ret == 0) {
+        /* Add errors to u and reduce. */
+#if defined(__aarch64__) && defined(WOLFSSL_ARMASM)
+        mlkem_add_reduce(u, e1);
+#elif defined(WOLFSSL_MLKEM_SMALL) || defined(WOLFSSL_MLKEM_NO_LARGE_CODE)
+        for (j = 0; j < MLKEM_N; ++j) {
+            sword16 t = (sword16)(u[j] + e1[j]);
+            u[j] = MLKEM_BARRETT_RED(t);
+        }
+#else
+        for (j = 0; j < MLKEM_N; j += 8) {
+            sword16 t0 = (sword16)(u[j + 0] + e1[j + 0]);
+            sword16 t1 = (sword16)(u[j + 1] + e1[j + 1]);
+            sword16 t2 = (sword16)(u[j + 2] + e1[j + 2]);
+            sword16 t3 = (sword16)(u[j + 3] + e1[j + 3]);
+            sword16 t4 = (sword16)(u[j + 4] + e1[j + 4]);
+            sword16 t5 = (sword16)(u[j + 5] + e1[j + 5]);
+            sword16 t6 = (sword16)(u[j + 6] + e1[j + 6]);
+            sword16 t7 = (sword16)(u[j + 7] + e1[j + 7]);
+            u[j + 0] = MLKEM_BARRETT_RED(t0);
+            u[j + 1] = MLKEM_BARRETT_RED(t1);
+            u[j + 2] = MLKEM_BARRETT_RED(t2);
+            u[j + 3] = MLKEM_BARRETT_RED(t3);
+            u[j + 4] = MLKEM_BARRETT_RED(t4);
+            u[j + 5] = MLKEM_BARRETT_RED(t5);
+            u[j + 6] = MLKEM_BARRETT_RED(t6);
+            u[j + 7] = MLKEM_BARRETT_RED(t7);
+        }
+#endif
+
+        /* Encode the polynomial of u into a block of cipher text.
+         * Step 22: c_1 <- ByteEncode_d_u(Compress_d_u(u)) */
+#if defined(WOLFSSL_KYBER512) || defined(WOLFSSL_WC_ML_KEM_512)
+        if (k == WC_ML_KEM_512_K) {
+            ret = mlkem_vec_compress_10(cb, u, 1);
+        }
+#endif
+#if defined(WOLFSSL_KYBER768) || defined(WOLFSSL_WC_ML_KEM_768)
+        if (k == WC_ML_KEM_768_K) {
+            ret = mlkem_vec_compress_10(cb, u, 1);
+        }
+#endif
+#if defined(WOLFSSL_KYBER1024) || defined(WOLFSSL_WC_ML_KEM_1024)
+        if (k == WC_ML_KEM_1024_K) {
+            ret = mlkem_vec_compress_11(cb, u, 1);
+        }
+#endif
+        MLKEM_NEON_END();
+    }
+#ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
+    if ((ret == 0) && (cmp != NULL)) {
+        /* The assembly compares only take a whole cipher text. */
+        blockFail = mlkem_cmp_c(cb, cmp + (unsigned int)i * blockSz,
+            (int)blockSz);
+        *cmpFail |= blockFail;
+    }
+    ForceZero(&blockFail, sizeof(blockFail));
+#else
+    (void)cmpFail;
+#endif
+
+    return ret;
+}
+
+/* Cipher text second component: v = pub o y + e2 + Decompress(msg), encoded
+ * into the last block of c or compared against the last block of cmp. With
+ * cmp set, fail is the result of every block compared, including cmpFail from
+ * the rows. y must be NTT transformed; it is reused in place to hold the
+ * decompressed message.
+ *
+ * @param  [in]       pub      Public key vector of polynomials.
+ * @param  [in, out]  prf      XOF object.
+ * @param  [out]      c        Cipher text, or one block of it when comparing.
+ * @param  [in]       cmp      Cipher text to compare against. May be NULL.
+ * @param  [out]      fail     Set to 0 on a match and -1 on a mismatch of any
+ *                             block. Only used when cmp is set.
+ * @param  [in]       cmpFail  OR of the row compare results.
+ * @param  [in, out]  u        Polynomial. Holds v.
+ * @param  [out]      tp       Temporary polynomial. Must not alias u or y.
+ * @param  [in, out]  y        Vector of polynomials, NTT form.
+ * @param  [in]       k        Number of polynomials in vector.
+ * @param  [in]       msg      Message to encapsulate.
+ * @param  [in, out]  coins    Random seed to generate noise from.
+ * @return  0 on success.
+ * @return  Other negative value when a hash error occurred.
+ */
+int mlkem_encapsulate_seeds_tail(const sword16* pub, MLKEM_PRF_T* prf,
+    byte* c, const byte* cmp, int* fail, int cmpFail, sword16* u, sword16* tp,
+    sword16* y, int k, const byte* msg, byte* coins)
+{
+    int ret = 0;
+#if !(defined(__aarch64__) && defined(WOLFSSL_ARMASM))
+    int i;
+#endif
+    sword16* e2 = tp;
+    sword16* v = u;
+    sword16* m = y;
+    unsigned int uSz = (unsigned int)k * mlkem_u_block_sz(k);
+    unsigned int blockSz = 0;
+    byte* cb = c;
+#ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
+    int blockFail = 0;
+#endif
+
+    if ((c == NULL) || ((cmp != NULL) && (fail == NULL))) {
+        ret = BAD_FUNC_ARG;
+    }
+#ifdef WOLFSSL_MLKEM_NO_DECAPSULATE
+    if (cmp != NULL) {
+        ret = BAD_FUNC_ARG;
+    }
+#endif
+    if (ret == 0) {
+        if (cmp == NULL) {
+            cb = c + uSz;
+        }
+
+        ret = MLKEM_NEON_BEGIN();
+        if (ret == 0) {
+            /* Multiply public key by y into v polynomial. */
+            mlkem_pointwise_acc_mont(v, pub, y, (unsigned int)k);
+            /* Inverse transform v. */
+            MLKEM_SMALL_RDM(mlkem_invntt, v);
+
+            ret = mlkem_from_msg(m, msg);
+            MLKEM_NEON_END();
+        }
+    }
+    if (ret == 0) {
+        /* Generate noise using PRF. */
+        coins[WC_ML_KEM_SYM_SZ] = WC_OCTET(2 * k);
+        ret = mlkem_get_noise_eta2_c(prf, e2, coins);
+    }
+    if (ret == 0) {
+        ret = MLKEM_NEON_BEGIN();
+    }
+    if (ret == 0) {
+        /* Add errors and message to v and reduce. */
+    #if defined(__aarch64__) && defined(WOLFSSL_ARMASM)
+        mlkem_add3_reduce(v, e2, m);
+    #elif defined(WOLFSSL_MLKEM_SMALL) || defined(WOLFSSL_MLKEM_NO_LARGE_CODE)
+        for (i = 0; i < MLKEM_N; ++i) {
+            sword16 t = (sword16)(v[i] + e2[i] + m[i]);
+            v[i] = MLKEM_BARRETT_RED(t);
+        }
+    #else
+        for (i = 0; i < MLKEM_N; i += 8) {
+            sword16 t0 = (sword16)(v[i + 0] + e2[i + 0] + m[i + 0]);
+            sword16 t1 = (sword16)(v[i + 1] + e2[i + 1] + m[i + 1]);
+            sword16 t2 = (sword16)(v[i + 2] + e2[i + 2] + m[i + 2]);
+            sword16 t3 = (sword16)(v[i + 3] + e2[i + 3] + m[i + 3]);
+            sword16 t4 = (sword16)(v[i + 4] + e2[i + 4] + m[i + 4]);
+            sword16 t5 = (sword16)(v[i + 5] + e2[i + 5] + m[i + 5]);
+            sword16 t6 = (sword16)(v[i + 6] + e2[i + 6] + m[i + 6]);
+            sword16 t7 = (sword16)(v[i + 7] + e2[i + 7] + m[i + 7]);
+            v[i + 0] = MLKEM_BARRETT_RED(t0);
+            v[i + 1] = MLKEM_BARRETT_RED(t1);
+            v[i + 2] = MLKEM_BARRETT_RED(t2);
+            v[i + 3] = MLKEM_BARRETT_RED(t3);
+            v[i + 4] = MLKEM_BARRETT_RED(t4);
+            v[i + 5] = MLKEM_BARRETT_RED(t5);
+            v[i + 6] = MLKEM_BARRETT_RED(t6);
+            v[i + 7] = MLKEM_BARRETT_RED(t7);
+        }
+    #endif
+
+        /* Encode v into the last block of cipher text.
+         * Step 23: c_2 <- ByteEncode_d_v(Compress_d_v(v)) */
+    #if defined(WOLFSSL_KYBER512) || defined(WOLFSSL_WC_ML_KEM_512)
+        if (k == WC_ML_KEM_512_K) {
+            ret = mlkem_compress_4(cb, v);
+            blockSz = MLKEM_POLY_COMPRESSED_SZ(MLKEM_COMP_4BITS);
+        }
+    #endif
+    #if defined(WOLFSSL_KYBER768) || defined(WOLFSSL_WC_ML_KEM_768)
+        if (k == WC_ML_KEM_768_K) {
+            ret = mlkem_compress_4(cb, v);
+            blockSz = MLKEM_POLY_COMPRESSED_SZ(MLKEM_COMP_4BITS);
+        }
+    #endif
+    #if defined(WOLFSSL_KYBER1024) || defined(WOLFSSL_WC_ML_KEM_1024)
+        if (k == WC_ML_KEM_1024_K) {
+            ret = mlkem_compress_5(cb, v);
+            blockSz = MLKEM_POLY_COMPRESSED_SZ(MLKEM_COMP_5BITS);
+        }
+    #endif
+        MLKEM_NEON_END();
+    }
+#ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
+    if ((ret == 0) && (cmp != NULL)) {
+        blockFail = mlkem_cmp_c(cb, cmp + uSz, (int)blockSz);
+        /* Only a comparison of every block may clear the caller's fail. */
+        *fail = cmpFail | blockFail;
+    }
+    ForceZero(&cmpFail, sizeof(cmpFail));
+    ForceZero(&blockFail, sizeof(blockFail));
+#else
+    (void)fail;
+    (void)cmpFail;
+    (void)blockSz;
+#endif
+    /* Step 24: return c <- (c_1||c_2) */
+
+    return ret;
+}
+#endif /* (!WOLFSSL_MLKEM_NO_ENCAPSULATE || !WOLFSSL_MLKEM_NO_DECAPSULATE) &&
+        * WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM */
 
 #if defined(WOLFSSL_ARMASM) && !defined(__aarch64__) && \
     !defined(WOLFSSL_ARMASM_THUMB2) && \
@@ -2685,15 +2799,13 @@ int mlkem_decapsulate(const sword16* s, sword16* w, sword16* u,
     #define MLKEM_REJ_UNIFORM_ASM   mlkem_arm32_rej_uniform
 #endif
 
-/* Small-memory key generation and encapsulation build the matrix and the
- * noise one polynomial at a time through the SHAKE API, so they keep the C
- * XOF, PRF and CBD helpers even on a target with the batched Keccak. Intel
- * and AArch64 refuse small memory with assembly (wc_mlkem.c); AArch32 allows
- * it. */
+/* Small-memory key generation and encapsulation work a polynomial at a time,
+ * so they keep the C XOF, PRF and CBD helpers next to the batched Keccak. */
 #if (defined(WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM) && \
      !defined(WOLFSSL_MLKEM_NO_MAKE_KEY)) || \
     (defined(WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM) && \
-     !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE))
+     (!defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) || \
+      !defined(WOLFSSL_MLKEM_NO_DECAPSULATE)))
     #define MLKEM_SMALL_MEM_C_PATHS
 #endif
 
@@ -2712,7 +2824,7 @@ int mlkem_decapsulate(const sword16* s, sword16* w, sword16* u,
  *   otherwise    : the AVX2 sampler
  * Only vpcompressw is AVX512-VBMI2; parts without it (e.g. Skylake-X, Cascade
  * Lake) still get an AVX512F/BW sampler rather than falling back to AVX2. */
-#ifdef WOLFSSL_MLKEM_HAVE_INTEL_AVX512
+#if defined(WOLFSSL_MLKEM_HAVE_INTEL_AVX512) && defined(MLKEM_FULL_MATRIX)
 static WC_INLINE unsigned int mlkem_rej_uniform_n_ins(sword16* p,
     unsigned int len, const byte* r, unsigned int rLen)
 {
@@ -2778,10 +2890,17 @@ static WC_INLINE void mlkem_redistribute_##N##_rand_ins(const word64* s,       \
     }                                                                          \
     mlkem_redistribute_##N##_rand_avx2(s, r0, r1, r2, r3);                     \
 }
+#if defined(WOLFSSL_KYBER512) || defined(WOLFSSL_WC_ML_KEM_512)
 MLKEM_REDIST_INS(8)
-MLKEM_REDIST_INS(16)
 MLKEM_REDIST_INS(17)
+#endif
+#if defined(WOLFSSL_KYBER768) || defined(WOLFSSL_WC_ML_KEM_768) || \
+    defined(WOLFSSL_KYBER1024) || defined(WOLFSSL_WC_ML_KEM_1024)
+MLKEM_REDIST_INS(16)
+#endif
+#ifdef MLKEM_FULL_MATRIX
 MLKEM_REDIST_INS(21)
+#endif
 #else
 #define mlkem_redistribute_8_rand_ins   mlkem_redistribute_8_rand_avx2
 #define mlkem_redistribute_16_rand_ins  mlkem_redistribute_16_rand_avx2
@@ -2799,6 +2918,7 @@ static WC_INLINE void mlkem_cbd_eta2_ins(sword16* p, const byte* r)
     }
     mlkem_cbd_eta2_avx2(p, r);
 }
+#if defined(WOLFSSL_KYBER512) || defined(WOLFSSL_WC_ML_KEM_512)
 static WC_INLINE void mlkem_cbd_eta3_ins(sword16* p, const byte* r)
 {
     if (USE_INTEL_AVX512(mlkem_poly_cpuid_flags())) {
@@ -2807,11 +2927,13 @@ static WC_INLINE void mlkem_cbd_eta3_ins(sword16* p, const byte* r)
     }
     mlkem_cbd_eta3_avx2(p, r);
 }
+#endif
 #else
 #define mlkem_cbd_eta2_ins  mlkem_cbd_eta2_avx2
 #define mlkem_cbd_eta3_ins  mlkem_cbd_eta3_avx2
 #endif
 
+#ifdef MLKEM_FULL_MATRIX
 #if defined(WOLFSSL_KYBER512) || defined(WOLFSSL_WC_ML_KEM_512)
 #if !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) || \
     !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) || \
@@ -3550,7 +3672,9 @@ static int mlkem_gen_matrix_k4_avx512(sword16* a, byte* seed, int transposed)
         * !WOLFSSL_MLKEM_NO_DECAPSULATE */
 #endif /* WOLFSSL_MLKEM_HAVE_INTEL_AVX512 */
 #endif /* WOLFSSL_KYBER1024 || WOLFSSL_WC_ML_KEM_1024 */
+#endif /* MLKEM_FULL_MATRIX */
 #elif defined(MLKEM_ASM_BLOCKSX3)
+#ifdef MLKEM_FULL_MATRIX
 #if defined(WOLFSSL_KYBER512) || defined(WOLFSSL_WC_ML_KEM_512)
 #if !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) || \
     !defined(WOLFSSL_MLKEM_NO_ENCAPSULATE) || \
@@ -3781,6 +3905,7 @@ static int mlkem_gen_matrix_k4_arm(sword16* a, byte* seed, int transposed)
 #endif /* !WOLFSSL_MLKEM_NO_MAKE_KEY || !WOLFSSL_MLKEM_NO_ENCAPSULATE ||
         * !WOLFSSL_MLKEM_NO_DECAPSULATE */
 #endif
+#endif /* MLKEM_FULL_MATRIX */
 #endif /* USE_INTEL_SPEEDUP */
 
 #if !defined(MLKEM_ASM_BLOCKSX3) || defined(MLKEM_SMALL_MEM_C_PATHS)
@@ -4363,8 +4488,7 @@ static unsigned int mlkem_rej_uniform_c(sword16* p, unsigned int len,
         * !WOLFSSL_MLKEM_NO_DECAPSULATE */
 #endif
 
-#if !defined(WOLFSSL_MLKEM_MAKEKEY_SMALL_MEM) || \
-    !defined(WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM)
+#ifdef MLKEM_FULL_MATRIX
 
 #if !defined(MLKEM_ASM_BLOCKSX3)
 #if !defined(WOLFSSL_MLKEM_NO_MAKE_KEY) || \
@@ -4752,13 +4876,16 @@ static int mlkem_gen_matrix_i_acc(MLKEM_PRF_T* prf, sword16* r, sword16* a,
             ret = mlkem_xof_squeezeblocks(prf, rand, GEN_MATRIX_NBLOCKS);
         }
         if (ret == 0) {
+            ret = MLKEM_NEON_BEGIN();
+        }
+        if (ret == 0) {
             unsigned int ctr;
             sword16* aj = a + (unsigned int)j * aStride;
 
             /* Sample random bytes to create a polynomial.
              * Alg 7, Step 3 - implicitly counter is 0.
              * Alg 7, Step 4-16. */
-            ctr = mlkem_rej_uniform_c(aj, MLKEM_N, rand, GEN_MATRIX_SIZE);
+            ctr = MLKEM_SMALL_REJ_UNIFORM(aj, MLKEM_N, rand, GEN_MATRIX_SIZE);
             /* Create more blocks if too many rejected.
              * Alg 7, Step 4. */
             while ((ret == 0) && (ctr < MLKEM_N)) {
@@ -4766,8 +4893,8 @@ static int mlkem_gen_matrix_i_acc(MLKEM_PRF_T* prf, sword16* r, sword16* a,
                 ret = mlkem_xof_squeezeblocks(prf, rand, 1);
                 if (ret == 0) {
                     /* Alg 7, Step 4-16. */
-                    ctr += mlkem_rej_uniform_c(aj + ctr, MLKEM_N - ctr, rand,
-                        XOF_BLOCK_SIZE);
+                    ctr += MLKEM_SMALL_REJ_UNIFORM(aj + ctr, MLKEM_N - ctr,
+                        rand, XOF_BLOCK_SIZE);
                 }
             }
 
@@ -4782,6 +4909,7 @@ static int mlkem_gen_matrix_i_acc(MLKEM_PRF_T* prf, sword16* r, sword16* a,
                     mlkem_basemul_mont_add(r, aj, v + j * MLKEM_N);
                 }
             }
+            MLKEM_NEON_END();
         }
     }
 
@@ -6128,14 +6256,20 @@ int mlkem_get_noise(MLKEM_PRF_T* prf, int k, sword16* vec1, sword16* vec2,
 {
     int ret;
 
-#if defined(MLKEM_ASM_BLOCKSX3) && defined(MLKEM_SMALL_MEM_C_PATHS)
+#if (defined(MLKEM_ASM_BLOCKSX3) || defined(USE_INTEL_SPEEDUP)) && \
+    defined(MLKEM_SMALL_MEM_C_PATHS)
     /* Small-memory key generation and encapsulation ask for vec1 alone and
      * make the rest a polynomial at a time. The batched lanes below fill every
      * vector they are given, so a request without vec2 takes the C path. */
     if (vec2 == NULL) {
-        return mlkem_get_noise_c(prf, k, vec1,
-            (k == WC_ML_KEM_512_K) ? MLKEM_CBD_ETA3 : MLKEM_CBD_ETA2, NULL,
-            MLKEM_CBD_ETA2, NULL, seed);
+        int eta1 = MLKEM_CBD_ETA2;
+    #if defined(WOLFSSL_KYBER512) || defined(WOLFSSL_WC_ML_KEM_512)
+        if (k == WC_ML_KEM_512_K) {
+            eta1 = MLKEM_CBD_ETA3;
+        }
+    #endif
+        return mlkem_get_noise_c(prf, k, vec1, eta1, NULL, MLKEM_CBD_ETA2,
+            NULL, seed);
     }
 #endif
 
@@ -6312,7 +6446,8 @@ static int mlkem_get_noise_i(MLKEM_PRF_T* prf, int k, sword16* vec2,
 
 /******************************************************************************/
 
-#if !(defined(__aarch64__) && defined(WOLFSSL_ARMASM))
+#if !(defined(__aarch64__) && defined(WOLFSSL_ARMASM)) || \
+    defined(WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM)
 #ifndef WOLFSSL_MLKEM_NO_DECAPSULATE
 /* Compare two byte arrays of equal size.
  *

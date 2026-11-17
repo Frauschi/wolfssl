@@ -8922,24 +8922,6 @@ if test "$ENABLED_MLKEM_SMALL_MEM" = "yes"
 then
     AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_MLKEM_MAKEKEY_SMALL_MEM"
     AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM"
-    # wc_mlkem.c rejects the small memory paths with x86_64 or AArch64 asm.
-    MLKEM_SMALL_MEM_NO_ASM=no
-    if test "$ENABLED_INTELASM" = "yes"
-    then
-        MLKEM_SMALL_MEM_NO_ASM=yes
-    elif test "$ENABLED_ARMASM" = "yes"
-    then
-        case $host_cpu in
-        *aarch64*|*arm64*)
-            MLKEM_SMALL_MEM_NO_ASM=yes
-            ;;
-        esac
-    fi
-    if test "$MLKEM_SMALL_MEM_NO_ASM" = "yes"
-    then
-        AC_MSG_WARN([ML-KEM small-mem and nonblock have no assembly; building all of ML-KEM without it.])
-        AM_CFLAGS="$AM_CFLAGS -DWC_MLKEM_NO_ASM"
-    fi
 fi
 
 # Default the parameter sets and operations when only a mode is named.
