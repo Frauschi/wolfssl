@@ -28610,6 +28610,11 @@ static int DoProcessReplyEx(WOLFSSL* ssl, int allowSocketErr)
         #ifdef WOLFSSL_ASYNC_CRYPT
                                 || ret == WC_NO_ERR_TRACE(WC_PENDING_E)
         #endif
+        #ifdef WOLFSSL_HAVE_ALERT_ON_PEER_CLOSE
+                                || (ret ==
+                                        WC_NO_ERR_TRACE(POST_HAND_AUTH_ERROR) &&
+                                    ssl->options.connReset)
+        #endif
                                 ) &&
                                 ssl->kdfMsgStep == TLS13_MSG_KDF_NONE &&
                                 ssl->options.processReply == doProcessInit) {
@@ -28817,6 +28822,7 @@ int ProcessReply(WOLFSSL* ssl)
 int ProcessReplyEx(WOLFSSL* ssl, int allowSocketErr)
 {
     int ret;
+    byte nested = ssl->options.inProcessReply;
 #if defined(WOLFSSL_DTLS) && defined(WOLFSSL_DTLS_CID)
     /* With application data pending, APP_DATA_READY means DoProcessReplyEx()
      * returned before reading any record. */
@@ -28826,7 +28832,9 @@ int ProcessReplyEx(WOLFSSL* ssl, int allowSocketErr)
 #endif
 #endif
 
+    ssl->options.inProcessReply = 1;
     ret = DoProcessReplyEx(ssl, allowSocketErr);
+    ssl->options.inProcessReply = nested;
 
 #if defined(WOLFSSL_DTLS) && defined(WOLFSSL_DTLS_CID)
     if (ssl->options.dtls) {
@@ -32022,6 +32030,10 @@ int SendData(WOLFSSL* ssl, const void* data, size_t sz)
             WOLFSSL_ERROR(error);
             if (error == WC_NO_ERR_TRACE(SOCKET_ERROR_E) &&
                     (ssl->options.connReset || ssl->options.isClosed)) {
+                if (wolfssl_local_CheckAlertOnPeerClose(ssl, error)) {
+                    WOLFSSL_ERROR(ssl->error);
+                    return ssl->error;
+                }
                 error = SOCKET_PEER_CLOSED_E;
                 ssl->error = error;
                 WOLFSSL_ERROR(error);
@@ -32098,7 +32110,9 @@ int SendData(WOLFSSL* ssl, const void* data, size_t sz)
             return (ssl->error = ret);
         }
         if (ret != 0) {
-            ssl->error = BUILD_MSG_ERROR;
+            if (!wolfssl_local_CheckAlertOnPeerClose(ssl, ret)) {
+                ssl->error = BUILD_MSG_ERROR;
+            }
             return WOLFSSL_FATAL_ERROR;
         }
     }
@@ -32415,6 +32429,10 @@ int SendData(WOLFSSL* ssl, const void* data, size_t sz)
             ssl->buffers.prevSent = sent;
             if (error == WC_NO_ERR_TRACE(SOCKET_ERROR_E) &&
                     (ssl->options.connReset || ssl->options.isClosed)) {
+                if (wolfssl_local_CheckAlertOnPeerClose(ssl, error)) {
+                    WOLFSSL_ERROR(ssl->error);
+                    return ssl->error;
+                }
                 error = SOCKET_PEER_CLOSED_E;
                 ssl->error = SOCKET_PEER_CLOSED_E;
                 WOLFSSL_ERROR(error);
@@ -32536,6 +32554,12 @@ startScr:
                 }
             }
             ssl->error = error;
+#ifdef WOLFSSL_HAVE_ALERT_ON_PEER_CLOSE
+            if (error == WC_NO_ERR_TRACE(POST_HAND_AUTH_ERROR) &&
+                    wolfssl_local_CheckAlertOnPeerClose(ssl, SOCKET_ERROR_E)) {
+                error = ssl->error;
+            }
+#endif
             WOLFSSL_ERROR(error);
             return error;
         }
@@ -50229,9 +50253,187 @@ int wolfSSL_TestAppleNativeCertValidation_AppendCA(WOLFSSL_CTX* ctx,
 #endif /* __APPLE__ && WOLFSSL_SYS_CA_CERTS && (!NO_WOLFSSL_CLIENT) ||
         * !WOLFSSL_NO_CLIENT_AUTH) */
 
+#ifdef WOLFSSL_HAVE_ALERT_ON_PEER_CLOSE
+#define ALERT_ON_PEER_CLOSE_MAX_MSGS 8
+#if defined(USE_WOLFSSL_IO) && defined(MSG_DONTWAIT)
+    #define ALERT_ON_PEER_CLOSE_DONTWAIT
+#endif
+#if defined(ALERT_ON_PEER_CLOSE_DONTWAIT) && !defined(USE_WINDOWS_API) && \
+    !defined(EBSNET) && !defined(WOLFSSL_LINUXKM) && \
+    !defined(WOLFSSL_EMNET) && !defined(FUSION_RTOS) && \
+    !defined(NUCLEUS_PLUS_2_3) && !defined(FREESCALE_MQX) && \
+    !defined(FREESCALE_KSDK_MQX)
+    /* Platforms where wolfSSL_LastError() reads errno. */
+    #define ALERT_ON_PEER_CLOSE_ERRNO
+#endif
+
+static int AlertOnPeerCloseDefaultRecv(const WOLFSSL* ssl)
+{
+#ifdef USE_WOLFSSL_IO
+    return ssl->CBIORecv == EmbedReceive;
+#else
+    (void)ssl;
+    return 0;
+#endif
+}
+
+/* Whether last_rx holds the peer's fatal alert, as DoAlert() rates it. */
+static int AlertOnPeerCloseFound(const WOLFSSL* ssl)
+{
+    const WOLFSSL_ALERT* rx = &ssl->alert_history.last_rx;
+
+    if (!ssl->options.fatalAlert || rx->level == -1 ||
+            ssl->alert_history.last_tx.level == alert_fatal) {
+        return 0;
+    }
+    if (rx->level == alert_fatal &&
+            !AlertIsExemptUserCanceled(ssl, rx->code)) {
+        return 1;
+    }
+    return IsAtLeastTLSv1_3(ssl->version) && rx->code != close_notify &&
+           rx->code != user_canceled;
+}
+
+/* Returns -1 when the read does not apply, 1 when the peer alerted, else 0. */
+static int AlertOnPeerClose(WOLFSSL* ssl, int err)
+{
+    int savedError;
+    int ret;
+    int i;
+    byte closeNotify;
+    byte alertCount;
+    WOLFSSL_ALERT lastRx;
+    WOLFSSL_ALERT lastTx;
+#ifdef ALERT_ON_PEER_CLOSE_DONTWAIT
+    int defaultRecv;
+    int savedFlags = 0;
+#ifdef ALERT_ON_PEER_CLOSE_ERRNO
+    int savedErrno = 0;
+#endif
+#endif
+
+    if (err != WC_NO_ERR_TRACE(SOCKET_ERROR_E) || !ssl->options.connReset ||
+            ssl->options.dtls || WOLFSSL_IS_QUIC(ssl)) {
+        return -1;
+    }
+#ifdef HAVE_WRITE_DUP
+    if (ssl->dupWrite != NULL && ssl->dupSide == WRITE_DUP_SIDE) {
+        return -1;
+    }
+#endif
+#ifndef ALERT_ON_PEER_CLOSE_DONTWAIT
+    if (AlertOnPeerCloseDefaultRecv(ssl)) {
+        return -1;
+    }
+#endif
+#ifndef WOLFSSL_ALERT_ON_PEER_CLOSE_USER_IO
+    if (!AlertOnPeerCloseDefaultRecv(ssl) || ssl->CBIOSend != EmbedSend) {
+        return -1;
+    }
+#endif
+#if defined(OPENSSL_EXTRA) && !defined(NO_BIO)
+    if (ssl->CBIORecv == SslBioReceive) {
+        return -1;
+    }
+#endif
+    if (AlertOnPeerCloseFound(ssl)) {
+        ssl->error = FATAL_ERROR;
+        return 1;
+    }
+    if (ssl->options.isClosed || ssl->options.fatalAlert ||
+            ssl->options.inProcessReply ||
+            ssl->buffers.clearOutputBuffer.length > 0) {
+        return -1;
+    }
+
+    savedError = ssl->error;
+    closeNotify = (byte)ssl->options.closeNotify;
+    alertCount = ssl->options.alertCount;
+    lastRx = ssl->alert_history.last_rx;
+    lastTx = ssl->alert_history.last_tx;
+    ssl->alert_history.last_rx.code = -1;
+    ssl->alert_history.last_rx.level = -1;
+    ssl->alert_history.last_tx.code = -1;
+    ssl->alert_history.last_tx.level = -1;
+#ifdef ALERT_ON_PEER_CLOSE_DONTWAIT
+    defaultRecv = AlertOnPeerCloseDefaultRecv(ssl);
+    if (defaultRecv) {
+        savedFlags = ssl->rflags;
+        ssl->rflags |= MSG_DONTWAIT;
+    }
+    #ifdef ALERT_ON_PEER_CLOSE_ERRNO
+    savedErrno = errno;
+    #endif
+#endif
+
+    ssl->error = SOCKET_ERROR_E;
+    for (i = 0; i < ALERT_ON_PEER_CLOSE_MAX_MSGS &&
+            !ssl->options.isClosed; i++) {
+        if (ssl->buffers.clearOutputBuffer.length > 0) {
+            ssl->buffers.clearOutputBuffer.buffer +=
+                ssl->buffers.clearOutputBuffer.length;
+            ssl->buffers.clearOutputBuffer.length = 0;
+        }
+        ret = ProcessReplyEx(ssl, 1);
+        if (ret != 0 && ret != WC_NO_ERR_TRACE(APP_DATA_READY)) {
+            break;
+        }
+    }
+    if (ssl->buffers.clearOutputBuffer.length > 0) {
+        ssl->buffers.clearOutputBuffer.buffer +=
+            ssl->buffers.clearOutputBuffer.length;
+        ssl->buffers.clearOutputBuffer.length = 0;
+    }
+
+#ifdef ALERT_ON_PEER_CLOSE_DONTWAIT
+    if (defaultRecv) {
+        ssl->rflags = savedFlags;
+    }
+    #ifdef ALERT_ON_PEER_CLOSE_ERRNO
+    errno = savedErrno;
+    #endif
+#endif
+
+    if (AlertOnPeerCloseFound(ssl)) {
+        ssl->alert_history.last_tx = lastTx;
+        ssl->error = FATAL_ERROR;
+        return 1;
+    }
+
+    ssl->error = savedError;
+    ssl->options.alertCount = alertCount;
+    ssl->alert_history.last_rx = lastRx;
+    if (ssl->alert_history.last_tx.level == -1) {
+        ssl->alert_history.last_tx = lastTx;
+    }
+    if (!ssl->options.fatalAlert) {
+        ssl->options.isClosed = 0;
+        ssl->options.closeNotify = closeNotify;
+    }
+    return 0;
+}
+#endif
+
+/* Returns 1 with ssl->error set to FATAL_ERROR if the peer alerted. */
+int wolfssl_local_CheckAlertOnPeerClose(WOLFSSL* ssl, int err)
+{
+#ifdef WOLFSSL_HAVE_ALERT_ON_PEER_CLOSE
+    return AlertOnPeerClose(ssl, err) == 1;
+#else
+    (void)ssl;
+    (void)err;
+    return 0;
+#endif
+}
+
 /* Do not try to process error for async, non blocking io, and app_read */
 void wolfssl_local_MaybeCheckAlertOnErr(WOLFSSL* ssl, int err)
 {
+#ifdef WOLFSSL_HAVE_ALERT_ON_PEER_CLOSE
+    if (AlertOnPeerClose(ssl, err) >= 0) {
+        return;
+    }
+#endif
 #if defined(WOLFSSL_CHECK_ALERT_ON_ERR)
 #if defined(WOLFSSL_HAVE_HS_SUSPEND)
     if (IsHsSuspendErr(err)) {
@@ -50243,6 +50445,9 @@ void wolfssl_local_MaybeCheckAlertOnErr(WOLFSSL* ssl, int err)
     }
     if (err == WC_NO_ERR_TRACE(WANT_WRITE) ||
             err == WC_NO_ERR_TRACE(WANT_READ)) {
+        return;
+    }
+    if (ssl->options.inProcessReply) {
         return;
     }
     /* check if an alert was sent */

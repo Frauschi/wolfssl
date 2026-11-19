@@ -162,6 +162,7 @@ static int wolfssl_connect_flush(WOLFSSL* ssl)
         }
         else {
             ssl->error = ret;
+            (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ret);
             WOLFSSL_ERROR(ssl->error);
             ret = WOLFSSL_FATAL_ERROR;
         }
@@ -246,6 +247,7 @@ static int wolfssl_accept_flush(WOLFSSL* ssl)
         }
         else {
             ssl->error = ret;
+            (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ret);
             WOLFSSL_ERROR(ssl->error);
             ret = WOLFSSL_FATAL_ERROR;
         }
@@ -453,6 +455,7 @@ int wolfSSL_connect(WOLFSSL* ssl)
     case CONNECT_BEGIN :
         /* always send client hello first */
         if ((ssl->error = SendClientHello(ssl)) != 0) {
+            (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
             WOLFSSL_ERROR(ssl->error);
             return WOLFSSL_FATAL_ERROR;
         }

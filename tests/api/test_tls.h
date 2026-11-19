@@ -135,6 +135,19 @@ int test_tls12_aesgcm_record_nonce_unique(void);
 int test_tls_param_flags_crl_check(void);
 int test_tls_hmac_inner_cid_decision_coverage(void);
 int test_tls_unset_fd_no_stdin_io(void);
+int test_tls12_alert_after_peer_close(void);
+int test_tls13_alert_after_peer_close(void);
+int test_tls_alert_after_peer_app_data(void);
+int test_tls_own_alert_after_peer_close(void);
+int test_tls_alert_after_peer_close_server(void);
+int test_tls_alert_after_peer_close_no_block(void);
+int test_tls13_alert_after_peer_close_pha(void);
+int test_tls_alert_after_peer_close_bounded(void);
+int test_tls_alert_after_peer_close_retry(void);
+int test_tls_alert_after_peer_close_write_dup(void);
+int test_tls13_alert_after_peer_close_handshake(void);
+int test_tls_alert_after_peer_close_warning(void);
+int test_tls_alert_after_peer_close_user_io(void);
 
 #define TEST_TLS_DECLS                                                         \
         TEST_DECL_GROUP("tls", test_utils_memio_move_message),                 \
@@ -256,6 +269,19 @@ int test_tls_unset_fd_no_stdin_io(void);
         TEST_DECL_GROUP("tls", test_internal_SetSSL_CTX_DecisionCoverage),     \
         TEST_DECL_GROUP("tls", test_internal_CheckVersion_DecisionCoverage), \
         TEST_DECL_GROUP("tls", test_tls_hmac_inner_cid_decision_coverage),     \
-        TEST_DECL_GROUP("tls", test_tls_unset_fd_no_stdin_io)
+        TEST_DECL_GROUP("tls", test_tls_unset_fd_no_stdin_io),                 \
+        TEST_DECL_GROUP("tls", test_tls12_alert_after_peer_close),             \
+        TEST_DECL_GROUP("tls", test_tls13_alert_after_peer_close),             \
+        TEST_DECL_GROUP("tls", test_tls_alert_after_peer_app_data),            \
+        TEST_DECL_GROUP("tls", test_tls_own_alert_after_peer_close),           \
+        TEST_DECL_GROUP("tls", test_tls_alert_after_peer_close_server),        \
+        TEST_DECL_GROUP("tls", test_tls_alert_after_peer_close_no_block),      \
+        TEST_DECL_GROUP("tls", test_tls13_alert_after_peer_close_pha),         \
+        TEST_DECL_GROUP("tls", test_tls_alert_after_peer_close_bounded),       \
+        TEST_DECL_GROUP("tls", test_tls_alert_after_peer_close_retry),         \
+        TEST_DECL_GROUP("tls", test_tls_alert_after_peer_close_write_dup),     \
+        TEST_DECL_GROUP("tls", test_tls13_alert_after_peer_close_handshake),   \
+        TEST_DECL_GROUP("tls", test_tls_alert_after_peer_close_warning),       \
+        TEST_DECL_GROUP("tls", test_tls_alert_after_peer_close_user_io)
 
 #endif /* TESTS_API_TEST_TLS_H */

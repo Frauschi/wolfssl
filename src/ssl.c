@@ -220,6 +220,10 @@ static struct SystemCryptoPolicy crypto_policy;
  *
  * Callbacks & Features:
  * WOLFSSL_CHECK_ALERT_ON_ERR: Check alerts on handshake error         default: off
+ * WOLFSSL_NO_ALERT_ON_PEER_CLOSE: Skip the alert read                 default: off
+ *                             after a send to a closed peer fails
+ * WOLFSSL_ALERT_ON_PEER_CLOSE_USER_IO: Do that alert read             default: off
+ *                             with custom I/O callbacks too
  * ATOMIC_USER:                User-defined record layer callbacks      default: off
  * HAVE_WRITE_DUP:             Separate threads for SSL read/write     default: off
  * WOLFSSL_CALLBACKS:          Handshake monitoring callbacks           default: off

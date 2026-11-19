@@ -9362,3 +9362,800 @@ int test_tls_unset_fd_no_stdin_io(void)
 #endif
     return EXPECT_RESULT();
 }
+
+#if !defined(NO_WOLFSSL_CLIENT) && !defined(NO_WOLFSSL_SERVER) && \
+    !defined(NO_TLS) && !defined(NO_RSA) && !defined(NO_FILESYSTEM) && \
+    !defined(NO_CERTS) && defined(WOLFSSL_HAVE_ALERT_ON_PEER_CLOSE) && \
+    defined(USE_WOLFSSL_IO) && defined(MSG_DONTWAIT) && \
+    (defined(MSG_NOSIGNAL) || defined(SO_NOSIGPIPE)) && \
+    (defined(__unix__) || defined(__APPLE__))
+#define TEST_PEER_CLOSE_SOCKETS
+
+/* A record the receiver cannot decrypt or accept. */
+static const byte pcJunk[37] = { 0x17, 0x03, 0x03, 0x00, 0x20 };
+static const char pcMsg[] = "request";
+
+struct pc_pair {
+    WOLFSSL_CTX* ctx_c;
+    WOLFSSL_CTX* ctx_s;
+    WOLFSSL*     ssl_c;
+    WOLFSSL*     ssl_s;
+    int          fd[2];
+};
+
+static void PcNoSigpipe(WOLFSSL* ssl, int fd)
+{
+#ifdef MSG_NOSIGNAL
+    (void)fd;
+    wolfSSL_SetIOWriteFlags(ssl, MSG_NOSIGNAL);
+#else
+    int on = 1;
+
+    (void)ssl;
+    (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
+#endif
+}
+
+/* With clientAuth the server demands a client cert it does not trust. */
+static int PcSetup(struct pc_pair* p, method_provider method_c,
+    method_provider method_s, int clientAuth)
+{
+    EXPECT_DECLS;
+
+    XMEMSET(p, 0, sizeof(*p));
+    p->fd[0] = -1;
+    p->fd[1] = -1;
+    ExpectIntEQ(socketpair(AF_UNIX, SOCK_STREAM, 0, p->fd), 0);
+    ExpectIntEQ(fcntl(p->fd[0], F_SETFL, O_NONBLOCK), 0);
+    ExpectIntEQ(fcntl(p->fd[1], F_SETFL, O_NONBLOCK), 0);
+    ExpectNotNull(p->ctx_c = wolfSSL_CTX_new(method_c()));
+    ExpectNotNull(p->ctx_s = wolfSSL_CTX_new(method_s()));
+    ExpectIntEQ(wolfSSL_CTX_load_verify_locations(p->ctx_c, caCertFile, NULL),
+        WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_CTX_use_certificate_file(p->ctx_s, svrCertFile,
+        WOLFSSL_FILETYPE_PEM), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_CTX_use_PrivateKey_file(p->ctx_s, svrKeyFile,
+        WOLFSSL_FILETYPE_PEM), WOLFSSL_SUCCESS);
+    if (clientAuth) {
+        if (p->ctx_s != NULL) {
+            wolfSSL_CTX_set_verify(p->ctx_s, WOLFSSL_VERIFY_PEER |
+                WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+        }
+        ExpectIntEQ(wolfSSL_CTX_use_certificate_file(p->ctx_c, cliCertFile,
+            WOLFSSL_FILETYPE_PEM), WOLFSSL_SUCCESS);
+        ExpectIntEQ(wolfSSL_CTX_use_PrivateKey_file(p->ctx_c, cliKeyFile,
+            WOLFSSL_FILETYPE_PEM), WOLFSSL_SUCCESS);
+    }
+    ExpectNotNull(p->ssl_c = wolfSSL_new(p->ctx_c));
+    ExpectNotNull(p->ssl_s = wolfSSL_new(p->ctx_s));
+    ExpectIntEQ(wolfSSL_set_fd(p->ssl_c, p->fd[0]), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_set_fd(p->ssl_s, p->fd[1]), WOLFSSL_SUCCESS);
+    if (p->ssl_c != NULL)
+        PcNoSigpipe(p->ssl_c, p->fd[0]);
+    if (p->ssl_s != NULL)
+        PcNoSigpipe(p->ssl_s, p->fd[1]);
+    return EXPECT_RESULT();
+}
+
+static int PcHandshake(struct pc_pair* p)
+{
+    int ret_c = WOLFSSL_FATAL_ERROR;
+    int ret_s = WOLFSSL_FATAL_ERROR;
+    int i;
+
+    for (i = 0; i < 20 && (ret_c != WOLFSSL_SUCCESS ||
+            ret_s != WOLFSSL_SUCCESS); i++) {
+        if (ret_c != WOLFSSL_SUCCESS)
+            ret_c = wolfSSL_connect(p->ssl_c);
+        if (ret_s != WOLFSSL_SUCCESS)
+            ret_s = wolfSSL_accept(p->ssl_s);
+    }
+    return (ret_c == WOLFSSL_SUCCESS && ret_s == WOLFSSL_SUCCESS) ? 0 : -1;
+}
+
+static void PcClose(struct pc_pair* p, int side)
+{
+    if (p->fd[side] >= 0) {
+        close(p->fd[side]);
+        p->fd[side] = -1;
+    }
+}
+
+static void PcFree(struct pc_pair* p)
+{
+    wolfSSL_free(p->ssl_c);
+    wolfSSL_free(p->ssl_s);
+    wolfSSL_CTX_free(p->ctx_c);
+    wolfSSL_CTX_free(p->ctx_s);
+    PcClose(p, 0);
+    PcClose(p, 1);
+}
+
+/* Makes the end at fd[side] fail on junk and send a fatal alert. */
+static int PcPeerSendsAlert(struct pc_pair* p, int side, int handshakeDone)
+{
+    EXPECT_DECLS;
+    WOLFSSL* ssl = (side == 1) ? p->ssl_s : p->ssl_c;
+    byte buf[64];
+    int ret;
+
+    ExpectIntEQ((int)write(p->fd[1 - side], pcJunk, sizeof(pcJunk)),
+        (int)sizeof(pcJunk));
+    if (handshakeDone)
+        ret = wolfSSL_read(ssl, buf, (int)sizeof(buf));
+    else if (side == 1)
+        ret = wolfSSL_accept(ssl);
+    else
+        ret = wolfSSL_connect(ssl);
+    ExpectIntEQ(ret, WOLFSSL_FATAL_ERROR);
+    ExpectIntNE(wolfSSL_get_error(ssl, ret), WOLFSSL_ERROR_WANT_READ);
+    PcClose(p, side);
+    return EXPECT_RESULT();
+}
+
+/* Sends a plaintext alert from the end at fd[side] and closes it. */
+static int PcRawAlert(struct pc_pair* p, int side, byte level, byte code)
+{
+    EXPECT_DECLS;
+    byte rec[7] = { 0x15, 0x03, 0x03, 0x00, 0x02, 0x00, 0x00 };
+
+    rec[5] = level;
+    rec[6] = code;
+    ExpectIntEQ((int)write(p->fd[side], rec, sizeof(rec)), (int)sizeof(rec));
+    PcClose(p, side);
+    return EXPECT_RESULT();
+}
+#endif
+
+#if defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && !defined(NO_RSA) && \
+    !defined(WOLFSSL_NO_CLIENT_AUTH)
+#define TEST_PEER_CLOSE_MEMIO
+#if defined(WOLFSSL_HAVE_ALERT_ON_PEER_CLOSE) && \
+    defined(WOLFSSL_ALERT_ON_PEER_CLOSE_USER_IO)
+#define TEST_PEER_CLOSE_MEMIO_ALERT
+#endif
+#endif
+
+#if defined(TEST_PEER_CLOSE_SOCKETS) || defined(TEST_PEER_CLOSE_MEMIO_ALERT)
+/* Checks rx received the fatal alert tx sent. */
+static int PcAlertSeen(WOLFSSL* rx, WOLFSSL* tx)
+{
+    EXPECT_DECLS;
+    WOLFSSL_ALERT_HISTORY h_rx;
+    WOLFSSL_ALERT_HISTORY h_tx;
+
+    XMEMSET(&h_rx, 0, sizeof(h_rx));
+    XMEMSET(&h_tx, 0, sizeof(h_tx));
+    ExpectIntEQ(wolfSSL_get_alert_history(tx, &h_tx), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_get_alert_history(rx, &h_rx), WOLFSSL_SUCCESS);
+    ExpectIntEQ(h_tx.last_tx.level, alert_fatal);
+    ExpectIntEQ(h_rx.last_rx.level, alert_fatal);
+    ExpectIntEQ(h_rx.last_rx.code, h_tx.last_tx.code);
+    return EXPECT_RESULT();
+}
+#endif
+
+#if defined(TEST_PEER_CLOSE_SOCKETS) || \
+    (defined(TEST_PEER_CLOSE_MEMIO) && !defined(TEST_PEER_CLOSE_MEMIO_ALERT))
+/* Checks a failed call kept its socket error and recorded no alert. */
+static int PcNoAlert(WOLFSSL* ssl, int ret)
+{
+    EXPECT_DECLS;
+    WOLFSSL_ALERT_HISTORY h;
+
+    XMEMSET(&h, 0, sizeof(h));
+    ExpectIntLE(ret, 0);
+    ExpectIntNE(wolfSSL_get_error(ssl, ret), WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(wolfSSL_get_alert_history(ssl, &h), WOLFSSL_SUCCESS);
+    ExpectIntEQ(h.last_rx.code, -1);
+    return EXPECT_RESULT();
+}
+#endif
+
+/* A TLS 1.2 client whose flight is refused because the server already sent a
+ * fatal alert and closed reports the alert, not the socket error. */
+int test_tls12_alert_after_peer_close(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_PEER_CLOSE_SOCKETS) && !defined(WOLFSSL_NO_TLS12)
+    struct pc_pair p;
+
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_2_client_method,
+        wolfTLSv1_2_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(p.ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_accept(p.ssl_s), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(PcPeerSendsAlert(&p, 1, 0), TEST_SUCCESS);
+
+    ExpectIntEQ(wolfSSL_connect(p.ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_c, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(PcAlertSeen(p.ssl_c, p.ssl_s), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(p.ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_c, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    PcFree(&p);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A TLS 1.3 client whose first write is refused because the server rejected
+ * its certificate and closed reports the alert, not the socket error. */
+int test_tls13_alert_after_peer_close(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_PEER_CLOSE_SOCKETS) && defined(WOLFSSL_TLS13) && \
+    !defined(WOLFSSL_NO_CLIENT_AUTH)
+    struct pc_pair p;
+
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_3_client_method,
+        wolfTLSv1_3_server_method, 1), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(p.ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_accept(p.ssl_s), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_connect(p.ssl_c), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_accept(p.ssl_s), WOLFSSL_FATAL_ERROR);
+    ExpectIntNE(wolfSSL_get_error(p.ssl_s, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_READ);
+    PcClose(&p, 1);
+
+    errno = 0;
+    ExpectIntEQ(wolfSSL_write(p.ssl_c, pcMsg, (int)sizeof(pcMsg)),
+        WOLFSSL_FATAL_ERROR);
+#ifdef EPIPE
+    ExpectIntEQ(errno, EPIPE);
+#endif
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_c, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(PcAlertSeen(p.ssl_c, p.ssl_s), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_write(p.ssl_c, pcMsg, (int)sizeof(pcMsg)),
+        WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_c, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    PcFree(&p);
+
+    /* A peer that closes without an alert keeps the old error. */
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_3_client_method,
+        wolfTLSv1_3_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(PcHandshake(&p), 0);
+    PcClose(&p, 1);
+    ExpectIntEQ(PcNoAlert(p.ssl_c,
+        wolfSSL_write(p.ssl_c, pcMsg, (int)sizeof(pcMsg))), TEST_SUCCESS);
+    PcFree(&p);
+
+    /* A close_notify read on the way is not left recorded. */
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_3_client_method,
+        wolfTLSv1_3_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(PcHandshake(&p), 0);
+    ExpectIntNE(wolfSSL_shutdown(p.ssl_s), WOLFSSL_FATAL_ERROR);
+    PcClose(&p, 1);
+    ExpectIntEQ(PcNoAlert(p.ssl_c,
+        wolfSSL_write(p.ssl_c, pcMsg, (int)sizeof(pcMsg))), TEST_SUCCESS);
+    PcFree(&p);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* The alert is found behind application data the peer sent before it. */
+int test_tls_alert_after_peer_app_data(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_PEER_CLOSE_SOCKETS
+    struct pc_pair p;
+    byte buf[8];
+
+#ifdef WOLFSSL_TLS13
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_3_client_method,
+        wolfTLSv1_3_server_method, 0), TEST_SUCCESS);
+#else
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_2_client_method,
+        wolfTLSv1_2_server_method, 0), TEST_SUCCESS);
+#endif
+    ExpectIntEQ(PcHandshake(&p), 0);
+    ExpectIntEQ(wolfSSL_write(p.ssl_s, pcMsg, (int)sizeof(pcMsg)),
+        (int)sizeof(pcMsg));
+    ExpectIntEQ(PcPeerSendsAlert(&p, 1, 1), TEST_SUCCESS);
+
+    ExpectIntEQ(wolfSSL_write(p.ssl_c, pcMsg, (int)sizeof(pcMsg)),
+        WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_c, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(PcAlertSeen(p.ssl_c, p.ssl_s), TEST_SUCCESS);
+    PcFree(&p);
+
+    /* Data the application has not read yet is kept, so no read happens. */
+    ExpectIntEQ(PcSetup(&p, wolfSSLv23_client_method,
+        wolfSSLv23_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(PcHandshake(&p), 0);
+    ExpectIntEQ(wolfSSL_write(p.ssl_s, pcMsg, (int)sizeof(pcMsg)),
+        (int)sizeof(pcMsg));
+    ExpectIntEQ(wolfSSL_read(p.ssl_c, buf, 2), 2);
+    ExpectIntEQ(PcPeerSendsAlert(&p, 1, 1), TEST_SUCCESS);
+
+    ExpectIntEQ(PcNoAlert(p.ssl_c,
+        wolfSSL_write(p.ssl_c, pcMsg, (int)sizeof(pcMsg))), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_pending(p.ssl_c), (int)sizeof(pcMsg) - 2);
+    PcFree(&p);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A fatal alert the client sends itself while reading is not the peer's. */
+int test_tls_own_alert_after_peer_close(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_PEER_CLOSE_SOCKETS
+    struct pc_pair p;
+    WOLFSSL_ALERT_HISTORY h;
+
+    XMEMSET(&h, 0, sizeof(h));
+#ifdef WOLFSSL_TLS13
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_3_client_method,
+        wolfTLSv1_3_server_method, 0), TEST_SUCCESS);
+#else
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_2_client_method,
+        wolfTLSv1_2_server_method, 0), TEST_SUCCESS);
+#endif
+    ExpectIntEQ(PcHandshake(&p), 0);
+    ExpectIntEQ((int)write(p.fd[1], pcJunk, sizeof(pcJunk)),
+        (int)sizeof(pcJunk));
+    PcClose(&p, 1);
+
+    ExpectIntEQ(PcNoAlert(p.ssl_c,
+        wolfSSL_write(p.ssl_c, pcMsg, (int)sizeof(pcMsg))), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_get_alert_history(p.ssl_c, &h), WOLFSSL_SUCCESS);
+    ExpectIntEQ(h.last_tx.level, alert_fatal);
+    PcFree(&p);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A TLS 1.2 server whose flight, and a server whose write, is refused by a
+ * client that already sent a fatal alert and closed reports the alert. */
+int test_tls_alert_after_peer_close_server(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_PEER_CLOSE_SOCKETS
+    struct pc_pair p;
+
+#ifndef WOLFSSL_NO_TLS12
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_2_client_method,
+        wolfTLSv1_2_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(p.ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(PcPeerSendsAlert(&p, 0, 0), TEST_SUCCESS);
+
+    ExpectIntEQ(wolfSSL_accept(p.ssl_s), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_s, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(PcAlertSeen(p.ssl_s, p.ssl_c), TEST_SUCCESS);
+    PcFree(&p);
+#endif
+
+    ExpectIntEQ(PcSetup(&p, wolfSSLv23_client_method,
+        wolfSSLv23_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(PcHandshake(&p), 0);
+    ExpectIntEQ(PcPeerSendsAlert(&p, 0, 1), TEST_SUCCESS);
+
+    ExpectIntEQ(wolfSSL_write(p.ssl_s, pcMsg, (int)sizeof(pcMsg)),
+        WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_s, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(PcAlertSeen(p.ssl_s, p.ssl_c), TEST_SUCCESS);
+    PcFree(&p);
+#endif
+    return EXPECT_RESULT();
+}
+
+#if defined(TEST_PEER_CLOSE_SOCKETS) && defined(EPIPE) && \
+    defined(WOLFSSL_ALERT_ON_PEER_CLOSE_USER_IO)
+static int PcCustomSend(WOLFSSL* ssl, char* buf, int sz, void* ctx)
+{
+    return EmbedSend(ssl, buf, sz, ctx);
+}
+
+#if defined(OPENSSL_EXTRA) && !defined(NO_BIO)
+#define TEST_PEER_CLOSE_BIO
+static int PcSocketBio(struct pc_pair* p)
+{
+    EXPECT_DECLS;
+    WOLFSSL_BIO* bio = NULL;
+#ifdef SO_NOSIGPIPE
+    int on = 1;
+
+    ExpectIntEQ(setsockopt(p->fd[0], SOL_SOCKET, SO_NOSIGPIPE, &on,
+        sizeof(on)), 0);
+#else
+    (void)signal(SIGPIPE, SIG_IGN);
+#endif
+    ExpectNotNull(bio = wolfSSL_BIO_new_socket(p->fd[0], WOLFSSL_BIO_NOCLOSE));
+    if (EXPECT_SUCCESS())
+        wolfSSL_set_bio(p->ssl_c, bio, bio);
+    else
+        wolfSSL_BIO_free(bio);
+    return EXPECT_RESULT();
+}
+#endif
+#endif
+
+/* A send refused by a local SHUT_WR does not block the alert read on the
+ * still open read side, and errno still holds the send's error. */
+int test_tls_alert_after_peer_close_no_block(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_PEER_CLOSE_SOCKETS) && defined(EPIPE)
+    struct pc_pair p;
+    int ret;
+    int custom;
+
+    for (custom = 0; custom < 3; custom++) {
+    #ifndef WOLFSSL_ALERT_ON_PEER_CLOSE_USER_IO
+        if (custom)
+            break;
+    #endif
+    #ifndef TEST_PEER_CLOSE_BIO
+        if (custom == 2)
+            break;
+    #endif
+        ExpectIntEQ(PcSetup(&p, wolfSSLv23_client_method,
+            wolfSSLv23_server_method, 0), TEST_SUCCESS);
+        ExpectIntEQ(PcHandshake(&p), 0);
+    #ifdef WOLFSSL_ALERT_ON_PEER_CLOSE_USER_IO
+        if (custom == 1 && p.ssl_c != NULL)
+            wolfSSL_SSLSetIOSend(p.ssl_c, PcCustomSend);
+    #endif
+    #ifdef TEST_PEER_CLOSE_BIO
+        if (custom == 2)
+            ExpectIntEQ(PcSocketBio(&p), TEST_SUCCESS);
+    #endif
+        ExpectIntEQ(fcntl(p.fd[0], F_SETFL, 0), 0);
+        ExpectIntEQ(shutdown(p.fd[0], SHUT_WR), 0);
+
+        errno = 0;
+        ret = wolfSSL_write(p.ssl_c, pcMsg, (int)sizeof(pcMsg));
+        ExpectIntEQ(errno, EPIPE);
+        ExpectIntEQ(PcNoAlert(p.ssl_c, ret), TEST_SUCCESS);
+        PcFree(&p);
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A send refused inside wolfSSL_read, answering a post-handshake
+ * CertificateRequest, reports the alert once that record is done. */
+int test_tls13_alert_after_peer_close_pha(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_PEER_CLOSE_SOCKETS) && defined(WOLFSSL_TLS13) && \
+    defined(WOLFSSL_POST_HANDSHAKE_AUTH) && !defined(WOLFSSL_NO_CLIENT_AUTH)
+    struct pc_pair p;
+    WOLFSSL_ALERT_HISTORY h;
+    byte buf[64];
+    int ret;
+
+    XMEMSET(&h, 0, sizeof(h));
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_3_client_method,
+        wolfTLSv1_3_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_use_certificate_file(p.ssl_c, cliCertFile,
+        WOLFSSL_FILETYPE_PEM), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_use_PrivateKey_file(p.ssl_c, cliKeyFile,
+        WOLFSSL_FILETYPE_PEM), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_allow_post_handshake_auth(p.ssl_c), 0);
+    ExpectIntEQ(PcHandshake(&p), 0);
+    ExpectIntEQ(wolfSSL_request_certificate(p.ssl_s), WOLFSSL_SUCCESS);
+    ExpectIntEQ(PcPeerSendsAlert(&p, 1, 1), TEST_SUCCESS);
+
+    ret = wolfSSL_read(p.ssl_c, buf, (int)sizeof(buf));
+    ExpectIntEQ(ret, WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_c, ret), WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(PcAlertSeen(p.ssl_c, p.ssl_s), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_get_alert_history(p.ssl_c, &h), WOLFSSL_SUCCESS);
+    ExpectIntEQ(h.last_tx.code, -1);
+    PcFree(&p);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A peer that keeps sending ahead of its alert does not hold the write
+ * call: the read stops after a few records and keeps the old error. */
+int test_tls_alert_after_peer_close_bounded(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_PEER_CLOSE_SOCKETS
+    struct pc_pair p;
+    int i;
+
+    ExpectIntEQ(PcSetup(&p, wolfSSLv23_client_method,
+        wolfSSLv23_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(PcHandshake(&p), 0);
+    for (i = 0; i < 32; i++) {
+        ExpectIntEQ(wolfSSL_write(p.ssl_s, pcMsg, (int)sizeof(pcMsg)),
+            (int)sizeof(pcMsg));
+    }
+    ExpectIntEQ(PcPeerSendsAlert(&p, 1, 1), TEST_SUCCESS);
+
+    ExpectIntEQ(PcNoAlert(p.ssl_c,
+        wolfSSL_write(p.ssl_c, pcMsg, (int)sizeof(pcMsg))), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_pending(p.ssl_c), 0);
+    PcFree(&p);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A write retried after WANT_WRITE reports the alert the peer sent before
+ * closing. */
+int test_tls_alert_after_peer_close_retry(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_PEER_CLOSE_SOCKETS
+    struct pc_pair p;
+    byte big[1024];
+    byte buf[2048];
+    int ret = 0;
+    int i;
+
+    XMEMSET(big, 0x5a, sizeof(big));
+    ExpectIntEQ(PcSetup(&p, wolfSSLv23_client_method,
+        wolfSSLv23_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(PcHandshake(&p), 0);
+    for (i = 0; i < 10000 && EXPECT_SUCCESS(); i++) {
+        ret = wolfSSL_write(p.ssl_c, big, (int)sizeof(big));
+        if (ret != (int)sizeof(big))
+            break;
+    }
+    ExpectIntEQ(ret, WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_c, ret), WOLFSSL_ERROR_WANT_WRITE);
+    /* The record refused with WANT_WRITE stays whole in the client's buffer,
+     * as AF_UNIX stream sockets do not send part of a 1 KB record. */
+    do {
+        ret = wolfSSL_read(p.ssl_s, buf, (int)sizeof(buf));
+    } while (ret > 0);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_s, ret), WOLFSSL_ERROR_WANT_READ);
+    ExpectIntEQ(PcPeerSendsAlert(&p, 1, 1), TEST_SUCCESS);
+
+    ExpectIntEQ(wolfSSL_write(p.ssl_c, big, (int)sizeof(big)),
+        WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_c, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(PcAlertSeen(p.ssl_c, p.ssl_s), TEST_SUCCESS);
+    PcFree(&p);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* The write side of a write_dup pair leaves the alert to the read side. */
+int test_tls_alert_after_peer_close_write_dup(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_PEER_CLOSE_SOCKETS) && defined(HAVE_WRITE_DUP)
+    struct pc_pair p;
+    WOLFSSL* wr = NULL;
+    byte buf[64];
+
+    ExpectIntEQ(PcSetup(&p, wolfSSLv23_client_method,
+        wolfSSLv23_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(PcHandshake(&p), 0);
+    ExpectNotNull(wr = wolfSSL_write_dup(p.ssl_c));
+    ExpectIntEQ(PcPeerSendsAlert(&p, 1, 1), TEST_SUCCESS);
+
+    ExpectIntEQ(PcNoAlert(wr, wolfSSL_write(wr, pcMsg, (int)sizeof(pcMsg))),
+        TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_read(p.ssl_c, buf, (int)sizeof(buf)),
+        WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(PcAlertSeen(p.ssl_c, p.ssl_s), TEST_SUCCESS);
+    wolfSSL_free(wr);
+    PcFree(&p);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* TLS 1.3 handshake sends refused by a peer that alerted and closed report
+ * the alert: the ClientHello and the server's flight. */
+int test_tls13_alert_after_peer_close_handshake(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_PEER_CLOSE_SOCKETS) && defined(WOLFSSL_TLS13)
+    struct pc_pair p;
+
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_3_client_method,
+        wolfTLSv1_3_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(PcPeerSendsAlert(&p, 1, 0), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(p.ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_c, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(PcAlertSeen(p.ssl_c, p.ssl_s), TEST_SUCCESS);
+    PcFree(&p);
+
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_3_client_method,
+        wolfTLSv1_3_server_method, 0), TEST_SUCCESS);
+    /* Grouped, the flight goes out after plaintext alerts are refused. */
+    ExpectIntEQ(wolfSSL_clear_group_messages(p.ssl_s), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(p.ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(PcPeerSendsAlert(&p, 0, 0), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_accept(p.ssl_s), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_s, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(PcAlertSeen(p.ssl_s, p.ssl_c), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_accept(p.ssl_s), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_s, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    PcFree(&p);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A TLS 1.2 warning alert is not reported. TLS 1.3 reports an error alert at
+ * warning level, and a plaintext user_canceled at fatal level. */
+int test_tls_alert_after_peer_close_warning(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_PEER_CLOSE_SOCKETS
+    struct pc_pair p;
+#ifdef WOLFSSL_TLS13
+    WOLFSSL_ALERT_HISTORY h;
+
+    XMEMSET(&h, 0, sizeof(h));
+#endif
+
+#ifndef WOLFSSL_NO_TLS12
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_2_client_method,
+        wolfTLSv1_2_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(p.ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(PcRawAlert(&p, 0, alert_warning, user_canceled),
+        TEST_SUCCESS);
+    ExpectIntEQ(PcNoAlert(p.ssl_s, wolfSSL_accept(p.ssl_s)), TEST_SUCCESS);
+    PcFree(&p);
+#endif
+
+#ifdef WOLFSSL_TLS13
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_3_client_method,
+        wolfTLSv1_3_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_clear_group_messages(p.ssl_s), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(p.ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(PcRawAlert(&p, 0, alert_warning, handshake_failure),
+        TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_accept(p.ssl_s), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_s, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(wolfSSL_get_alert_history(p.ssl_s, &h), WOLFSSL_SUCCESS);
+    ExpectIntEQ(h.last_rx.code, handshake_failure);
+    ExpectIntEQ(h.last_rx.level, alert_warning);
+    PcFree(&p);
+
+    ExpectIntEQ(PcSetup(&p, wolfTLSv1_3_client_method,
+        wolfTLSv1_3_server_method, 0), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_clear_group_messages(p.ssl_s), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(p.ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(PcRawAlert(&p, 0, alert_fatal, user_canceled), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_accept(p.ssl_s), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(p.ssl_s, WOLFSSL_FATAL_ERROR),
+        WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(wolfSSL_get_alert_history(p.ssl_s, &h), WOLFSSL_SUCCESS);
+    ExpectIntEQ(h.last_rx.code, user_canceled);
+    ExpectIntEQ(h.last_rx.level, alert_fatal);
+    PcFree(&p);
+#endif
+#endif
+    return EXPECT_RESULT();
+}
+
+#ifdef TEST_PEER_CLOSE_MEMIO
+/* 0 forwards, 1 forwards one write then switches to 3, 2 reports the peer
+ * closed, 3 returns WANT_WRITE. */
+static int pcSendMode;
+#ifdef WOLFSSL_TLS13
+static const char pcMsgMemio[] = "request";
+#endif
+
+static int PcMemioSend(WOLFSSL* ssl, char* buf, int sz, void* ctx)
+{
+    if (pcSendMode == 2)
+        return WOLFSSL_CBIO_ERR_CONN_CLOSE;
+    if (pcSendMode == 3)
+        return WOLFSSL_CBIO_ERR_WANT_WRITE;
+    if (pcSendMode == 1)
+        pcSendMode = 3;
+    return test_memio_write_cb(ssl, buf, sz, ctx);
+}
+
+static int PcMemioSetup(struct test_memio_ctx* test_ctx, WOLFSSL_CTX** ctx_c,
+    WOLFSSL_CTX** ctx_s, WOLFSSL** ssl_c, WOLFSSL** ssl_s,
+    method_provider method_c, method_provider method_s)
+{
+    EXPECT_DECLS;
+
+    XMEMSET(test_ctx, 0, sizeof(*test_ctx));
+    pcSendMode = 0;
+    ExpectIntEQ(test_memio_setup(test_ctx, ctx_c, ctx_s, ssl_c, ssl_s,
+        method_c, method_s), 0);
+    if (*ssl_s != NULL) {
+        wolfSSL_set_verify(*ssl_s, WOLFSSL_VERIFY_PEER |
+            WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+    }
+    ExpectIntEQ(wolfSSL_use_certificate_file(*ssl_c, cliCertFile,
+        WOLFSSL_FILETYPE_PEM), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_use_PrivateKey_file(*ssl_c, cliKeyFile,
+        WOLFSSL_FILETYPE_PEM), WOLFSSL_SUCCESS);
+    if (*ssl_c != NULL)
+        wolfSSL_SSLSetIOSend(*ssl_c, PcMemioSend);
+    return EXPECT_RESULT();
+}
+
+static int PcMemioResult(WOLFSSL* ssl_c, WOLFSSL* ssl_s, int ret)
+{
+#ifdef TEST_PEER_CLOSE_MEMIO_ALERT
+    EXPECT_DECLS;
+
+    ExpectIntEQ(ret, WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(ssl_c, ret), WC_NO_ERR_TRACE(FATAL_ERROR));
+    ExpectIntEQ(PcAlertSeen(ssl_c, ssl_s), TEST_SUCCESS);
+    return EXPECT_RESULT();
+#else
+    (void)ssl_s;
+    return PcNoAlert(ssl_c, ret);
+#endif
+}
+#endif
+
+/* Custom I/O callbacks get the alert read only with the opt-in macro. This
+ * covers the connect flush and a write retried after WANT_WRITE. */
+int test_tls_alert_after_peer_close_user_io(void)
+{
+    EXPECT_DECLS;
+#ifdef TEST_PEER_CLOSE_MEMIO
+    WOLFSSL_CTX *ctx_c = NULL;
+    WOLFSSL_CTX *ctx_s = NULL;
+    WOLFSSL *ssl_c = NULL;
+    WOLFSSL *ssl_s = NULL;
+    struct test_memio_ctx test_ctx;
+
+#ifndef WOLFSSL_NO_TLS12
+    ExpectIntEQ(PcMemioSetup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfTLSv1_2_client_method, wolfTLSv1_2_server_method), TEST_SUCCESS);
+    /* The Certificate goes out alone so the next message can be held back. */
+    ExpectIntEQ(wolfSSL_clear_group_messages(ssl_c), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_accept(ssl_s), WOLFSSL_FATAL_ERROR);
+    pcSendMode = 1;
+    ExpectIntEQ(wolfSSL_connect(ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(ssl_c, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_WRITE);
+    ExpectIntEQ(wolfSSL_accept(ssl_s), WOLFSSL_FATAL_ERROR);
+    ExpectIntNE(wolfSSL_get_error(ssl_s, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_READ);
+    pcSendMode = 2;
+    ExpectIntEQ(PcMemioResult(ssl_c, ssl_s, wolfSSL_connect(ssl_c)),
+        TEST_SUCCESS);
+    wolfSSL_free(ssl_c);
+    ssl_c = NULL;
+    wolfSSL_free(ssl_s);
+    ssl_s = NULL;
+    wolfSSL_CTX_free(ctx_c);
+    ctx_c = NULL;
+    wolfSSL_CTX_free(ctx_s);
+    ctx_s = NULL;
+#endif
+
+#ifdef WOLFSSL_TLS13
+    ExpectIntEQ(PcMemioSetup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfTLSv1_3_client_method, wolfTLSv1_3_server_method), TEST_SUCCESS);
+    ExpectIntEQ(wolfSSL_connect(ssl_c), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_accept(ssl_s), WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_connect(ssl_c), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_accept(ssl_s), WOLFSSL_FATAL_ERROR);
+    ExpectIntNE(wolfSSL_get_error(ssl_s, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_READ);
+    pcSendMode = 3;
+    ExpectIntEQ(wolfSSL_write(ssl_c, pcMsgMemio, (int)sizeof(pcMsgMemio)),
+        WOLFSSL_FATAL_ERROR);
+    ExpectIntEQ(wolfSSL_get_error(ssl_c, WOLFSSL_FATAL_ERROR),
+        WOLFSSL_ERROR_WANT_WRITE);
+    pcSendMode = 2;
+    ExpectIntEQ(PcMemioResult(ssl_c, ssl_s,
+        wolfSSL_write(ssl_c, pcMsgMemio, (int)sizeof(pcMsgMemio))),
+        TEST_SUCCESS);
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
+#endif
+#endif
+    return EXPECT_RESULT();
+}

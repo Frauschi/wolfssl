@@ -3083,6 +3083,18 @@ int  wolfSSL_get_using_nonblock(WOLFSSL*);
     underlying I/O is blocking, wolfSSL_write() will only return once the buffer
     data of size sz has been completely written or an error occurred.
 
+    If the send fails because the peer closed the connection, wolfSSL_write()
+    reads up to eight messages the peer sent before closing. If one is a fatal
+    alert, it returns SSL_FATAL_ERROR, wolfSSL_get_error() returns FATAL_ERROR
+    and the alert is in wolfSSL_get_alert_history(). Otherwise it returns 0
+    with SOCKET_PEER_CLOSED_E as before.
+    With wolfSSL's own receive callback the read needs MSG_DONTWAIT. Custom
+    I/O callbacks need WOLFSSL_ALERT_ON_PEER_CLOSE_USER_IO, and a custom
+    receive callback must then not block. The read is not done for DTLS,
+    QUIC or a BIO set with wolfSSL_set_bio(), nor with NO_TLS,
+    WOLFSSL_NO_ALERT_ON_PEER_CLOSE, WOLFSSL_DTLS_ONLY, WOLFSSL_RW_THREADED,
+    WOLFSSL_THREADED_CRYPT or WOLFSSL_ASYNC_CRYPT.
+
     \return >0 the number of bytes written upon success.
     \return 0 will be returned upon failure.  Call wolfSSL_get_error() for
     the specific error code.
@@ -3181,6 +3193,12 @@ int wolfSSL_write_ex(WOLFSSL* ssl, const void* data, size_t sz, size_t* wr);
     the internal read buffer.  If no bytes are buffered in the internal read
     buffer yet, a call to wolfSSL_read() will trigger processing of the next
     record.
+
+    If the response to a TLS 1.3 post-handshake CertificateRequest cannot be
+    sent because the peer closed the connection, wolfSSL_read() reads up to
+    eight messages the peer sent before closing, as wolfSSL_write() does. If
+    one is a fatal alert, wolfSSL_get_error() returns FATAL_ERROR instead of
+    POST_HAND_AUTH_ERROR.
 
     \return >0 the number of bytes read upon success.
     \return 0 will be returned upon failure.  This may be caused by a either a
@@ -3340,6 +3358,18 @@ int  wolfSSL_peek(WOLFSSL* ssl, void* data, int sz);
     renegotiation, the handshake is not continued and wolfSSL_get_error()
     returns APP_DATA_READY. Read the data with wolfSSL_read() and then call
     wolfSSL_accept() again.
+
+    If a send fails because the peer closed the connection, up to eight
+    messages the peer sent before closing are read. If one is a fatal alert,
+    for example to refuse the client certificate, wolfSSL_get_error() returns
+    FATAL_ERROR and the alert is in wolfSSL_get_alert_history(). Otherwise
+    the socket error is returned as before.
+    With wolfSSL's own receive callback the read needs MSG_DONTWAIT. Custom
+    I/O callbacks need WOLFSSL_ALERT_ON_PEER_CLOSE_USER_IO, and a custom
+    receive callback must then not block. The read is not done for DTLS,
+    QUIC or a BIO set with wolfSSL_set_bio(), nor with NO_TLS,
+    WOLFSSL_NO_ALERT_ON_PEER_CLOSE, WOLFSSL_DTLS_ONLY, WOLFSSL_RW_THREADED,
+    WOLFSSL_THREADED_CRYPT or WOLFSSL_ASYNC_CRYPT.
 
     \return SSL_SUCCESS upon success.
     \return SSL_FATAL_ERROR will be returned if an error occurred. To get a
@@ -16061,6 +16091,18 @@ WOLFSSL_ASN1_TIME* wolfSSL_X509_get_notBefore(WOLFSSL_X509*);
     received during a secure renegotiation, the handshake is not continued
     and wolfSSL_get_error() returns APP_DATA_READY. Read the data with
     wolfSSL_read() and then call wolfSSL_connect() again.
+
+    If a send fails because the peer closed the connection, up to eight
+    messages the peer sent before closing are read. If one is a fatal alert,
+    for example to refuse the client certificate, wolfSSL_get_error() returns
+    FATAL_ERROR and the alert is in wolfSSL_get_alert_history(). Otherwise
+    the socket error is returned as before.
+    With wolfSSL's own receive callback the read needs MSG_DONTWAIT. Custom
+    I/O callbacks need WOLFSSL_ALERT_ON_PEER_CLOSE_USER_IO, and a custom
+    receive callback must then not block. The read is not done for DTLS,
+    QUIC or a BIO set with wolfSSL_set_bio(), nor with NO_TLS,
+    WOLFSSL_NO_ALERT_ON_PEER_CLOSE, WOLFSSL_DTLS_ONLY, WOLFSSL_RW_THREADED,
+    WOLFSSL_THREADED_CRYPT or WOLFSSL_ASYNC_CRYPT.
 
     \return SSL_SUCCESS If successful.
     \return SSL_FATAL_ERROR will be returned if an error occurred.  To get a

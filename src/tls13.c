@@ -17065,6 +17065,7 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
         }
         else {
             ssl->error = ret;
+            (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ret);
             WOLFSSL_ERROR(ssl->error);
             return WOLFSSL_FATAL_ERROR;
         }
@@ -17094,6 +17095,7 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
         case CONNECT_BEGIN:
             /* Always send client hello first. */
             if ((ssl->error = SendTls13ClientHello(ssl)) != 0) {
+                (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                 WOLFSSL_ERROR(ssl->error);
                 return WOLFSSL_FATAL_ERROR;
             }
@@ -17118,6 +17120,8 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
                             ssl->options.sentChangeCipher = 1;
                         }
                         if (ssl->error != 0) {
+                            (void)wolfssl_local_CheckAlertOnPeerClose(ssl,
+                                ssl->error);
                             WOLFSSL_ERROR(ssl->error);
                             return WOLFSSL_FATAL_ERROR;
                         }
@@ -17176,6 +17180,8 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
                          * the state machine on this case while the record
                          * drains. */
                         ssl->options.buildingMsg = 1;
+                        (void)wolfssl_local_CheckAlertOnPeerClose(ssl,
+                            ssl->error);
                         WOLFSSL_ERROR(ssl->error);
                         return WOLFSSL_FATAL_ERROR;
                     }
@@ -17183,6 +17189,7 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
         #endif
                 /* Try again with different security parameters. */
                 if ((ssl->error = SendTls13ClientHello(ssl)) != 0) {
+                    (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                     WOLFSSL_ERROR(ssl->error);
                     return WOLFSSL_FATAL_ERROR;
                 }
@@ -17242,6 +17249,7 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
             if (!ssl->options.dtls && ssl->earlyData != no_early_data
                 && !TLS13_AFTER_HANDSHAKE(ssl) && !WOLFSSL_IS_QUIC(ssl)) {
                 if ((ssl->error = SendTls13EndOfEarlyData(ssl)) != 0) {
+                    (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                     WOLFSSL_ERROR(ssl->error);
                     return WOLFSSL_FATAL_ERROR;
                 }
@@ -17263,6 +17271,7 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
                     ssl->options.sentChangeCipher = 1;
                 }
                 if (ssl->error != 0) {
+                    (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                     WOLFSSL_ERROR(ssl->error);
                     return WOLFSSL_FATAL_ERROR;
                 }
@@ -18409,6 +18418,7 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
         }
         else {
             ssl->error = ret;
+            (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ret);
             WOLFSSL_ERROR(ssl->error);
             return WOLFSSL_FATAL_ERROR;
         }
@@ -18478,6 +18488,7 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
                                           SERVER_HELLO_RETRY_REQUEST_COMPLETE) {
                 if ((ssl->error = SendTls13ServerHello(ssl,
                                                    hello_retry_request)) != 0) {
+                    (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                     WOLFSSL_ERROR(ssl->error);
                     return WOLFSSL_FATAL_ERROR;
                 }
@@ -18492,6 +18503,7 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
                                           SERVER_HELLO_RETRY_REQUEST_COMPLETE) {
                 ssl->error = SendTls13ServerChangeCipher(ssl, 1);
                 if (ssl->error != 0) {
+                    (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                     WOLFSSL_ERROR(ssl->error);
                     return WOLFSSL_FATAL_ERROR;
                 }
@@ -18535,6 +18547,7 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
             }
 
             if ((ssl->error = SendTls13ServerHello(ssl, server_hello)) != 0) {
+                (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                 WOLFSSL_ERROR(ssl->error);
                 return WOLFSSL_FATAL_ERROR;
             }
@@ -18545,6 +18558,7 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
         case TLS13_SERVER_HELLO_SENT :
             ssl->error = SendTls13ServerChangeCipher(ssl, 0);
             if (ssl->error != 0) {
+                (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                 WOLFSSL_ERROR(ssl->error);
                 return WOLFSSL_FATAL_ERROR;
             }
@@ -18566,6 +18580,7 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
     #endif
 
             if ((ssl->error = SendTls13EncryptedExtensions(ssl)) != 0) {
+                (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                 WOLFSSL_ERROR(ssl->error);
                 return WOLFSSL_FATAL_ERROR;
             }
@@ -18583,6 +18598,8 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
                    ) {
                     ssl->error = SendTls13CertificateRequest(ssl, NULL, 0);
                     if (ssl->error != 0) {
+                        (void)wolfssl_local_CheckAlertOnPeerClose(ssl,
+                            ssl->error);
                         WOLFSSL_ERROR(ssl->error);
                         return WOLFSSL_FATAL_ERROR;
                     }
@@ -18601,6 +18618,7 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
 #ifndef NO_CERTS
             if (!ssl->options.resuming && ssl->options.sendVerify) {
                 if ((ssl->error = SendTls13Certificate(ssl)) != 0) {
+                    (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                     WOLFSSL_ERROR(ssl->error);
                     return WOLFSSL_FATAL_ERROR;
                 }
@@ -18616,6 +18634,7 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
      defined(WOLFSSL_HAVE_MLDSA) || defined(WOLFSSL_HAVE_SLHDSA))
             if (!ssl->options.resuming && ssl->options.sendVerify) {
                 if ((ssl->error = SendTls13CertificateVerify(ssl)) != 0) {
+                    (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                     WOLFSSL_ERROR(ssl->error);
                     return WOLFSSL_FATAL_ERROR;
                 }
@@ -18627,6 +18646,7 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
 
         case TLS13_CERT_VERIFY_SENT :
             if ((ssl->error = SendTls13Finished(ssl)) != 0) {
+                (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                 WOLFSSL_ERROR(ssl->error);
                 return WOLFSSL_FATAL_ERROR;
             }
@@ -18650,6 +18670,7 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
                     ssl->ctx->ticketEncCb != NULL &&
                     ssl->options.maxTicketTls13 > 0) {
                 if ((ssl->error = SendTls13NewSessionTicket(ssl)) != 0) {
+                    (void)wolfssl_local_CheckAlertOnPeerClose(ssl, ssl->error);
                     WOLFSSL_ERROR(ssl->error);
                     return WOLFSSL_FATAL_ERROR;
                 }
@@ -18715,6 +18736,8 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
                 if (!ssl->options.noTicketTls13 && ssl->ctx->ticketEncCb
                         != NULL) {
                     if ((ssl->error = SendTls13NewSessionTicket(ssl)) != 0) {
+                        (void)wolfssl_local_CheckAlertOnPeerClose(ssl,
+                            ssl->error);
                         WOLFSSL_ERROR(ssl->error);
                         return WOLFSSL_FATAL_ERROR;
                     }

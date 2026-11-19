@@ -5844,6 +5844,14 @@ enum asyncState {
     TLS_ASYNC_END
 };
 
+#if !defined(WOLFSSL_NO_ALERT_ON_PEER_CLOSE) && !defined(NO_TLS) && \
+    !defined(WOLFSSL_DTLS_ONLY) && !defined(WOLFSSL_RW_THREADED) && \
+    !defined(WOLFSSL_THREADED_CRYPT) && !defined(WOLFSSL_ASYNC_CRYPT) && \
+    (defined(WOLFSSL_ALERT_ON_PEER_CLOSE_USER_IO) || \
+     (defined(USE_WOLFSSL_IO) && defined(MSG_DONTWAIT)))
+    #define WOLFSSL_HAVE_ALERT_ON_PEER_CLOSE
+#endif
+
 /* Handshake message processing can suspend part way through and resume when
  * the application re-enters wolfSSL_connect()/wolfSSL_accept(). State for the
  * message in flight is held in ssl->async. */
@@ -6185,6 +6193,7 @@ struct Options {
     byte            asyncState;         /* sub-state for enum asyncState */
     byte            buildMsgState;      /* sub-state for enum buildMsgState */
     byte            alertCount;         /* detect warning dos attempt */
+    byte            inProcessReply;     /* ProcessReplyEx() is running */
     byte            emptyRecordCount;   /* detect empty record dos attempt */
 #ifdef WOLFSSL_TLS13
     byte            ccsIgnoredCount;    /* detect TLS 1.3 CCS dos attempt */
@@ -8750,6 +8759,7 @@ WOLFSSL_LOCAL int wolfSSL_PEM_X509_X509_CRL_X509_PKEY_read_bio(
 WOLFSSL_LOCAL void wolfSSL_X509_PKEY_free(WOLFSSL_X509_PKEY* xPkey);
 #endif
 
+WOLFSSL_LOCAL int wolfssl_local_CheckAlertOnPeerClose(WOLFSSL* ssl, int err);
 WOLFSSL_LOCAL void wolfssl_local_MaybeCheckAlertOnErr(WOLFSSL* ssl, int err);
 
 #ifdef __cplusplus
