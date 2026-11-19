@@ -500,6 +500,14 @@ static const SlhDsaParameters SlhDsaParams[] =
  * Hashes
  ******************************************************************************/
 
+/* Device id for the SHAKE objects: a device that offloads short SHAKE-256
+ * calls sees the hashing only when WOLFSSL_SLHDSA_HASH_DEVID is defined. */
+#if defined(WOLF_CRYPTO_CB) && defined(WOLFSSL_SLHDSA_HASH_DEVID)
+    #define SLHDSA_HASH_DEVID(key)  ((key)->devId)
+#else
+    #define SLHDSA_HASH_DEVID(key)  INVALID_DEVID
+#endif
+
 /* Everything from here to the SLH-DSA API section is the software
  * implementation: hashes, WOTS+, XMSS, the hypertree and FORS. Under
  * WOLF_CRYPTO_CB_ONLY_SLHDSA the registered device performs all of it. */
@@ -8832,10 +8840,10 @@ int wc_SlhDsaKey_Init(SlhDsaKey* key, enum SlhDsaParam param, void* heap,
         {
             /* Initialize SHAKE-256 objects. */
             ret = wc_InitShake256(&key->hash.shk.shake, key->heap,
-                INVALID_DEVID);
+                SLHDSA_HASH_DEVID(key));
             if (ret == 0) {
                 ret = wc_InitShake256(&key->hash.shk.shake2, key->heap,
-                    INVALID_DEVID);
+                    SLHDSA_HASH_DEVID(key));
             }
         }
 #endif
@@ -9681,7 +9689,7 @@ static int slhdsakey_sign_internal_msg(SlhDsaKey* key, const byte* m,
             /* SHAKE: PRF_msg = SHAKE256(SK.prf || opt_rand || M, 8n). */
             {
                 wc_Shake tmpShake;
-                ret = wc_InitShake256(&tmpShake, NULL, INVALID_DEVID);
+                ret = wc_InitShake256(&tmpShake, NULL, SLHDSA_HASH_DEVID(key));
                 if (ret == 0) ret = wc_Shake256_Update(&tmpShake, key->sk + n, n);
                 if (ret == 0) ret = wc_Shake256_Update(&tmpShake, addRnd, n);
                 if (ret == 0) ret = wc_Shake256_Update(&tmpShake, m, mSz);
@@ -9690,7 +9698,8 @@ static int slhdsakey_sign_internal_msg(SlhDsaKey* key, const byte* m,
             }
             /* SHAKE: H_msg = SHAKE256(R || PK.seed || PK.root || M, ...). */
             if (ret == 0) {
-                ret = wc_InitShake256(&key->hash.shk.shake, NULL, INVALID_DEVID);
+                ret = wc_InitShake256(&key->hash.shk.shake, NULL,
+                    SLHDSA_HASH_DEVID(key));
             }
             if (ret == 0) {
                 ret = wc_Shake256_Update(&key->hash.shk.shake, sig, n);
