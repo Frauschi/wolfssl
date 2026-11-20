@@ -9347,6 +9347,8 @@ static int wc_PKCS7_KeyWrap(const wc_PKCS7 * pkcs7, const byte * cek,
 
             if (ret <= 0)
                 return ret;
+            if ((word32)ret > outSz)
+                return BUFFER_E;
             break;
 #endif /* NO_AES */
 
@@ -11601,9 +11603,9 @@ static int wc_PKCS7_KemriWrapAllowed(int wrapOID)
 #ifdef WC_PKCS7_MLKEM_ENCODE
 /* Wrap cek under kek with the algorithm named by wrapOID. Returns the wrapped
  * length or a negative error code. */
-static int wc_PKCS7_WrapKey(int wrapOID, const byte* kek, word32 kekSz,
-                            const byte* cek, word32 cekSz, byte* out,
-                            word32 outSz)
+static int wc_PKCS7_WrapKey(const wc_PKCS7* pkcs7, int wrapOID,
+                            const byte* kek, word32 kekSz, const byte* cek,
+                            word32 cekSz, byte* out, word32 outSz)
 {
     if (wc_PKCS7_WrapIsPadded(wrapOID)) {
 #ifdef WOLFSSL_AES_KEYWRAP_PADDING
@@ -11612,16 +11614,17 @@ static int wc_PKCS7_WrapKey(int wrapOID, const byte* kek, word32 kekSz,
         return ALGO_ID_E;
 #endif
     }
-    return wc_AesKeyWrap(kek, kekSz, cek, cekSz, out, outSz, NULL);
+    return wc_PKCS7_KeyWrap(pkcs7, cek, cekSz, kek, kekSz, out, outSz, wrapOID,
+                            AES_ENCRYPTION);
 }
 #endif /* WC_PKCS7_MLKEM_ENCODE */
 
 #ifdef WC_PKCS7_MLKEM_DECODE
 /* Unwrap in under kek with the algorithm named by wrapOID. Returns the
  * recovered length or a negative error code. */
-static int wc_PKCS7_UnwrapKey(int wrapOID, const byte* kek, word32 kekSz,
-                              const byte* in, word32 inSz, byte* out,
-                              word32 outSz)
+static int wc_PKCS7_UnwrapKey(const wc_PKCS7* pkcs7, int wrapOID,
+                              const byte* kek, word32 kekSz, const byte* in,
+                              word32 inSz, byte* out, word32 outSz)
 {
     if (wc_PKCS7_WrapIsPadded(wrapOID)) {
 #ifdef WOLFSSL_AES_KEYWRAP_PADDING
@@ -11630,7 +11633,8 @@ static int wc_PKCS7_UnwrapKey(int wrapOID, const byte* kek, word32 kekSz,
         return ALGO_ID_E;
 #endif
     }
-    return wc_AesKeyUnWrap(kek, kekSz, in, inSz, out, outSz, NULL);
+    return wc_PKCS7_KeyWrap(pkcs7, in, inSz, kek, kekSz, out, outSz, wrapOID,
+                            AES_DECRYPTION);
 }
 #endif /* WC_PKCS7_MLKEM_DECODE */
 
@@ -11947,10 +11951,14 @@ int wc_PKCS7_AddRecipient_KEMRI(wc_PKCS7* pkcs7, const byte* cert,
         ret = MEMORY_E;
         goto out;
     }
-    ret = wc_PKCS7_WrapKey(wrapOID, kek, (word32)kekLen, pkcs7->cek,
+    ret = wc_PKCS7_WrapKey(pkcs7, wrapOID, kek, (word32)kekLen, pkcs7->cek,
                            pkcs7->cekSz, encKey, encKeySz);
     ForceZero(kek, sizeof(kek));
     if (ret < 0) {
+        goto out;
+    }
+    if (ret == 0 || (word32)ret > encKeySz) {
+        ret = WC_KEY_SIZE_E;
         goto out;
     }
     encKeySz = (word32)ret;
@@ -12362,8 +12370,9 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     }
 
     if (ret == 0) {
-        ret = wc_PKCS7_UnwrapKey((int)wrapOID, kek, (word32)kekLen, encKey,
-                                 encKeySz, decryptedKey, *decryptedKeySz);
+        ret = wc_PKCS7_UnwrapKey(pkcs7, (int)wrapOID, kek, (word32)kekLen,
+                                 encKey, encKeySz, decryptedKey,
+                                 *decryptedKeySz);
         ForceZero(kek, sizeof(kek));
         if (ret < 0) {
             /* a wrong ML-KEM key still decapsulates and only fails here */

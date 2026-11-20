@@ -518,6 +518,9 @@ int wc_PKCS7_VerifySignedData_ex(wc_PKCS7* pkcs7, const byte* hashBuf,
     \brief Set the callback function to be used to perform a custom AES key
     wrap/unwrap operation.
 
+    The callback has no padding flag, so the RFC 5649 padded wraps of a
+    KEMRecipientInfo always use the built-in implementation.
+
     \retval 0 Callback function was set successfully
     \retval BAD_FUNC_ARG Parameter pkcs7 is NULL
 

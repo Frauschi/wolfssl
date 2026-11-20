@@ -10656,6 +10656,106 @@ int test_wc_PKCS7_KEMRI_SingleCert(void)
     return EXPECT_RESULT();
 }
 
+#ifdef PKCS7_KEM_TESTS
+static int pkcs7KemWrapCbCalls = 0;
+static int pkcs7KemWrapCbOversize = 0;
+
+/* Counts the calls and does the plain RFC 3394 operation. */
+static int pkcs7_kem_wrap_cb(const byte* key, word32 keySz, const byte* in,
+    word32 inSz, int wrap, byte* out, word32 outSz)
+{
+    pkcs7KemWrapCbCalls++;
+    if (wrap)
+        return wc_AesKeyWrap(key, keySz, in, inSz, out, outSz, NULL);
+    if (pkcs7KemWrapCbOversize)
+        return (int)outSz + 1;
+    return wc_AesKeyUnWrap(key, keySz, in, inSz, out, outSz, NULL);
+}
+#endif
+
+/* A registered AES key wrap callback wraps and unwraps the KEMRI CEK. */
+int test_wc_PKCS7_KEMRI_KeyWrapCb(void)
+{
+    EXPECT_DECLS;
+#ifdef PKCS7_KEM_TESTS
+    wc_PKCS7* pkcs7 = NULL;
+    byte* cert = NULL;
+    byte* key = NULL;
+    byte* msg = NULL;
+    byte plain[64];
+    word32 certSz = 0;
+    word32 keySz = 0;
+    int msgSz = 0;
+
+    ExpectNotNull(cert = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_CERT(PKCS7_KEM_PARAM), cert,
+        &certSz), 0);
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_KEY(PKCS7_KEM_PARAM), key, &keySz),
+        0);
+    pkcs7KemWrapCbCalls = 0;
+
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+    ExpectIntEQ(wc_PKCS7_SetAESKeyWrapUnwrapCb(pkcs7, pkcs7_kem_wrap_cb), 0);
+    if (pkcs7 != NULL) {
+        pkcs7->content    = (byte*)pkcs7KemContent;
+        pkcs7->contentSz  = (word32)sizeof(pkcs7KemContent);
+        pkcs7->contentOID = DATA;
+        pkcs7->encryptOID = PKCS7_KEM_CONTENT_ALG;
+    }
+    ExpectIntGT(wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+        PKCS7_KEM_KDF, AES256_WRAP, NULL, 0, 0), 0);
+    ExpectIntGT(msgSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, msg,
+        PKCS7_KEM_BUF), 0);
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+    ExpectIntEQ(pkcs7KemWrapCbCalls, 1);
+
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+    ExpectIntEQ(wc_PKCS7_SetAESKeyWrapUnwrapCb(pkcs7, pkcs7_kem_wrap_cb), 0);
+    if (pkcs7 != NULL) {
+        pkcs7->privateKey   = key;
+        pkcs7->privateKeySz = keySz;
+    }
+    ExpectIntEQ(wc_PKCS7_DecodeEnvelopedData(pkcs7, msg, (word32)msgSz, plain,
+        sizeof(plain)), (int)sizeof(pkcs7KemContent));
+    ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+    if (pkcs7 != NULL) {
+        pkcs7->privateKey   = NULL;
+        pkcs7->privateKeySz = 0;
+    }
+    wc_PKCS7_Free(pkcs7);
+    ExpectIntEQ(pkcs7KemWrapCbCalls, 2);
+
+    /* an unwrap longer than the CEK buffer fails the decode */
+    pkcs7KemWrapCbOversize = 1;
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+    ExpectIntEQ(wc_PKCS7_SetAESKeyWrapUnwrapCb(pkcs7, pkcs7_kem_wrap_cb), 0);
+    if (pkcs7 != NULL) {
+        pkcs7->privateKey   = key;
+        pkcs7->privateKeySz = keySz;
+    }
+    ExpectIntEQ(wc_PKCS7_DecodeEnvelopedData(pkcs7, msg, (word32)msgSz, plain,
+        sizeof(plain)), WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+    if (pkcs7 != NULL) {
+        pkcs7->privateKey   = NULL;
+        pkcs7->privateKeySz = 0;
+    }
+    wc_PKCS7_Free(pkcs7);
+    pkcs7KemWrapCbOversize = 0;
+    ExpectIntEQ(pkcs7KemWrapCbCalls, 3);
+
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
 #if defined(HAVE_PKCS7) && !defined(NO_AES) && defined(HAVE_AES_CBC) && \
     defined(WOLFSSL_AES_256) && defined(HAVE_AES_KEYWRAP)
 /* Stores the complement of the CEK under the id-data OID as oriType. */

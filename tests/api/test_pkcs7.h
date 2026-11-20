@@ -73,6 +73,7 @@ int test_wc_PKCS7_KEMRI_ForeignKey(void);
 int test_wc_PKCS7_KEMRI_SkidLength(void);
 int test_wc_PKCS7_KEMRI_SerialPadding(void);
 int test_wc_PKCS7_KEMRI_SingleCert(void);
+int test_wc_PKCS7_KEMRI_KeyWrapCb(void);
 int test_wc_PKCS7_DecodeEnvelopedData_OriNotOurs(void);
 int test_wc_PKCS7_stream_encode_chunk_boundary(void);
 int test_wc_PKCS7_GetEnvelopedDataKariRid(void);
@@ -246,6 +247,7 @@ int test_wc_PKCS7_VerifySignedData_NonSequence(void);
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_ForeignKey),           \
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_SkidLength),           \
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_SerialPadding),        \
-    TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_SingleCert)
+    TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_SingleCert),           \
+    TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_KeyWrapCb)
 
 #endif /* WOLFCRYPT_TEST_PKCS7_H */
