@@ -1959,10 +1959,11 @@ int wc_PKCS7_SetOriDecryptCtx(wc_PKCS7* pkcs7, void* ctx);
     other than MEMORY_E means this OtherRecipientInfo yielded no key; the
     decoder treats that as "not this recipient" and carries on with the next
     RecipientInfo in the set, so a message naming several recipients stays
-    readable by each of them. Those values are not passed to the application - a
-    decode that runs out of recipients reports PKCS7_RECIP_E. MEMORY_E is the
-    exception: it says nothing about which recipient this is, so it ends the
-    decode and reaches the application unchanged.
+    readable by each of them. Those values are not passed to the application; a
+    decode that finds no usable recipient returns the error from the last
+    recipient it tried, which is PKCS7_RECIP_E for an OtherRecipientInfo.
+    MEMORY_E is the exception: it says nothing about which recipient this is, so
+    it ends the decode and reaches the application unchanged.
 
     A callback is consulted for every oriType. RFC 9629 KEMRecipientInfo
     (id-ori-kem) is also handled internally, so ML-KEM recipients need no
@@ -2006,6 +2007,9 @@ int wc_PKCS7_SetOriDecryptCb(wc_PKCS7* pkcs7, CallbackOriDecrypt cb);
     A message may mix KEMRecipientInfo with the other recipient types in any
     order. The decoder walks past the recipients that are not the reader's,
     bounded by the length of the RecipientInfo set, and tries each in turn.
+    A rejected KeyAgreeRecipientInfo, KEKRecipientInfo or
+    PasswordRecipientInfo of indefinite length ends the decode, as it has no
+    end to skip to.
 
     An ML-KEM certificate given to wc_PKCS7_InitWithCert() becomes a
     KEMRecipientInfo at encode time with the RFC 9936 mandatory algorithms:

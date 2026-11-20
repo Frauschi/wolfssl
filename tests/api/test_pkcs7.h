@@ -74,7 +74,10 @@ int test_wc_PKCS7_KEMRI_SkidLength(void);
 int test_wc_PKCS7_KEMRI_SerialPadding(void);
 int test_wc_PKCS7_KEMRI_SingleCert(void);
 int test_wc_PKCS7_KEMRI_KeyWrapCb(void);
+int test_wc_PKCS7_KEMRI_AfterOtherRecipients(void);
+int test_wc_PKCS7_DecodeEnvelopedData_KariSameIssuer(void);
 int test_wc_PKCS7_DecodeEnvelopedData_OriNotOurs(void);
+int test_wc_PKCS7_DecodeEnvelopedData_IndefKekri(void);
 int test_wc_PKCS7_stream_encode_chunk_boundary(void);
 int test_wc_PKCS7_GetEnvelopedDataKariRid(void);
 int test_wc_PKCS7_EncodeEncryptedData(void);
@@ -206,7 +209,10 @@ int test_wc_PKCS7_VerifySignedData_NonSequence(void);
     TEST_PKCS7_KTRI_BADRSAPAD_DECL                                          \
     TEST_DECL_GROUP("pkcs7_ed", test_wc_PKCS7_SetAESKeyWrapUnwrapCb),       \
     TEST_DECL_GROUP("pkcs7_ed", test_wc_PKCS7_MultipleRecipients),          \
+    TEST_DECL_GROUP("pkcs7_ed",                                             \
+        test_wc_PKCS7_DecodeEnvelopedData_KariSameIssuer),                  \
     TEST_DECL_GROUP("pkcs7_ed", test_wc_PKCS7_DecodeEnvelopedData_OriNotOurs), \
+    TEST_DECL_GROUP("pkcs7_ed", test_wc_PKCS7_DecodeEnvelopedData_IndefKekri), \
     TEST_DECL_GROUP("pkcs7_ed", test_wc_PKCS7_GetEnvelopedDataKariRid),     \
     TEST_DECL_GROUP("pkcs7_ed", test_wc_PKCS7_EncodeEncryptedData),         \
     TEST_DECL_GROUP("pkcs7_ed", test_wc_PKCS7_EncodeEncryptedData_AttribOverflow), \
@@ -248,6 +254,7 @@ int test_wc_PKCS7_VerifySignedData_NonSequence(void);
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_SkidLength),           \
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_SerialPadding),        \
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_SingleCert),           \
-    TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_KeyWrapCb)
+    TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_KeyWrapCb),            \
+    TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_AfterOtherRecipients)
 
 #endif /* WOLFCRYPT_TEST_PKCS7_H */

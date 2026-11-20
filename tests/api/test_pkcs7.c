@@ -10756,6 +10756,358 @@ int test_wc_PKCS7_KEMRI_KeyWrapCb(void)
     return EXPECT_RESULT();
 }
 
+/* A KARI, KEKRI or PWRI recipient ahead of the KEMRecipientInfo is not the
+ * reader's, and the decoder moves on to the KEM recipient. */
+int test_wc_PKCS7_KEMRI_AfterOtherRecipients(void)
+{
+    EXPECT_DECLS;
+#if defined(PKCS7_KEM_TESTS) && !defined(WC_NO_RNG)
+    static byte kek[32] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    static byte keyId[1] = { 0x01 };
+#if !defined(NO_PWDBASED) && !defined(NO_SHA) && defined(HAVE_AES_CBC)
+    static byte password[] = "passwordFIPS_MODE";
+    static byte salt[] = { 0x12, 0x34, 0x56, 0x78, 0x78, 0x56, 0x34, 0x12 };
+#endif
+#ifndef NO_PKCS7_STREAM
+    const int chunks[] = { 0, 1, 64 };
+#else
+    const int chunks[] = { 0 };
+#endif
+    wc_PKCS7* pkcs7 = NULL;
+    WC_RNG rng;
+    byte* kemCert = NULL;
+    byte* kemKey = NULL;
+    byte* other = NULL;
+    byte* msg = NULL;
+    byte plain[64];
+    word32 kemCertSz = 0;
+    word32 kemKeySz = 0;
+    word32 otherSz = 0;
+    int msgSz = 0;
+    int first;
+    int authEnv;
+    int c;
+    int withCert;
+    int added;
+
+    XMEMSET(&rng, 0, sizeof(rng));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectNotNull(kemCert = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(kemKey = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(other = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_CERT(PKCS7_KEM_PARAM), kemCert,
+        &kemCertSz), 0);
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_KEY(PKCS7_KEM_PARAM), kemKey,
+        &kemKeySz), 0);
+#if defined(HAVE_ECC) && defined(HAVE_X963_KDF) && !defined(NO_SHA256)
+    ExpectIntEQ(pkcs7_kem_load("./certs/client-ecc-cert.der", other,
+        &otherSz), 0);
+#else
+    (void)otherSz;
+#endif
+
+    /* 0 KARI, 1 KEKRI, 2 PWRI */
+    for (first = 0; first < 3; first++) {
+        for (authEnv = 0; authEnv < PKCS7_KEM_TYPES; authEnv++) {
+            added = 0;
+            ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+            if (pkcs7 != NULL) {
+                pkcs7->content    = (byte*)pkcs7KemContent;
+                pkcs7->contentSz  = (word32)sizeof(pkcs7KemContent);
+                pkcs7->contentOID = DATA;
+                pkcs7->encryptOID = authEnv ? AES256GCMb :
+                                              PKCS7_KEM_CONTENT_ALG;
+                pkcs7->rng        = &rng;
+            }
+        #if defined(HAVE_ECC) && defined(HAVE_X963_KDF) && !defined(NO_SHA256)
+            if (first == 0) {
+                ExpectIntGT(wc_PKCS7_AddRecipient_KARI(pkcs7, other, otherSz,
+                    AES256_WRAP, dhSinglePass_stdDH_sha256kdf_scheme, NULL, 0,
+                    0), 0);
+                added = 1;
+            }
+        #endif
+            if (first == 1) {
+                ExpectIntGT(wc_PKCS7_AddRecipient_KEKRI(pkcs7, AES256_WRAP,
+                    kek, sizeof(kek), keyId, sizeof(keyId), NULL, NULL, 0,
+                    NULL, 0, 0), 0);
+                added = 1;
+            }
+        #if !defined(NO_PWDBASED) && !defined(NO_SHA) && defined(HAVE_AES_CBC)
+            if (first == 2) {
+                ExpectIntGT(wc_PKCS7_AddRecipient_PWRI(pkcs7, password,
+                    (word32)XSTRLEN((char*)password), salt,
+                    (word32)sizeof(salt), PBKDF2_OID, WC_SHA, 5, AES256CBCb,
+                    0), 0);
+                added = 1;
+            }
+        #endif
+            ExpectIntGT(wc_PKCS7_AddRecipient_KEMRI(pkcs7, kemCert,
+                kemCertSz, PKCS7_KEM_KDF, AES256_WRAP, NULL, 0, 0), 0);
+        #ifdef HAVE_AESGCM
+            if (authEnv) {
+                ExpectIntGT(msgSz = wc_PKCS7_EncodeAuthEnvelopedData(pkcs7,
+                    msg, PKCS7_KEM_BUF), 0);
+            }
+            else
+        #endif
+            {
+                ExpectIntGT(msgSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, msg,
+                    PKCS7_KEM_BUF), 0);
+            }
+            wc_PKCS7_Free(pkcs7);
+            pkcs7 = NULL;
+            if (!added)
+                continue;
+
+            for (c = 0; c < (int)(sizeof(chunks) / sizeof(chunks[0])); c++) {
+                for (withCert = 0; withCert < 2; withCert++) {
+                    XMEMSET(plain, 0, sizeof(plain));
+                    ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, kemKey, kemKeySz,
+                        withCert ? kemCert : NULL, withCert ? kemCertSz : 0,
+                        authEnv, chunks[c], NULL, plain, sizeof(plain)),
+                        (int)sizeof(pkcs7KemContent));
+                    ExpectBufEQ(plain, pkcs7KemContent,
+                        sizeof(pkcs7KemContent));
+                }
+            }
+        }
+    }
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(other, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(kemKey, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(kemCert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    wc_FreeRng(&rng);
+#endif
+    return EXPECT_RESULT();
+}
+
+#if defined(HAVE_PKCS7) && defined(HAVE_ECC) && defined(HAVE_X963_KDF) && \
+    !defined(NO_SHA256) && defined(WOLFSSL_SHA384) && \
+    defined(HAVE_AES_KEYWRAP) && defined(WOLFSSL_AES_256) && \
+    defined(HAVE_AES_CBC) && !defined(NO_FILESYSTEM) && !defined(WC_NO_RNG)
+static int pkcs7KariSeenAgreeOID = 0;
+static int pkcs7KariOversize = 0;
+
+/* Records the agreement scheme a KARI unwrap sees, then fails it. */
+static int pkcs7_kari_oid_cb(wc_PKCS7* pkcs7, byte* cek, word32 cekSz,
+    byte* keyId, word32 keyIdSz, byte* originKey, word32 originKeySz,
+    byte* out, word32 outSz, int keyWrapAlgo, int type, int direction)
+{
+    (void)cek; (void)cekSz; (void)keyId; (void)keyIdSz; (void)originKey;
+    (void)originKeySz; (void)out; (void)outSz; (void)keyWrapAlgo;
+    (void)direction;
+    if (type == (int)PKCS7_KARI)
+        pkcs7KariSeenAgreeOID = pkcs7->keyAgreeOID;
+    return pkcs7KariOversize ? (int)outSz + 1 : -1;
+}
+#endif
+
+#if defined(HAVE_PKCS7) && defined(HAVE_ECC) && defined(HAVE_X963_KDF) && \
+    !defined(NO_SHA256) && defined(WOLFSSL_SHA384) && \
+    !defined(NO_SHA) && (defined(HAVE_ECC384) || defined(HAVE_ALL_CURVES)) && \
+    defined(HAVE_AES_KEYWRAP) && defined(WOLFSSL_AES_256) && \
+    defined(HAVE_AES_CBC) && !defined(NO_FILESYSTEM) && !defined(WC_NO_RNG)
+/* OpenSSL 4.1 cms -encrypt -aes256 of "kari" to client-ecc-ca-cert (serial
+ * 1234) and server-ecc384-cert (1001), both IssuerAndSerialNumber */
+static const byte pkcs7KariSameIssuer[] = {
+        0x30,0x82,0x03,0x04,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,
+        0x01,0x07,0x03,0xa0,0x82,0x02,0xf5,0x30,0x82,0x02,0xf1,0x02,
+        0x01,0x02,0x31,0x82,0x02,0xac,0xa1,0x82,0x01,0x42,0x02,0x01,
+        0x03,0xa0,0x51,0xa1,0x4f,0x30,0x09,0x06,0x07,0x2a,0x86,0x48,
+        0xce,0x3d,0x02,0x01,0x03,0x42,0x00,0x04,0xcf,0x88,0x23,0xbc,
+        0x1d,0xa7,0x1d,0xc5,0x0f,0xfb,0xf0,0x79,0xe3,0x09,0x92,0x6a,
+        0x9d,0x3f,0x03,0xe2,0x97,0xc6,0xa8,0x4e,0x1e,0x22,0xae,0x46,
+        0x6c,0xf7,0x38,0x67,0x87,0xfb,0x73,0x90,0x13,0x6d,0x09,0x9f,
+        0x71,0x91,0xd4,0xac,0x0b,0x3b,0xbe,0xb0,0x0c,0x02,0xfd,0x32,
+        0x66,0x87,0x53,0x6b,0x2a,0xfe,0x47,0xd4,0xc0,0x42,0x7e,0xc2,
+        0x30,0x18,0x06,0x09,0x2b,0x81,0x05,0x10,0x86,0x48,0x3f,0x00,
+        0x02,0x30,0x0b,0x06,0x09,0x60,0x86,0x48,0x01,0x65,0x03,0x04,
+        0x01,0x2d,0x30,0x81,0xcf,0x30,0x81,0xcc,0x30,0x81,0x9f,0x30,
+        0x81,0x98,0x31,0x0b,0x30,0x09,0x06,0x03,0x55,0x04,0x06,0x13,
+        0x02,0x55,0x53,0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x08,
+        0x0c,0x0a,0x57,0x61,0x73,0x68,0x69,0x6e,0x67,0x74,0x6f,0x6e,
+        0x31,0x10,0x30,0x0e,0x06,0x03,0x55,0x04,0x07,0x0c,0x07,0x53,
+        0x65,0x61,0x74,0x74,0x6c,0x65,0x31,0x10,0x30,0x0e,0x06,0x03,
+        0x55,0x04,0x0a,0x0c,0x07,0x77,0x6f,0x6c,0x66,0x53,0x53,0x4c,
+        0x31,0x14,0x30,0x12,0x06,0x03,0x55,0x04,0x0b,0x0c,0x0b,0x44,
+        0x65,0x76,0x65,0x6c,0x6f,0x70,0x6d,0x65,0x6e,0x74,0x31,0x18,
+        0x30,0x16,0x06,0x03,0x55,0x04,0x03,0x0c,0x0f,0x77,0x77,0x77,
+        0x2e,0x77,0x6f,0x6c,0x66,0x73,0x73,0x6c,0x2e,0x63,0x6f,0x6d,
+        0x31,0x20,0x30,0x1e,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,
+        0x01,0x09,0x01,0x16,0x11,0x66,0x61,0x63,0x74,0x73,0x40,0x77,
+        0x6f,0x6c,0x66,0x73,0x73,0x6c,0x2e,0x63,0x6f,0x6d,0x02,0x02,
+        0x12,0x34,0x04,0x28,0x14,0x4b,0x57,0xce,0x03,0xbe,0x15,0x5c,
+        0xda,0xed,0xb8,0xba,0xc8,0x41,0x71,0x50,0x36,0xf2,0xcf,0x06,
+        0xc7,0x93,0x1d,0x62,0x18,0x43,0x4c,0xf3,0xd0,0x67,0xa8,0x15,
+        0x20,0x20,0xcd,0xa6,0x75,0x1b,0x36,0x3f,0xa1,0x82,0x01,0x62,
+        0x02,0x01,0x03,0xa0,0x71,0xa1,0x6f,0x30,0x09,0x06,0x07,0x2a,
+        0x86,0x48,0xce,0x3d,0x02,0x01,0x03,0x62,0x00,0x04,0xbc,0x92,
+        0x2b,0x34,0xf8,0x01,0x85,0x97,0x5d,0x0f,0x19,0xae,0x5f,0x86,
+        0x88,0x20,0x29,0xd3,0x60,0x13,0x7c,0x95,0x94,0x2e,0x41,0xa4,
+        0x90,0x39,0xe3,0x11,0xc1,0xd3,0xff,0x46,0xda,0xd5,0xa4,0x61,
+        0x79,0x80,0x15,0xd4,0x2a,0x21,0x48,0xb7,0x80,0xea,0x9d,0x90,
+        0xad,0xa1,0xb0,0xf5,0x46,0xbc,0xb1,0x1e,0x75,0xd8,0xf1,0xd1,
+        0xac,0x3a,0x5d,0x6d,0x7e,0xc9,0xfa,0x9f,0x63,0xa1,0xbc,0x80,
+        0x34,0x1f,0xfa,0x35,0x76,0x03,0xbf,0xcf,0x3c,0x12,0x74,0x72,
+        0x54,0x0c,0xca,0x53,0xa0,0x50,0x44,0x2e,0xe0,0x6e,0x30,0x18,
+        0x06,0x09,0x2b,0x81,0x05,0x10,0x86,0x48,0x3f,0x00,0x02,0x30,
+        0x0b,0x06,0x09,0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x01,0x2d,
+        0x30,0x81,0xcf,0x30,0x81,0xcc,0x30,0x81,0x9f,0x30,0x81,0x98,
+        0x31,0x0b,0x30,0x09,0x06,0x03,0x55,0x04,0x06,0x13,0x02,0x55,
+        0x53,0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x08,0x0c,0x0a,
+        0x57,0x61,0x73,0x68,0x69,0x6e,0x67,0x74,0x6f,0x6e,0x31,0x10,
+        0x30,0x0e,0x06,0x03,0x55,0x04,0x07,0x0c,0x07,0x53,0x65,0x61,
+        0x74,0x74,0x6c,0x65,0x31,0x10,0x30,0x0e,0x06,0x03,0x55,0x04,
+        0x0a,0x0c,0x07,0x77,0x6f,0x6c,0x66,0x53,0x53,0x4c,0x31,0x14,
+        0x30,0x12,0x06,0x03,0x55,0x04,0x0b,0x0c,0x0b,0x44,0x65,0x76,
+        0x65,0x6c,0x6f,0x70,0x6d,0x65,0x6e,0x74,0x31,0x18,0x30,0x16,
+        0x06,0x03,0x55,0x04,0x03,0x0c,0x0f,0x77,0x77,0x77,0x2e,0x77,
+        0x6f,0x6c,0x66,0x73,0x73,0x6c,0x2e,0x63,0x6f,0x6d,0x31,0x20,
+        0x30,0x1e,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x09,
+        0x01,0x16,0x11,0x66,0x61,0x63,0x74,0x73,0x40,0x77,0x6f,0x6c,
+        0x66,0x73,0x73,0x6c,0x2e,0x63,0x6f,0x6d,0x02,0x02,0x10,0x01,
+        0x04,0x28,0x12,0x34,0xa8,0x87,0xa0,0x6c,0x86,0x64,0xb0,0xd7,
+        0x05,0x39,0x04,0xf0,0xa4,0x9b,0xba,0xcc,0x29,0xbf,0x4d,0x18,
+        0xd5,0x5a,0xc9,0x39,0x21,0xe5,0x5f,0x48,0xdd,0x71,0x42,0x0b,
+        0xac,0x0f,0x81,0xba,0xc1,0xc4,0x30,0x3c,0x06,0x09,0x2a,0x86,
+        0x48,0x86,0xf7,0x0d,0x01,0x07,0x01,0x30,0x1d,0x06,0x09,0x60,
+        0x86,0x48,0x01,0x65,0x03,0x04,0x01,0x2a,0x04,0x10,0x45,0x94,
+        0xd9,0xdf,0xd0,0xa4,0x37,0x9b,0x3f,0x25,0x15,0x1d,0x93,0x50,
+        0xb9,0x99,0x80,0x10,0xfa,0x39,0x1e,0xa2,0x43,0xd2,0xd3,0xf4,
+        0x2e,0xa0,0x52,0x6d,0xa2,0x26,0xd5,0x5a,
+};
+#endif
+
+/* Two KARI recipients from the same CA, the reader's second: with different
+ * KDFs from wolfSSL, and with IssuerAndSerialNumber rids from OpenSSL. */
+int test_wc_PKCS7_DecodeEnvelopedData_KariSameIssuer(void)
+{
+    EXPECT_DECLS;
+#if defined(HAVE_PKCS7) && defined(HAVE_ECC) && defined(HAVE_X963_KDF) && \
+    !defined(NO_SHA256) && defined(WOLFSSL_SHA384) && \
+    defined(HAVE_AES_KEYWRAP) && defined(WOLFSSL_AES_256) && \
+    defined(HAVE_AES_CBC) && !defined(NO_FILESYSTEM) && !defined(WC_NO_RNG)
+    static const byte content[] = { 0x6B, 0x61, 0x72, 0x69 };
+    wc_PKCS7* pkcs7 = NULL;
+    WC_RNG rng;
+    byte* other = NULL;
+    byte* cert = NULL;
+    byte* key = NULL;
+    size_t otherSz = 0;
+    size_t certSz = 0;
+    size_t keySz = 0;
+    byte msg[2048];
+    byte plain[64];
+    int msgSz = 0;
+
+    XMEMSET(&rng, 0, sizeof(rng));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(load_file("./certs/server-ecc.der", &other, &otherSz), 0);
+    ExpectIntEQ(load_file("./certs/client-ecc-ca-cert.der", &cert, &certSz),
+        0);
+    ExpectIntEQ(load_file("./certs/ecc-client-key.der", &key, &keySz), 0);
+
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+    if (pkcs7 != NULL) {
+        pkcs7->content    = (byte*)content;
+        pkcs7->contentSz  = (word32)sizeof(content);
+        pkcs7->contentOID = DATA;
+        pkcs7->encryptOID = AES256CBCb;
+        pkcs7->rng        = &rng;
+    }
+    ExpectIntGT(wc_PKCS7_AddRecipient_KARI(pkcs7, other, (word32)otherSz,
+        AES256_WRAP, dhSinglePass_stdDH_sha256kdf_scheme, NULL, 0, 0), 0);
+    ExpectIntGT(wc_PKCS7_AddRecipient_KARI(pkcs7, cert, (word32)certSz,
+        AES256_WRAP, dhSinglePass_stdDH_sha384kdf_scheme, NULL, 0, 0), 0);
+    ExpectIntGT(msgSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, msg, sizeof(msg)),
+        0);
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+    ExpectIntEQ(wc_PKCS7_InitWithCert(pkcs7, cert, (word32)certSz), 0);
+    if (pkcs7 != NULL) {
+        pkcs7->privateKey   = key;
+        pkcs7->privateKeySz = (word32)keySz;
+        pkcs7->rng          = &rng;
+    }
+    ExpectIntEQ(wc_PKCS7_DecodeEnvelopedData(pkcs7, msg, (word32)msgSz, plain,
+        sizeof(plain)), (int)sizeof(content));
+    ExpectBufEQ(plain, content, sizeof(content));
+    if (pkcs7 != NULL) {
+        pkcs7->privateKey   = NULL;
+        pkcs7->privateKeySz = 0;
+    }
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+
+    pkcs7KariSeenAgreeOID = 0;
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+    ExpectIntEQ(wc_PKCS7_InitWithCert(pkcs7, other, (word32)otherSz), 0);
+    ExpectIntEQ(wc_PKCS7_SetWrapCEKCb(pkcs7, pkcs7_kari_oid_cb), 0);
+    if (pkcs7 != NULL) {
+        pkcs7->privateKey   = key;
+        pkcs7->privateKeySz = (word32)keySz;
+        pkcs7->rng          = &rng;
+    }
+    ExpectIntLT(wc_PKCS7_DecodeEnvelopedData(pkcs7, msg, (word32)msgSz, plain,
+        sizeof(plain)), 0);
+    ExpectIntEQ(pkcs7KariSeenAgreeOID, dhSinglePass_stdDH_sha256kdf_scheme);
+    if (pkcs7 != NULL) {
+        ExpectIntEQ(pkcs7->keyAgreeOID, 0);
+    }
+    pkcs7KariOversize = 1;
+    ExpectIntEQ(wc_PKCS7_DecodeEnvelopedData(pkcs7, msg, (word32)msgSz, plain,
+        sizeof(plain)), WC_NO_ERR_TRACE(BUFFER_E));
+    pkcs7KariOversize = 0;
+    if (pkcs7 != NULL) {
+        ExpectIntEQ(pkcs7->keyAgreeOID, 0);
+        pkcs7->privateKey   = NULL;
+        pkcs7->privateKeySz = 0;
+    }
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+    XFREE(key, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(cert, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    key = NULL;
+    cert = NULL;
+
+#if !defined(NO_SHA) && (defined(HAVE_ECC384) || defined(HAVE_ALL_CURVES))
+    ExpectIntEQ(load_file("./certs/server-ecc384-cert.der", &cert, &certSz),
+        0);
+    ExpectIntEQ(load_file("./certs/server-ecc384-key.der", &key, &keySz), 0);
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+    ExpectIntEQ(wc_PKCS7_InitWithCert(pkcs7, cert, (word32)certSz), 0);
+    if (pkcs7 != NULL) {
+        pkcs7->privateKey   = key;
+        pkcs7->privateKeySz = (word32)keySz;
+        pkcs7->rng          = &rng;
+    }
+    XMEMSET(plain, 0, sizeof(plain));
+    ExpectIntEQ(wc_PKCS7_DecodeEnvelopedData(pkcs7,
+        (byte*)pkcs7KariSameIssuer, (word32)sizeof(pkcs7KariSameIssuer),
+        plain, sizeof(plain)), (int)sizeof(content));
+    ExpectBufEQ(plain, content, sizeof(content));
+    if (pkcs7 != NULL) {
+        pkcs7->privateKey   = NULL;
+        pkcs7->privateKeySz = 0;
+    }
+    wc_PKCS7_Free(pkcs7);
+    XFREE(key, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(cert, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    XFREE(other, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    wc_FreeRng(&rng);
+#endif
+    return EXPECT_RESULT();
+}
+
 #if defined(HAVE_PKCS7) && !defined(NO_AES) && defined(HAVE_AES_CBC) && \
     defined(WOLFSSL_AES_256) && defined(HAVE_AES_KEYWRAP)
 /* Stores the complement of the CEK under the id-data OID as oriType. */
@@ -10851,6 +11203,106 @@ int test_wc_PKCS7_DecodeEnvelopedData_OriNotOurs(void)
             ExpectIntEQ(wc_PKCS7_DecodeEnvelopedData(pkcs7, msg,
                 (word32)msgSz, plain, sizeof(plain)),
                 WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+        }
+        if (pkcs7 != NULL) {
+            pkcs7->privateKey   = NULL;
+            pkcs7->privateKeySz = 0;
+        }
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = NULL;
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A KEKRecipientInfo with an indefinite length opens, and with the wrong KEK
+ * fails, whether the message arrives whole or one byte at a time. */
+int test_wc_PKCS7_DecodeEnvelopedData_IndefKekri(void)
+{
+    EXPECT_DECLS;
+#if defined(HAVE_PKCS7) && !defined(NO_AES) && defined(HAVE_AES_CBC) && \
+    defined(WOLFSSL_AES_256) && defined(HAVE_AES_KEYWRAP) && \
+    defined(ASN_BER_TO_DER)
+    static const byte kek[32] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    static const byte badKek[32] = { 2, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    static const byte keyId[1] = { 0x01 };
+    static const byte content[] = { 0x6B, 0x65, 0x6B };
+    wc_PKCS7* pkcs7 = NULL;
+    byte enc[512];
+    byte msg[sizeof(enc) + 2];
+    byte plain[64];
+    int encSz = 0;
+    int msgSz = 0;
+    int set = -1;
+    int kekriSz = 0;
+    int chunk;
+    int fed;
+    int n;
+    int pass;
+    int ret;
+
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+    if (pkcs7 != NULL) {
+        pkcs7->content    = (byte*)content;
+        pkcs7->contentSz  = (word32)sizeof(content);
+        pkcs7->contentOID = DATA;
+        pkcs7->encryptOID = AES256CBCb;
+    }
+    ExpectIntEQ(wc_PKCS7_SetStreamMode(pkcs7, 1, NULL, NULL, NULL), 0);
+    ExpectIntGT(wc_PKCS7_AddRecipient_KEKRI(pkcs7, AES256_WRAP, (byte*)kek,
+        sizeof(kek), (byte*)keyId, sizeof(keyId), NULL, NULL, 0, NULL, 0, 0),
+        0);
+    ExpectIntGT(encSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, enc, sizeof(enc)),
+        0);
+    wc_PKCS7_Free(pkcs7);
+    pkcs7 = NULL;
+
+    /* the streamed outer layers are indefinite, so only the SET grows:
+     * 31 LL A2 KK becomes 31 LL+2 A2 80 ... 00 00 */
+    for (n = 0; EXPECT_SUCCESS() && set < 0 && n + 3 < encSz; n++) {
+        if (enc[n] == 0x31 && enc[n + 1] < 0x7E && enc[n + 2] == 0xA2 &&
+                enc[n + 3] == enc[n + 1] - 2)
+            set = n;
+    }
+    ExpectIntGE(set, 0);
+    if (EXPECT_SUCCESS()) {
+        kekriSz = enc[set + 3];
+        XMEMCPY(msg, enc, (size_t)set + 3);
+        msg[set + 1] = (byte)(enc[set + 1] + 2);
+        msg[set + 3] = 0x80;
+        XMEMCPY(msg + set + 4, enc + set + 4, (size_t)kekriSz);
+        msg[set + 4 + kekriSz] = 0x00;
+        msg[set + 5 + kekriSz] = 0x00;
+        XMEMCPY(msg + set + 6 + kekriSz, enc + set + 4 + kekriSz,
+            (size_t)(encSz - set - 4 - kekriSz));
+        msgSz = encSz + 2;
+    }
+
+    for (pass = 0; EXPECT_SUCCESS() && pass < 4; pass++) {
+    #ifdef NO_PKCS7_STREAM
+        if (pass & 1)
+            continue;
+    #endif
+        chunk = (pass & 1) ? 1 : msgSz;
+        ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+        if (pkcs7 != NULL) {
+            pkcs7->privateKey   = (byte*)((pass & 2) ? badKek : kek);
+            pkcs7->privateKeySz = sizeof(kek);
+        }
+        ret = WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E);
+        for (fed = 0; fed < msgSz &&
+                ret == WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E); fed += n) {
+            n = (msgSz - fed < chunk) ? (msgSz - fed) : chunk;
+            ret = wc_PKCS7_DecodeEnvelopedData(pkcs7, msg + fed, (word32)n,
+                plain, sizeof(plain));
+        }
+        if (pass & 2) {
+            ExpectIntLT(ret, 0);
+            ExpectIntNE(ret, WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E));
+        }
+        else {
+            ExpectIntEQ(ret, (int)sizeof(content));
+            ExpectBufEQ(plain, content, sizeof(content));
         }
         if (pkcs7 != NULL) {
             pkcs7->privateKey   = NULL;
