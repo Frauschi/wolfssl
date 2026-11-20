@@ -9623,3 +9623,1142 @@ int test_wc_PKCS7_VerifySignedData_NonSequence(void)
 #endif /* HAVE_PKCS7 */
     return EXPECT_RESULT();
 }
+
+#if defined(HAVE_PKCS7) && defined(WOLFSSL_HAVE_MLKEM)
+    #include <wolfssl/wolfcrypt/wc_mlkem.h>
+#endif
+#if defined(HAVE_PKCS7) && defined(WC_PKCS7_MLKEM_ENCODE) && \
+    defined(WC_PKCS7_MLKEM_DECODE) && !defined(NO_FILESYSTEM) && \
+    defined(WOLFSSL_AES_256) && (defined(HAVE_AES_CBC) || defined(HAVE_AESGCM))
+    #ifdef WOLFSSL_SHA512
+        #define PKCS7_KEM_KDF          HKDF_SHA512_OID
+        #define PKCS7_KEM_KDF_OID_LAST 0x1e
+    #elif defined(WOLFSSL_SHA384)
+        #define PKCS7_KEM_KDF          HKDF_SHA384_OID
+        #define PKCS7_KEM_KDF_OID_LAST 0x1d
+    #elif !defined(NO_SHA256)
+        #define PKCS7_KEM_KDF          HKDF_SHA256_OID
+        #define PKCS7_KEM_KDF_OID_LAST 0x1c
+    #endif
+    #if defined(WOLFSSL_WC_ML_KEM_1024) && !defined(WOLFSSL_NO_ML_KEM)
+        #define PKCS7_KEM_PARAM "1024"
+        #define PKCS7_KEM_LEVEL WC_ML_KEM_1024
+        #if defined(WOLFSSL_WC_ML_KEM_768)
+            #define PKCS7_KEM_ALT_PARAM "768"
+        #elif defined(WOLFSSL_WC_ML_KEM_512)
+            #define PKCS7_KEM_ALT_PARAM "512"
+        #endif
+    #elif defined(WOLFSSL_WC_ML_KEM_768) && !defined(WOLFSSL_NO_ML_KEM)
+        #define PKCS7_KEM_PARAM "768"
+        #define PKCS7_KEM_LEVEL WC_ML_KEM_768
+        #if defined(WOLFSSL_WC_ML_KEM_512)
+            #define PKCS7_KEM_ALT_PARAM "512"
+        #endif
+    #elif defined(WOLFSSL_WC_ML_KEM_512) && !defined(WOLFSSL_NO_ML_KEM)
+        #define PKCS7_KEM_PARAM "512"
+        #define PKCS7_KEM_LEVEL WC_ML_KEM_512
+    #endif
+    #if defined(PKCS7_KEM_KDF) && defined(PKCS7_KEM_PARAM)
+        #define PKCS7_KEM_TESTS
+    #endif
+#endif
+
+#ifdef PKCS7_KEM_TESTS
+#define PKCS7_KEM_CERT(n) "./certs/mlkem/mlkem" n "-cert.der"
+#define PKCS7_KEM_KEY(n)  "./certs/mlkem/mlkem" n "-key.der"
+#define PKCS7_KEM_BUF     (FOURK_BUF * 4)
+#ifdef HAVE_AES_CBC
+    #define PKCS7_KEM_CONTENT_ALG AES256CBCb
+#else
+    #define PKCS7_KEM_CONTENT_ALG AES256GCMb
+#endif
+/* loop bound over EnvelopedData (0) and AuthEnvelopedData (1) */
+#ifdef HAVE_AESGCM
+    #define PKCS7_KEM_TYPES 2
+#else
+    #define PKCS7_KEM_TYPES 1
+#endif
+
+static const byte pkcs7KemContent[] = {
+    0x48,0x65,0x6c,0x6c,0x6f,0x20,0x50,0x51,0x43    /* "Hello PQC" */
+};
+
+/* 2.16.840.1.101.3.4.4, the ML-KEM arc; the next byte names the set */
+static const byte pkcs7KemArc[] = {
+    0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x04
+};
+
+static int pkcs7_kem_load(const char* file, byte* buf, word32* sz)
+{
+    XFILE f;
+    size_t n;
+
+    f = XFOPEN(file, "rb");
+    if (f == XBADFILE)
+        return -1;
+    n = XFREAD(buf, 1, PKCS7_KEM_BUF, f);
+    XFCLOSE(f);
+    if (n == 0)
+        return -1;
+    *sz = (word32)n;
+    return 0;
+}
+
+static int pkcs7_kem_find(const byte* buf, int bufSz, const byte* pat,
+    int patSz)
+{
+    int i;
+
+    for (i = 0; i + patSz <= bufSz; i++) {
+        if (XMEMCMP(buf + i, pat, (size_t)patSz) == 0)
+            return i;
+    }
+    return -1;
+}
+
+/* Encode the test content to the certificates in certs, in order, wrapping
+ * the CEK with wrapOID. Returns the encoded size or a negative error. */
+static int pkcs7_kem_encode_ex(const char** certs, int nCerts, int opt,
+    int authEnv, int wrapOID, byte* out, word32 outSz)
+{
+    wc_PKCS7* pkcs7;
+    byte* cert;
+    word32 certSz = 0;
+    int ret = 0;
+    int i;
+
+    (void)authEnv;
+    cert = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId);
+    if (cert == NULL || pkcs7 == NULL)
+        ret = MEMORY_E;
+    if (ret == 0) {
+        pkcs7->content    = (byte*)pkcs7KemContent;
+        pkcs7->contentSz  = (word32)sizeof(pkcs7KemContent);
+        pkcs7->contentOID = DATA;
+        pkcs7->encryptOID = PKCS7_KEM_CONTENT_ALG;
+    #ifdef HAVE_AESGCM
+        if (authEnv)
+            pkcs7->encryptOID = AES256GCMb;
+    #endif
+    }
+    for (i = 0; ret == 0 && i < nCerts; i++) {
+        ret = pkcs7_kem_load(certs[i], cert, &certSz);
+        if (ret == 0) {
+            ret = wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+                PKCS7_KEM_KDF, wrapOID, NULL, 0, opt);
+            if (ret > 0)
+                ret = 0;
+        }
+    }
+    if (ret == 0) {
+    #ifdef HAVE_AESGCM
+        if (authEnv)
+            ret = wc_PKCS7_EncodeAuthEnvelopedData(pkcs7, out, outSz);
+        else
+    #endif
+            ret = wc_PKCS7_EncodeEnvelopedData(pkcs7, out, outSz);
+    }
+    wc_PKCS7_Free(pkcs7);
+    XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    return ret;
+}
+
+static int pkcs7_kem_encode(const char** certs, int nCerts, int opt,
+    int authEnv, byte* out, word32 outSz)
+{
+    return pkcs7_kem_encode_ex(certs, nCerts, opt, authEnv, AES256_WRAP, out,
+        outSz);
+}
+
+/* Declines every OtherRecipientInfo, counting the calls in ctx. */
+static int pkcs7_kem_other_ori_cb(wc_PKCS7* pkcs7, byte* oriType,
+    word32 oriTypeSz, byte* oriValue, word32 oriValueSz, byte* decryptedKey,
+    word32* decryptedKeySz, void* ctx)
+{
+    (*(int*)ctx)++;
+    (void)pkcs7;
+    (void)oriType;
+    (void)oriTypeSz;
+    (void)oriValue;
+    (void)oriValueSz;
+    (void)decryptedKey;
+    (void)decryptedKeySz;
+    return -1;
+}
+
+/* Returns 0 with a fixed 32-byte key, counting the calls in ctx. */
+static int pkcs7_kem_fixed_ori_cb(wc_PKCS7* pkcs7, byte* oriType,
+    word32 oriTypeSz, byte* oriValue, word32 oriValueSz, byte* decryptedKey,
+    word32* decryptedKeySz, void* ctx)
+{
+    (*(int*)ctx)++;
+    (void)pkcs7;
+    (void)oriType;
+    (void)oriTypeSz;
+    (void)oriValue;
+    (void)oriValueSz;
+    XMEMSET(decryptedKey, 0x5a, 32);
+    *decryptedKeySz = 32;
+    return 0;
+}
+
+/* Returns MEMORY_E, counting the calls in ctx. */
+static int pkcs7_kem_nomem_ori_cb(wc_PKCS7* pkcs7, byte* oriType,
+    word32 oriTypeSz, byte* oriValue, word32 oriValueSz, byte* decryptedKey,
+    word32* decryptedKeySz, void* ctx)
+{
+    (*(int*)ctx)++;
+    (void)pkcs7;
+    (void)oriType;
+    (void)oriTypeSz;
+    (void)oriValue;
+    (void)oriValueSz;
+    (void)decryptedKey;
+    (void)decryptedKeySz;
+    return WC_NO_ERR_TRACE(MEMORY_E);
+}
+
+/* Returns 0 with a length one byte over the buffer, counting the calls in
+ * ctx. */
+static int pkcs7_kem_oversize_ori_cb(wc_PKCS7* pkcs7, byte* oriType,
+    word32 oriTypeSz, byte* oriValue, word32 oriValueSz, byte* decryptedKey,
+    word32* decryptedKeySz, void* ctx)
+{
+    (*(int*)ctx)++;
+    (void)pkcs7;
+    (void)oriType;
+    (void)oriTypeSz;
+    (void)oriValue;
+    (void)oriValueSz;
+    (void)decryptedKey;
+    *decryptedKeySz += 1;
+    return 0;
+}
+
+/* Decode msg chunk bytes per call (0 for all at once), with cert when not NULL
+ * and cb when cbCalls is not NULL. Returns the decoded size or an error. */
+static int pkcs7_kem_decode_ex(const byte* msg, int msgSz, byte* key,
+    word32 keySz, byte* cert, word32 certSz, int authEnv, int chunk,
+    CallbackOriDecrypt cb, int* cbCalls, byte* plain, word32 plainSz)
+{
+    wc_PKCS7* pkcs7;
+    int ret;
+    int fed;
+    int n = 0;
+
+    pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId);
+    if (pkcs7 == NULL)
+        return MEMORY_E;
+    ret = wc_PKCS7_InitWithCert(pkcs7, cert, certSz);
+    if (ret == 0 && cbCalls != NULL) {
+        ret = wc_PKCS7_SetOriDecryptCb(pkcs7, cb);
+        if (ret == 0)
+            ret = wc_PKCS7_SetOriDecryptCtx(pkcs7, cbCalls);
+    }
+    if (ret == 0) {
+        pkcs7->privateKey   = key;
+        pkcs7->privateKeySz = keySz;
+        if (chunk <= 0)
+            chunk = msgSz;
+        ret = WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E);
+        for (fed = 0; fed < msgSz &&
+                ret == WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E); fed += n) {
+            n = (msgSz - fed < chunk) ? (msgSz - fed) : chunk;
+        #ifdef HAVE_AESGCM
+            if (authEnv)
+                ret = wc_PKCS7_DecodeAuthEnvelopedData(pkcs7,
+                    (byte*)msg + fed, (word32)n, plain, plainSz);
+            else
+        #endif
+                ret = wc_PKCS7_DecodeEnvelopedData(pkcs7, (byte*)msg + fed,
+                    (word32)n, plain, plainSz);
+        }
+        pkcs7->privateKey   = NULL;
+        pkcs7->privateKeySz = 0;
+    }
+    (void)authEnv;
+    wc_PKCS7_Free(pkcs7);
+    return ret;
+}
+
+static int pkcs7_kem_decode(const byte* msg, int msgSz, byte* key,
+    word32 keySz, byte* cert, word32 certSz, int authEnv, int chunk,
+    int* cbCalls, byte* plain, word32 plainSz)
+{
+    return pkcs7_kem_decode_ex(msg, msgSz, key, keySz, cert, certSz, authEnv,
+        chunk, pkcs7_kem_other_ori_cb, cbCalls, plain, plainSz);
+}
+#endif /* PKCS7_KEM_TESTS */
+
+/* A callback registered for other oriTypes must not hide the built-in
+ * KEMRecipientInfo decoder, and one that answers must be used as is. */
+int test_wc_PKCS7_KEMRI_OriCallbackFallback(void)
+{
+    EXPECT_DECLS;
+#ifdef PKCS7_KEM_TESTS
+    const char* certs[2] = {
+        PKCS7_KEM_CERT(PKCS7_KEM_PARAM), PKCS7_KEM_CERT(PKCS7_KEM_PARAM)
+    };
+    byte* key = NULL;
+    byte* msg = NULL;
+    byte plain[64];
+    word32 keySz = 0;
+    int msgSz = 0;
+    int cbCalls = 0;
+    int authEnv;
+    int ret = 0;
+
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_KEY(PKCS7_KEM_PARAM), key, &keySz),
+        0);
+    for (authEnv = 0; authEnv < PKCS7_KEM_TYPES; authEnv++) {
+        ExpectIntGT(msgSz = pkcs7_kem_encode(certs, 1, 0, authEnv, msg,
+            PKCS7_KEM_BUF), 0);
+        cbCalls = 0;
+        ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, NULL, 0, authEnv,
+            0, &cbCalls, plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
+        ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+        ExpectIntEQ(cbCalls, 1);
+
+        /* a key from the callback wins over the built-in decoder */
+        cbCalls = 0;
+        XMEMSET(plain, 0, sizeof(plain));
+        ret = pkcs7_kem_decode_ex(msg, msgSz, key, keySz, NULL, 0, authEnv, 0,
+            pkcs7_kem_fixed_ori_cb, &cbCalls, plain, sizeof(plain));
+        ExpectFalse((ret == (int)sizeof(pkcs7KemContent)) &&
+            (XMEMCMP(plain, pkcs7KemContent, sizeof(pkcs7KemContent)) == 0));
+        ExpectIntEQ(cbCalls, 1);
+
+        ExpectIntEQ(pkcs7_kem_decode_ex(msg, msgSz, key, keySz, NULL, 0,
+            authEnv, 0, pkcs7_kem_oversize_ori_cb, &cbCalls, plain,
+            sizeof(plain)), WC_NO_ERR_TRACE(BUFFER_E));
+
+        /* MEMORY_E ends the decode though the second recipient would open */
+        ExpectIntGT(msgSz = pkcs7_kem_encode(certs, 2, 0, authEnv, msg,
+            PKCS7_KEM_BUF), 0);
+        cbCalls = 0;
+        ExpectIntEQ(pkcs7_kem_decode_ex(msg, msgSz, key, keySz, NULL, 0,
+            authEnv, 0, pkcs7_kem_nomem_ori_cb, &cbCalls, plain,
+            sizeof(plain)), WC_NO_ERR_TRACE(MEMORY_E));
+        ExpectIntEQ(cbCalls, 1);
+    }
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* Indefinite-length outer headers fed in chunks: the KEM decoder reads the
+ * recipient set to its end, which empties the stream buffer. */
+int test_wc_PKCS7_KEMRI_IndefiniteChunked(void)
+{
+    EXPECT_DECLS;
+#if defined(PKCS7_KEM_TESTS) && !defined(NO_PKCS7_STREAM) && \
+    defined(ASN_BER_TO_DER)
+    const char* certs[1] = { PKCS7_KEM_CERT(PKCS7_KEM_PARAM) };
+    const int chunks[] = { 64, 100 };
+    byte* key = NULL;
+    byte* der = NULL;
+    byte* ber = NULL;
+    byte plain[64];
+    word32 keySz = 0;
+    int derSz = 0;
+    int berSz = 0;
+    int authEnv;
+    int c;
+    int h;
+    int i;
+
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(der = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(ber = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_KEY(PKCS7_KEM_PARAM), key, &keySz),
+        0);
+    for (authEnv = 0; authEnv < PKCS7_KEM_TYPES; authEnv++) {
+        ExpectIntGT(derSz = pkcs7_kem_encode(certs, 1, 0, authEnv, der,
+            PKCS7_KEM_BUF), 0);
+        /* rewrite the ContentInfo, [0] and outer SEQUENCE headers to
+         * indefinite length, keeping the contentType OID between them */
+        if (EXPECT_SUCCESS()) {
+            i = 0;
+            berSz = 0;
+            for (h = 0; h < 3; h++) {
+                if (h == 1) {
+                    XMEMCPY(ber + berSz, der + i, 2 + (size_t)der[i + 1]);
+                    berSz += 2 + der[i + 1];
+                    i += 2 + der[i + 1];
+                }
+                ber[berSz++] = der[i++];
+                ber[berSz++] = 0x80;
+                i += (der[i] & 0x80) ? 1 + (der[i] & 0x7F) : 1;
+            }
+            XMEMCPY(ber + berSz, der + i, (size_t)(derSz - i));
+            berSz += derSz - i;
+            XMEMSET(ber + berSz, 0, 6);
+            berSz += 6;
+        }
+        for (c = 0; c < (int)(sizeof(chunks) / sizeof(chunks[0])); c++) {
+            XMEMSET(plain, 0, sizeof(plain));
+            ExpectIntEQ(pkcs7_kem_decode(ber, berSz, key, keySz, NULL, 0,
+                authEnv, chunks[c], NULL, plain, sizeof(plain)),
+                (int)sizeof(pkcs7KemContent));
+            ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+        }
+    }
+    XFREE(ber, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(der, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* Every recipient of a multi-recipient message opens it, the last one being
+ * the case that walks past RecipientInfos that are not the reader's. */
+int test_wc_PKCS7_KEMRI_MultipleRecipients(void)
+{
+    EXPECT_DECLS;
+#if defined(PKCS7_KEM_TESTS) && defined(PKCS7_KEM_ALT_PARAM)
+    const char* certs[3];
+    const char* keys[3];
+    const int opts[2] = { CMS_ISSUER_AND_SERIAL_NUMBER, CMS_SKID };
+    byte* key = NULL;
+    byte* cert = NULL;
+    byte* msg = NULL;
+    byte plain[64];
+    word32 keySz = 0;
+    word32 certSz = 0;
+    int msgSz = 0;
+    int nRecip = 0;
+    int authEnv;
+    int i;
+
+#if defined(WOLFSSL_WC_ML_KEM_512) && !defined(WOLFSSL_NO_ML_KEM)
+    certs[nRecip] = PKCS7_KEM_CERT("512");
+    keys[nRecip++] = PKCS7_KEM_KEY("512");
+#endif
+#if defined(WOLFSSL_WC_ML_KEM_768) && !defined(WOLFSSL_NO_ML_KEM)
+    certs[nRecip] = PKCS7_KEM_CERT("768");
+    keys[nRecip++] = PKCS7_KEM_KEY("768");
+#endif
+#if defined(WOLFSSL_WC_ML_KEM_1024) && !defined(WOLFSSL_NO_ML_KEM)
+    certs[nRecip] = PKCS7_KEM_CERT("1024");
+    keys[nRecip++] = PKCS7_KEM_KEY("1024");
+#endif
+
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(cert = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF * 2, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+
+    for (authEnv = 0; authEnv < PKCS7_KEM_TYPES; authEnv++) {
+        ExpectIntGT(msgSz = pkcs7_kem_encode(certs, nRecip, 0, authEnv, msg,
+            PKCS7_KEM_BUF * 2), 0);
+        for (i = 0; i < nRecip; i++) {
+            ExpectIntEQ(pkcs7_kem_load(keys[i], key, &keySz), 0);
+            XMEMSET(plain, 0, sizeof(plain));
+            ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, NULL, 0,
+                authEnv, 0, NULL, plain, sizeof(plain)),
+                (int)sizeof(pkcs7KemContent));
+            ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+        }
+    }
+
+    /* with the second recipient's certificate only its own key opens it */
+    ExpectIntEQ(pkcs7_kem_load(certs[1], cert, &certSz), 0);
+    for (i = 0; i < 2; i++) {
+        ExpectIntGT(msgSz = pkcs7_kem_encode(certs, 2, opts[i], 0, msg,
+            PKCS7_KEM_BUF * 2), 0);
+        ExpectIntEQ(pkcs7_kem_load(keys[1], key, &keySz), 0);
+        ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, cert, certSz, 0,
+            0, NULL, plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
+        ExpectIntEQ(pkcs7_kem_load(keys[0], key, &keySz), 0);
+        ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, cert, certSz, 0,
+            0, NULL, plain, sizeof(plain)), WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+    }
+
+#ifndef NO_PKCS7_STREAM
+    /* chunks small enough to resume part way through a RecipientInfo */
+    ExpectIntGT(msgSz = pkcs7_kem_encode(certs, 2, 0, 0, msg,
+        PKCS7_KEM_BUF * 2), 0);
+    ExpectIntEQ(pkcs7_kem_load(keys[1], key, &keySz), 0);
+    XMEMSET(plain, 0, sizeof(plain));
+    ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, NULL, 0, 0, 64, NULL,
+        plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
+    ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+#endif
+
+#ifdef WOLFSSL_AES_KEYWRAP_PADDING
+    ExpectIntGT(msgSz = pkcs7_kem_encode_ex(certs, 2, 0, 0, AES256_WRAP_PAD,
+        msg, PKCS7_KEM_BUF * 2), 0);
+    for (i = 0; i < 2; i++) {
+        ExpectIntEQ(pkcs7_kem_load(keys[i], key, &keySz), 0);
+        XMEMSET(plain, 0, sizeof(plain));
+        ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, NULL, 0, 0, 0,
+            NULL, plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
+        ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+    }
+#ifndef NO_PKCS7_STREAM
+    XMEMSET(plain, 0, sizeof(plain));
+    ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, NULL, 0, 0, 1, NULL,
+        plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
+    ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+#endif
+#endif
+
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A corrupted KEMRecipientInfo must never decode to the original content. */
+int test_wc_PKCS7_KEMRI_Corrupted(void)
+{
+    EXPECT_DECLS;
+#ifdef PKCS7_KEM_TESTS
+    const char* certs[1] = { PKCS7_KEM_CERT(PKCS7_KEM_PARAM) };
+    /* end of the KDF OID, then kekLength 32 for AES256_WRAP */
+    const byte kekLen[] = { 0x03, PKCS7_KEM_KDF_OID_LAST, 0x02, 0x01, 0x20 };
+    byte* key = NULL;
+    byte* good = NULL;
+    byte* bad = NULL;
+    byte plain[64];
+    word32 keySz = 0;
+    int goodSz = 0;
+    int start = -1;
+    int decSz;
+    int i;
+
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(good = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(bad = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_KEY(PKCS7_KEM_PARAM), key, &keySz),
+        0);
+    ExpectIntGT(goodSz = pkcs7_kem_encode(certs, 1, 0, 0, good,
+        PKCS7_KEM_BUF), 0);
+    /* the rid before the KEM identifier is not matched without a cert */
+    ExpectIntGT(start = pkcs7_kem_find(good, goodSz, pkcs7KemArc,
+        (int)sizeof(pkcs7KemArc)), 0);
+    for (i = start; EXPECT_SUCCESS() && i < goodSz; i += 97) {
+        XMEMCPY(bad, good, (size_t)goodSz);
+        bad[i] = (byte)(bad[i] ^ 0xFF);
+        XMEMSET(plain, 0, sizeof(plain));
+        decSz = pkcs7_kem_decode(bad, goodSz, key, keySz, NULL, 0, 0, 0, NULL,
+            plain, sizeof(plain));
+        ExpectFalse(decSz == (int)sizeof(pkcs7KemContent) &&
+            XMEMCMP(plain, pkcs7KemContent, sizeof(pkcs7KemContent)) == 0);
+    }
+
+    /* a kekLength that does not match the wrap key size */
+    if (EXPECT_SUCCESS())
+        XMEMCPY(bad, good, (size_t)goodSz);
+    ExpectIntGT(i = pkcs7_kem_find(bad, goodSz, kekLen, (int)sizeof(kekLen)),
+        0);
+    if (EXPECT_SUCCESS())
+        bad[i + (int)sizeof(kekLen) - 1] = 0x10;
+    ExpectIntEQ(pkcs7_kem_decode(bad, goodSz, key, keySz, NULL, 0, 0, 0, NULL,
+        plain, sizeof(plain)), WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+    XFREE(bad, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(good, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
+int test_wc_PKCS7_AddRecipient_KEMRI(void)
+{
+    EXPECT_DECLS;
+#ifdef PKCS7_KEM_TESTS
+    wc_PKCS7* pkcs7 = NULL;
+    byte* cert = NULL;
+    word32 certSz = 0;
+#ifdef HAVE_ECC
+    byte* ecc = NULL;
+    word32 eccSz = 0;
+#endif
+    int i;
+    int j;
+    int patched = 0;
+
+    ExpectNotNull(cert = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_CERT(PKCS7_KEM_PARAM), cert,
+        &certSz), 0);
+    ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+    if (pkcs7 != NULL) {
+        pkcs7->content    = (byte*)pkcs7KemContent;
+        pkcs7->contentSz  = (word32)sizeof(pkcs7KemContent);
+        pkcs7->contentOID = DATA;
+        pkcs7->encryptOID = PKCS7_KEM_CONTENT_ALG;
+    }
+
+    ExpectIntGT(wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+        PKCS7_KEM_KDF, AES256_WRAP, NULL, 0, 0), 0);
+    ExpectIntLT(wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+        PBKDF2_OID, AES256_WRAP, NULL, 0, 0), 0);
+    ExpectIntEQ(wc_PKCS7_AddRecipient_KEMRI(NULL, cert, certSz,
+        PKCS7_KEM_KDF, AES256_WRAP, NULL, 0, 0), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntEQ(wc_PKCS7_AddRecipient_KEMRI(pkcs7, NULL, certSz,
+        PKCS7_KEM_KDF, AES256_WRAP, NULL, 0, 0), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    ExpectIntLT(wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+        PKCS7_KEM_KDF, DATA, NULL, 0, 0), 0);
+    ExpectIntEQ(wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+        PKCS7_KEM_KDF, PKCS7_KEM_CONTENT_ALG, NULL, 0, 0),
+        WC_NO_ERR_TRACE(BAD_KEYWRAP_ALG_E));
+#ifndef WOLFSSL_AES_KEYWRAP_PADDING
+    ExpectIntEQ(wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+        PKCS7_KEM_KDF, AES256_WRAP_PAD, NULL, 0, 0),
+        WC_NO_ERR_TRACE(BAD_KEYWRAP_ALG_E));
+#endif
+    if (pkcs7 != NULL)
+        pkcs7->sidType = DEGENERATE_SID;
+    ExpectIntEQ(wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+        PKCS7_KEM_KDF, AES256_WRAP, NULL, 0, 0),
+        WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+    if (pkcs7 != NULL)
+        pkcs7->sidType = 0;
+#ifdef HAVE_ECC
+    ExpectNotNull(ecc = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_load("./certs/client-ecc-cert.der", ecc, &eccSz), 0);
+    ExpectIntEQ(wc_PKCS7_AddRecipient_KEMRI(pkcs7, ecc, eccSz,
+        PKCS7_KEM_KDF, AES256_WRAP, NULL, 0, 0), WC_NO_ERR_TRACE(BAD_FUNC_ARG));
+    XFREE(ecc, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+
+    /* add digitalSignature: keyUsage (55 1D 0F) BIT STRING 03 02 05 20 */
+    for (i = 0; EXPECT_SUCCESS() && !patched && i + 3 < (int)certSz; i++) {
+        if (cert[i] != 0x55 || cert[i + 1] != 0x1D || cert[i + 2] != 0x0F)
+            continue;
+        for (j = i + 3; j + 3 < (int)certSz && j < i + 12; j++) {
+            if (cert[j] == 0x03 && cert[j + 1] == 0x02 &&
+                    cert[j + 2] == 0x05 && cert[j + 3] == 0x20) {
+                cert[j + 3] = 0xA0;
+                patched = 1;
+                break;
+            }
+        }
+    }
+    ExpectIntEQ(patched, 1);
+    ExpectIntEQ(wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+        PKCS7_KEM_KDF, AES256_WRAP, NULL, 0, 0), WC_NO_ERR_TRACE(KEYUSAGE_E));
+
+    wc_PKCS7_Free(pkcs7);
+    XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A first recipient that fails for a reason other than "not mine" must not
+ * end the search. */
+int test_wc_PKCS7_KEMRI_UnusableRecipient(void)
+{
+    EXPECT_DECLS;
+#ifdef PKCS7_KEM_TESTS
+    /* same key for both, so only the corruption rejects the first */
+    const char* certs[2] = {
+        PKCS7_KEM_CERT(PKCS7_KEM_PARAM), PKCS7_KEM_CERT(PKCS7_KEM_PARAM)
+    };
+    /* tail of the HKDF OID in use, 1.2.840.113549.1.9.16.3.x */
+    const byte kdfTail[] = {
+        0x86,0xf7,0x0d,0x01,0x09,0x10,0x03,PKCS7_KEM_KDF_OID_LAST
+    };
+    /* id-aes256-wrap, 2.16.840.1.101.3.4.1.45 */
+    const byte wrapOid[] = {
+        0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x01,0x2d
+    };
+    byte* key = NULL;
+    byte* msg = NULL;
+    byte* alt = NULL;
+    byte* wrp = NULL;
+    byte plain[64];
+    word32 keySz = 0;
+    int msgSz = 0;
+    int hit = -1;
+
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF * 2, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(alt = (byte*)XMALLOC(PKCS7_KEM_BUF * 2, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(wrp = (byte*)XMALLOC(PKCS7_KEM_BUF * 2, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_KEY(PKCS7_KEM_PARAM), key, &keySz),
+        0);
+    ExpectIntGT(msgSz = pkcs7_kem_encode(certs, 2, 0, 0, msg,
+        PKCS7_KEM_BUF * 2), 0);
+    if (EXPECT_SUCCESS()) {
+        XMEMCPY(alt, msg, (size_t)msgSz);
+        XMEMCPY(wrp, msg, (size_t)msgSz);
+    }
+
+    /* unknown KDF in the first recipient */
+    ExpectIntGT(hit = pkcs7_kem_find(msg, msgSz, kdfTail,
+        (int)sizeof(kdfTail)), 0);
+    if (EXPECT_SUCCESS())
+        msg[hit + (int)sizeof(kdfTail) - 1] = 0x7f;
+    ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, NULL, 0, 0, 0, NULL,
+        plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
+    ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+
+    /* unknown KEM in the first recipient */
+    ExpectIntGT(hit = pkcs7_kem_find(alt, msgSz, pkcs7KemArc,
+        (int)sizeof(pkcs7KemArc)), 0);
+    if (EXPECT_SUCCESS())
+        alt[hit + (int)sizeof(pkcs7KemArc)] = 0x7f;
+    XMEMSET(plain, 0, sizeof(plain));
+    ExpectIntEQ(pkcs7_kem_decode(alt, msgSz, key, keySz, NULL, 0, 0, 0, NULL,
+        plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
+    ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+
+    /* aes256-CBC, not a key wrap, as the first recipient's wrap */
+    ExpectIntGT(hit = pkcs7_kem_find(wrp, msgSz, wrapOid,
+        (int)sizeof(wrapOid)), 0);
+    if (EXPECT_SUCCESS())
+        wrp[hit + (int)sizeof(wrapOid) - 1] = 0x2a;
+    XMEMSET(plain, 0, sizeof(plain));
+    ExpectIntEQ(pkcs7_kem_decode(wrp, msgSz, key, keySz, NULL, 0, 0, 0, NULL,
+        plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
+    ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+#ifndef WOLFSSL_AES_KEYWRAP_PADDING
+    /* id-aes256-wrap-pad, which this build cannot unwrap */
+    if (EXPECT_SUCCESS())
+        wrp[hit + (int)sizeof(wrapOid) - 1] = 0x30;
+    XMEMSET(plain, 0, sizeof(plain));
+    ExpectIntEQ(pkcs7_kem_decode(wrp, msgSz, key, keySz, NULL, 0, 0, 0, NULL,
+        plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
+    ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+#endif
+
+    XFREE(wrp, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(alt, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A key for the same parameter set decapsulates by implicit rejection, so
+ * only the unwrap fails, and that has to read as not this recipient. */
+int test_wc_PKCS7_KEMRI_ForeignKey(void)
+{
+    EXPECT_DECLS;
+#if defined(PKCS7_KEM_TESTS) && !defined(WC_NO_RNG) && \
+    !defined(WOLFSSL_MLKEM_NO_MAKE_KEY)
+    const char* certs[1] = { PKCS7_KEM_CERT(PKCS7_KEM_PARAM) };
+    WC_RNG rng;
+    MlKemKey foreign;
+    byte* key = NULL;
+    byte* msg = NULL;
+    byte plain[64];
+    int keySz = 0;
+    int msgSz = 0;
+
+    XMEMSET(&rng, 0, sizeof(rng));
+    XMEMSET(&foreign, 0, sizeof(foreign));
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    ExpectIntEQ(wc_MlKemKey_Init(&foreign, PKCS7_KEM_LEVEL, HEAP_HINT,
+        testDevId), 0);
+    ExpectIntEQ(wc_MlKemKey_MakeKey(&foreign, &rng), 0);
+    ExpectIntGT(keySz = wc_MlKemKey_PrivateKeyToDer(&foreign, key,
+        PKCS7_KEM_BUF), 0);
+    ExpectIntGT(msgSz = pkcs7_kem_encode(certs, 1, 0, 0, msg, PKCS7_KEM_BUF),
+        0);
+    ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, (word32)keySz, NULL, 0, 0,
+        0, NULL, plain, sizeof(plain)), WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+#ifdef WOLFSSL_AES_KEYWRAP_PADDING
+    ExpectIntGT(msgSz = pkcs7_kem_encode_ex(certs, 1, 0, 0, AES256_WRAP_PAD,
+        msg, PKCS7_KEM_BUF), 0);
+    ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, (word32)keySz, NULL, 0, 0,
+        0, NULL, plain, sizeof(plain)), WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+#endif
+
+    wc_MlKemKey_Free(&foreign);
+    DoExpectIntEQ(wc_FreeRng(&rng), 0);
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
+#if defined(PKCS7_KEM_TESTS) && defined(WOLFSSL_CERT_GEN) && \
+    defined(WOLFSSL_CERT_EXT) && defined(HAVE_ECC) && \
+    defined(HAVE_ECC_SIGN) && !defined(NO_SHA256) && !defined(WC_NO_RNG) && \
+    !defined(WOLFSSL_MLKEM_NO_MAKE_KEY)
+#define PKCS7_KEM_CERTGEN
+
+/* Issue an ML-KEM certificate with the given SKI and serial number, signed by
+ * a throwaway ECC key, and write the matching private key DER to key. */
+static int pkcs7_kem_make_cert(const byte* skid, int skidSz,
+    const byte* serial, int serialSz, byte* der, int* derSz, byte* key,
+    int* keySz)
+{
+    WC_RNG rng;
+    ecc_key ca;
+    MlKemKey kem;
+    Cert* cert = NULL;
+    int rngInit = 0;
+    int caInit = 0;
+    int kemInit = 0;
+    int ret;
+
+    cert = (Cert*)XMALLOC(sizeof(Cert), HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    ret = (cert == NULL) ? MEMORY_E : wc_InitRng(&rng);
+    if (ret == 0) {
+        rngInit = 1;
+        ret = wc_ecc_init_ex(&ca, HEAP_HINT, INVALID_DEVID);
+    }
+    if (ret == 0) {
+        caInit = 1;
+        ret = wc_ecc_make_key(&rng, 32, &ca);
+    }
+    if (ret == 0)
+        ret = wc_MlKemKey_Init(&kem, PKCS7_KEM_LEVEL, HEAP_HINT, testDevId);
+    if (ret == 0) {
+        kemInit = 1;
+        ret = wc_MlKemKey_MakeKey(&kem, &rng);
+    }
+    if (ret == 0) {
+        *keySz = wc_MlKemKey_PrivateKeyToDer(&kem, key, PKCS7_KEM_BUF);
+        ret = (*keySz > 0) ? 0 : *keySz;
+    }
+    if (ret == 0)
+        ret = wc_InitCert_ex(cert, HEAP_HINT, testDevId);
+    if (ret == 0) {
+        XSTRNCPY(cert->issuer.commonName, "KEM test CA", CTC_NAME_SIZE);
+        XSTRNCPY(cert->subject.commonName, "KEM test", CTC_NAME_SIZE);
+        cert->sigType = CTC_SHA256wECDSA;
+        XMEMCPY(cert->skid, skid, (size_t)skidSz);
+        cert->skidSz = skidSz;
+        XMEMCPY(cert->serial, serial, (size_t)serialSz);
+        cert->serialSz = serialSz;
+        ret = wc_SetKeyUsage(cert, "keyEncipherment");
+    }
+    if (ret == 0) {
+        ret = wc_MakeCert_ex(cert, der, PKCS7_KEM_BUF, MLKEM_TYPE, &kem, &rng);
+        if (ret > 0)
+            ret = wc_SignCert_ex(cert->bodySz, cert->sigType, der,
+                PKCS7_KEM_BUF, ECC_TYPE, &ca, &rng);
+        if (ret > 0) {
+            *derSz = ret;
+            ret = 0;
+        }
+    }
+    if (kemInit)
+        wc_MlKemKey_Free(&kem);
+    if (caInit)
+        wc_ecc_free(&ca);
+    if (rngInit)
+        wc_FreeRng(&rng);
+    XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    return ret;
+}
+
+/* Encode the test content to der with options, then decode it with cert and
+ * key. Returns the decoded size or a negative error. */
+static int pkcs7_kem_cert_roundtrip(byte* der, int derSz, byte* key,
+    int keySz, int opt, byte* msg, int* msgSz)
+{
+    wc_PKCS7* pkcs7;
+    byte plain[64];
+    int ret;
+
+    pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId);
+    if (pkcs7 == NULL)
+        return MEMORY_E;
+    pkcs7->content    = (byte*)pkcs7KemContent;
+    pkcs7->contentSz  = (word32)sizeof(pkcs7KemContent);
+    pkcs7->contentOID = DATA;
+    pkcs7->encryptOID = PKCS7_KEM_CONTENT_ALG;
+    ret = wc_PKCS7_AddRecipient_KEMRI(pkcs7, der, (word32)derSz,
+        PKCS7_KEM_KDF, AES256_WRAP, NULL, 0, opt);
+    if (ret > 0)
+        ret = wc_PKCS7_EncodeEnvelopedData(pkcs7, msg, PKCS7_KEM_BUF);
+    wc_PKCS7_Free(pkcs7);
+    if (ret <= 0)
+        return ret;
+    *msgSz = ret;
+    return pkcs7_kem_decode(msg, *msgSz, key, (word32)keySz, der,
+        (word32)derSz, 0, 0, NULL, plain, sizeof(plain));
+}
+#endif
+
+/* A SubjectKeyIdentifier rid carries the certificate's SKI as is, whatever
+ * its length. */
+int test_wc_PKCS7_KEMRI_SkidLength(void)
+{
+    EXPECT_DECLS;
+#ifdef PKCS7_KEM_CERTGEN
+    /* [0] SubjectKeyIdentifier rid holding the 8-byte SKI below */
+    static const byte rid[10] = { 0x80, 0x08, 1, 2, 3, 4, 5, 6, 7, 8 };
+    static const byte serial[1] = { 0x01 };
+    byte* der = NULL;
+    byte* key = NULL;
+    byte* msg = NULL;
+    int derSz = 0;
+    int keySz = 0;
+    int msgSz = 0;
+
+    ExpectNotNull(der = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_make_cert(rid + 2, (int)sizeof(rid) - 2, serial,
+        (int)sizeof(serial), der, &derSz, key, &keySz), 0);
+    ExpectIntEQ(pkcs7_kem_cert_roundtrip(der, derSz, key, keySz, CMS_SKID,
+        msg, &msgSz), (int)sizeof(pkcs7KemContent));
+    ExpectIntGT(pkcs7_kem_find(msg, msgSz, rid, (int)sizeof(rid)), 0);
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(der, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* A serial number with its top bit set is encoded with a leading zero, which
+ * the rid match has to ignore. */
+int test_wc_PKCS7_KEMRI_SerialPadding(void)
+{
+    EXPECT_DECLS;
+#ifdef PKCS7_KEM_CERTGEN
+    static const byte skid[20] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    static const byte serial[4] = { 0x80, 0x11, 0x22, 0x33 };
+    byte* der = NULL;
+    byte* key = NULL;
+    byte* msg = NULL;
+    int derSz = 0;
+    int keySz = 0;
+    int msgSz = 0;
+
+    ExpectNotNull(der = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_make_cert(skid, (int)sizeof(skid), serial,
+        (int)sizeof(serial), der, &derSz, key, &keySz), 0);
+    ExpectIntEQ(pkcs7_kem_cert_roundtrip(der, derSz, key, keySz,
+        CMS_ISSUER_AND_SERIAL_NUMBER, msg, &msgSz),
+        (int)sizeof(pkcs7KemContent));
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(der, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* An ML-KEM singleCert gets a KEMRecipientInfo with the RFC 9936 mandatory
+ * HKDF-SHA256 and the AES wrap matching the parameter set. */
+int test_wc_PKCS7_KEMRI_SingleCert(void)
+{
+    EXPECT_DECLS;
+#if defined(PKCS7_KEM_TESTS) && !defined(NO_SHA256)
+    static const byte hkdfSha256[] = {
+        0x86,0xf7,0x0d,0x01,0x09,0x10,0x03,0x1c
+    };
+    /* id-aes128-wrap and id-aes256-wrap, 2.16.840.1.101.3.4.1.5 and .45 */
+    static const byte aes128Wrap[] = {
+        0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x01,0x05
+    };
+    static const byte aes256Wrap[] = {
+        0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x01,0x2d
+    };
+    const char* params[3];
+    wc_PKCS7* pkcs7 = NULL;
+    byte* cert = NULL;
+    byte* key = NULL;
+    byte* msg = NULL;
+    byte plain[64];
+    word32 certSz = 0;
+    word32 keySz = 0;
+    int msgSz = 0;
+    int n = 0;
+    int i;
+    char path[64];
+
+#if defined(WOLFSSL_WC_ML_KEM_512) && !defined(WOLFSSL_NO_ML_KEM) && \
+    defined(WOLFSSL_AES_128)
+    params[n++] = "512";
+#endif
+#if defined(WOLFSSL_WC_ML_KEM_768) && !defined(WOLFSSL_NO_ML_KEM)
+    params[n++] = "768";
+#endif
+#if defined(WOLFSSL_WC_ML_KEM_1024) && !defined(WOLFSSL_NO_ML_KEM)
+    params[n++] = "1024";
+#endif
+
+    ExpectNotNull(cert = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    for (i = 0; i < n; i++) {
+        XSNPRINTF(path, sizeof(path), "./certs/mlkem/mlkem%s-cert.der",
+            params[i]);
+        ExpectIntEQ(pkcs7_kem_load(path, cert, &certSz), 0);
+        XSNPRINTF(path, sizeof(path), "./certs/mlkem/mlkem%s-key.der",
+            params[i]);
+        ExpectIntEQ(pkcs7_kem_load(path, key, &keySz), 0);
+
+        ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+        ExpectIntEQ(wc_PKCS7_InitWithCert(pkcs7, cert, certSz), 0);
+        if (pkcs7 != NULL) {
+            pkcs7->content    = (byte*)pkcs7KemContent;
+            pkcs7->contentSz  = (word32)sizeof(pkcs7KemContent);
+            pkcs7->contentOID = DATA;
+            pkcs7->encryptOID = PKCS7_KEM_CONTENT_ALG;
+        }
+        ExpectIntGT(msgSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, msg,
+            PKCS7_KEM_BUF), 0);
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = NULL;
+
+        ExpectIntGT(pkcs7_kem_find(msg, msgSz, hkdfSha256,
+            (int)sizeof(hkdfSha256)), 0);
+        if (XSTRCMP(params[i], "512") == 0) {
+            ExpectIntGT(pkcs7_kem_find(msg, msgSz, aes128Wrap,
+                (int)sizeof(aes128Wrap)), 0);
+        }
+        else {
+            ExpectIntGT(pkcs7_kem_find(msg, msgSz, aes256Wrap,
+                (int)sizeof(aes256Wrap)), 0);
+        }
+        ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, cert, certSz, 0,
+            0, NULL, plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
+        ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+    }
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
+#if defined(HAVE_PKCS7) && !defined(NO_AES) && defined(HAVE_AES_CBC) && \
+    defined(WOLFSSL_AES_256) && defined(HAVE_AES_KEYWRAP)
+/* Stores the complement of the CEK under the id-data OID as oriType. */
+static int pkcs7_ori_complement_cb(wc_PKCS7* pkcs7, byte* cek, word32 cekSz,
+    byte* oriType, word32* oriTypeSz, byte* oriValue, word32* oriValueSz,
+    void* ctx)
+{
+    static const byte dataOid[] = {
+        0x2A,0x86,0x48,0x86,0xF7,0x0D,0x01,0x07,0x01
+    };
+    word32 i;
+
+    (void)pkcs7;
+    (void)ctx;
+    if (*oriValueSz < 2 + cekSz || *oriTypeSz < sizeof(dataOid))
+        return BUFFER_E;
+    oriValue[0] = ASN_OCTET_STRING;
+    oriValue[1] = (byte)cekSz;
+    for (i = 0; i < cekSz; i++)
+        oriValue[2 + i] = (byte)~cek[i];
+    *oriValueSz = 2 + cekSz;
+    XMEMCPY(oriType, dataOid, sizeof(dataOid));
+    *oriTypeSz = sizeof(dataOid);
+    return 0;
+}
+
+/* Reports an oriValue one byte larger than the encoder allows. */
+static int pkcs7_ori_oversize_cb(wc_PKCS7* pkcs7, byte* cek, word32 cekSz,
+    byte* oriType, word32* oriTypeSz, byte* oriValue, word32* oriValueSz,
+    void* ctx)
+{
+    (void)pkcs7;
+    (void)cek;
+    (void)cekSz;
+    (void)oriValue;
+    (void)ctx;
+    oriType[0] = 0x2A;
+    *oriTypeSz = 1;
+    *oriValueSz = MAX_ORI_VALUE_SZ + 1;
+    return 0;
+}
+#endif
+
+/* An OtherRecipientInfo the reader cannot open, with or without a callback,
+ * reports PKCS7_RECIP_E and lets a later recipient open the message. */
+int test_wc_PKCS7_DecodeEnvelopedData_OriNotOurs(void)
+{
+    EXPECT_DECLS;
+#if defined(HAVE_PKCS7) && !defined(NO_AES) && defined(HAVE_AES_CBC) && \
+    defined(WOLFSSL_AES_256) && defined(HAVE_AES_KEYWRAP)
+    static const byte kek[32] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    static const byte keyId[1] = { 0x01 };
+    static const byte content[] = { 0x6F, 0x72, 0x69 };
+    wc_PKCS7* pkcs7 = NULL;
+    byte msg[1024];
+    byte plain[64];
+    int msgSz = 0;
+    int withKekri;
+
+    for (withKekri = 0; withKekri < 2; withKekri++) {
+        ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+        if (pkcs7 != NULL) {
+            pkcs7->content    = (byte*)content;
+            pkcs7->contentSz  = (word32)sizeof(content);
+            pkcs7->contentOID = DATA;
+            pkcs7->encryptOID = AES256CBCb;
+        }
+        ExpectIntEQ(wc_PKCS7_AddRecipient_ORI(pkcs7, pkcs7_ori_oversize_cb,
+            0), WC_NO_ERR_TRACE(BUFFER_E));
+        ExpectIntGT(wc_PKCS7_AddRecipient_ORI(pkcs7, pkcs7_ori_complement_cb,
+            0), 0);
+        if (withKekri) {
+            ExpectIntGT(wc_PKCS7_AddRecipient_KEKRI(pkcs7, AES256_WRAP,
+                (byte*)kek, sizeof(kek), (byte*)keyId, sizeof(keyId), NULL,
+                NULL, 0, NULL, 0, 0), 0);
+        }
+        ExpectIntGT(msgSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, msg,
+            sizeof(msg)), 0);
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = NULL;
+
+        ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+        if (pkcs7 != NULL) {
+            pkcs7->privateKey   = (byte*)kek;
+            pkcs7->privateKeySz = sizeof(kek);
+        }
+        if (withKekri) {
+            ExpectIntEQ(wc_PKCS7_DecodeEnvelopedData(pkcs7, msg,
+                (word32)msgSz, plain, sizeof(plain)), (int)sizeof(content));
+            ExpectBufEQ(plain, content, sizeof(content));
+        }
+        else {
+            ExpectIntEQ(wc_PKCS7_DecodeEnvelopedData(pkcs7, msg,
+                (word32)msgSz, plain, sizeof(plain)),
+                WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+        }
+        if (pkcs7 != NULL) {
+            pkcs7->privateKey   = NULL;
+            pkcs7->privateKeySz = 0;
+        }
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = NULL;
+    }
+#endif
+    return EXPECT_RESULT();
+}
