@@ -500,6 +500,17 @@ static const SlhDsaParameters SlhDsaParams[] =
  * Hashes
  ******************************************************************************/
 
+/* WOLFSSL_SLHDSA_HASH_DEVID puts the SHA-2 objects on the key's device, which
+ * must survive wc_Sha256Copy() and, under CB_ONLY_SHA*, do the hashing. */
+#if defined(WOLF_CRYPTO_CB) && defined(WOLFSSL_SLHDSA_HASH_DEVID)
+    #define SLHDSA_HASH_DEVID(key, swDevId) \
+        (((key)->devId != INVALID_DEVID) ? (key)->devId : (swDevId))
+#else
+    #define SLHDSA_HASH_DEVID(key, swDevId)     (swDevId)
+#endif
+#define SLHDSA_SHA256_DEVID(key)    SLHDSA_HASH_DEVID(key, WC_SHA256_SW_DEVID)
+#define SLHDSA_SHA512_DEVID(key)    SLHDSA_HASH_DEVID(key, WC_SHA512_SW_DEVID)
+
 /* Everything from here to the SLH-DSA API section is the software
  * implementation: hashes, WOTS+, XMSS, the hypertree and FORS. Under
  * WOLF_CRYPTO_CB_ONLY_SLHDSA the registered device performs all of it. */
@@ -839,7 +850,7 @@ static int slhdsakey_precompute_sha2_midstates(SlhDsaKey* key)
         key->hash.sha2.sha256_mid_inited = 0;
     }
     ret = wc_InitSha256_ex(&key->hash.sha2.sha256_mid, key->heap,
-        WC_SHA256_SW_DEVID);
+        SLHDSA_SHA256_DEVID(key));
     if (ret == 0) {
         key->hash.sha2.sha256_mid_inited = 1;
         ret = wc_Sha256Update(&key->hash.sha2.sha256_mid, block,
@@ -857,7 +868,7 @@ static int slhdsakey_precompute_sha2_midstates(SlhDsaKey* key)
             key->hash.sha2.sha512_mid_inited = 0;
         }
         ret = wc_InitSha512_ex(&key->hash.sha2.sha512_mid, key->heap,
-            WC_SHA512_SW_DEVID);
+            SLHDSA_SHA512_DEVID(key));
         if (ret == 0) {
             key->hash.sha2.sha512_mid_inited = 1;
             ret = wc_Sha512Update(&key->hash.sha2.sha512_mid, block,
@@ -1032,7 +1043,7 @@ static int slhdsakey_sha256_hash(SlhDsaKey* key, const byte* address,
 #ifdef SLHDSA_SHA2_BLOCK_HASH
     if (!key->hash.sha2.sha256_inited) {
         int ret = wc_InitSha256_ex(&key->hash.sha2.sha256, key->heap,
-            WC_SHA256_SW_DEVID);
+            SLHDSA_SHA256_DEVID(key));
         if (ret != 0) {
             return ret;
         }
@@ -1348,7 +1359,7 @@ static int slhdsakey_mgf1_sha2(SlhDsaKey* key, const byte* seed,
 
             if (! key->hash.sha2.sha256_2_inited) {
                 ret = wc_InitSha256_ex(&key->hash.sha2.sha256_2, key->heap,
-                    WC_SHA256_SW_DEVID);
+                    SLHDSA_SHA256_DEVID(key));
                 if (ret == 0)
                     key->hash.sha2.sha256_2_inited = 1;
             }
@@ -1375,7 +1386,7 @@ static int slhdsakey_mgf1_sha2(SlhDsaKey* key, const byte* seed,
 
             if (! key->hash.sha2.sha512_2_inited) {
                 ret = wc_InitSha512_ex(&key->hash.sha2.sha512_2, key->heap,
-                    WC_SHA512_SW_DEVID);
+                    SLHDSA_SHA512_DEVID(key));
                 if (ret == 0)
                     key->hash.sha2.sha512_2_inited = 1;
             }
@@ -1445,7 +1456,7 @@ static int slhdsakey_prf_msg_sha2(SlhDsaKey* key, const byte* sk_prf,
 #endif
 
     ret = wc_HmacInit(&hmac, key->heap, (hmacType == WC_SHA256) ?
-        WC_SHA256_SW_DEVID : WC_SHA512_SW_DEVID);
+        SLHDSA_SHA256_DEVID(key) : SLHDSA_SHA512_DEVID(key));
     if (ret == 0) {
         ret = wc_HmacSetKey(&hmac, hmacType, sk_prf, n);
     }
@@ -1513,7 +1524,7 @@ static int slhdsakey_h_msg_sha2(SlhDsaKey* key, const byte* r,
         /* Step 1: innerHash = SHA-256(R || PK.seed || PK.root || M). */
         if (! key->hash.sha2.sha256_2_inited) {
             ret = wc_InitSha256_ex(&key->hash.sha2.sha256_2, key->heap,
-                WC_SHA256_SW_DEVID);
+                SLHDSA_SHA256_DEVID(key));
             if (ret == 0)
                 key->hash.sha2.sha256_2_inited = 1;
         }
@@ -1558,7 +1569,7 @@ static int slhdsakey_h_msg_sha2(SlhDsaKey* key, const byte* r,
         /* Step 1: innerHash = SHA-512(R || PK.seed || PK.root || M). */
         if (! key->hash.sha2.sha512_2_inited) {
             ret = wc_InitSha512_ex(&key->hash.sha2.sha512_2, key->heap,
-                WC_SHA512_SW_DEVID);
+                SLHDSA_SHA512_DEVID(key));
             if (ret == 0)
                 key->hash.sha2.sha512_2_inited = 1;
         }
@@ -8824,13 +8835,13 @@ int wc_SlhDsaKey_Init(SlhDsaKey* key, enum SlhDsaParam param, void* heap,
         if (SLHDSA_IS_SHA2(param)) {
             /* Initialize SHA2 hash objects. */
             ret = wc_InitSha256_ex(&key->hash.sha2.sha256, key->heap,
-                WC_SHA256_SW_DEVID);
+                SLHDSA_SHA256_DEVID(key));
             if (ret == 0)
                 key->hash.sha2.sha256_inited = 1;
         #ifdef WC_SLHDSA_NEED_SHA512
             if ((ret == 0) && (key->params->n > 16)) {
                 ret = wc_InitSha512_ex(&key->hash.sha2.sha512, key->heap,
-                    WC_SHA512_SW_DEVID);
+                    SLHDSA_SHA512_DEVID(key));
                 if (ret == 0)
                     key->hash.sha2.sha512_inited = 1;
             }

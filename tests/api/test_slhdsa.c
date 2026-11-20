@@ -4696,6 +4696,104 @@ int test_wc_slhdsa_hash_sw(void)
     return EXPECT_RESULT();
 }
 
+/* Test that WOLFSSL_SLHDSA_HASH_DEVID hands SHA-2 hashing of a key with a
+ * device to that device, keeps SHAKE in software, and that both verify. */
+int test_wc_slhdsa_hash_devid(void)
+{
+    EXPECT_DECLS;
+#if defined(TEST_SLHDSA_HASH_DEVID) && defined(WOLFSSL_SLHDSA_HASH_DEVID)
+    static const enum SlhDsaParam params[] = {
+        SLHDSA_SHAKE128F,
+    #ifdef WOLFSSL_SLHDSA_SHA2
+        SLHDSA_SHA2_128F, SLHDSA_SHA2_192F,
+    #endif
+    };
+    SlhDsaKey key;
+    SlhDsaKey vfy;
+    WC_RNG    rng;
+    wc_Sha256 sha;
+    byte      hash[WC_SHA256_DIGEST_SIZE];
+    byte      pub[WC_SLHDSA_MAX_PUB_LEN];
+    word32    pubLen;
+    byte      msg[64];
+    byte*     sig = NULL;
+    word32    sigLen;
+    int       ran = 0;
+    int       i;
+    int       ret;
+
+    test_slhdsa_hash_calls = 0;
+    XMEMSET(msg, 0xAA, sizeof(msg));
+    ret = wc_CryptoCb_RegisterDevice(TEST_SLHDSA_HASH_DEVID,
+        test_slhdsa_hash_cryptocb, NULL);
+    if (ret != 0) {
+        return TEST_FAIL;
+    }
+    /* Skipped when a SHA-256 object does not reach the device, as with a
+     * SHA-256 hardware port. */
+    ret = wc_InitSha256_ex(&sha, NULL, TEST_SLHDSA_HASH_DEVID);
+    if (ret == 0) {
+        ret = wc_Sha256Update(&sha, msg, sizeof(msg));
+        if (ret == 0) {
+            ret = wc_Sha256Final(&sha, hash);
+        }
+        wc_Sha256Free(&sha);
+    }
+    if ((ret != 0) || (test_slhdsa_hash_calls == 0)) {
+        test_slhdsa_hash_dev_stop();
+        return (ret != 0) ? TEST_FAIL : TEST_SKIPPED;
+    }
+
+    XMEMSET(&rng, 0, sizeof(rng));
+    ExpectIntEQ(wc_InitRng_ex(&rng, NULL, WC_SW_DEVID), 0);
+    for (i = 0; EXPECT_SUCCESS() && (i < (int)XELEM_CNT(params)); i++) {
+        XMEMSET(&key, 0, sizeof(key));
+        XMEMSET(&vfy, 0, sizeof(vfy));
+        if (wc_SlhDsaKey_Init(&key, params[i], NULL,
+                TEST_SLHDSA_HASH_DEVID) != 0) {
+            continue;
+        }
+        ExpectIntGT(ret = wc_SlhDsaKey_SigSizeFromParam(params[i]), 0);
+        sigLen = (word32)ret;
+        ExpectNotNull(sig = (byte*)XMALLOC(sigLen, NULL,
+            DYNAMIC_TYPE_TMP_BUFFER));
+        ExpectIntEQ(wc_SlhDsaKey_MakeKey(&key, &rng), 0);
+        ExpectIntEQ(wc_SlhDsaKey_SignDeterministic(&key, NULL, 0, msg,
+            sizeof(msg), sig, &sigLen), 0);
+        test_slhdsa_hash_calls = 0;
+        ExpectIntEQ(wc_SlhDsaKey_Verify(&key, NULL, 0, msg, sizeof(msg), sig,
+            sigLen), 0);
+        if (params[i] == SLHDSA_SHAKE128F) {
+            ExpectIntEQ(test_slhdsa_hash_calls, 0);
+        }
+        else {
+            ExpectIntGT(test_slhdsa_hash_calls, 0);
+        }
+
+        pubLen = (word32)sizeof(pub);
+        ExpectIntEQ(wc_SlhDsaKey_ExportPublic(&key, pub, &pubLen), 0);
+        ExpectIntEQ(wc_SlhDsaKey_Init(&vfy, params[i], NULL, INVALID_DEVID),
+            0);
+        ExpectIntEQ(wc_SlhDsaKey_ImportPublic(&vfy, pub, pubLen), 0);
+        ExpectIntEQ(wc_SlhDsaKey_Verify(&vfy, NULL, 0, msg, sizeof(msg), sig,
+            sigLen), 0);
+
+        XFREE(sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        sig = NULL;
+        wc_SlhDsaKey_Free(&vfy);
+        wc_SlhDsaKey_Free(&key);
+        ran++;
+    }
+
+    wc_FreeRng(&rng);
+    test_slhdsa_hash_dev_stop();
+    if (EXPECT_SUCCESS() && (ran == 0)) {
+        return TEST_SKIPPED;
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
 #if defined(WOLFSSL_HAVE_SLHDSA) && !defined(WOLFSSL_SLHDSA_VERIFY_ONLY) && \
     defined(WOLFSSL_SLHDSA_SHA2) && defined(WOLF_CRYPTO_CB) && \
     !defined(WOLF_CRYPTO_CB_ONLY_SLHDSA) && \

@@ -56,6 +56,7 @@ int test_slhdsa_cb_free(void);
 int test_wc_slhdsa_sign_refused_save_clears_sig(void);
 int test_wc_slhdsa_make_key_id_dev(void);
 int test_wc_slhdsa_hash_sw(void);
+int test_wc_slhdsa_hash_devid(void);
 int test_wc_slhdsa_sha2_cb_only(void);
 
 #define TEST_SLHDSA_DECLS                                                      \
@@ -91,6 +92,7 @@ int test_wc_slhdsa_sha2_cb_only(void);
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_sign_refused_save_clears_sig),    \
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_make_key_id_dev),                 \
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_hash_sw),                         \
+    TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_hash_devid),                      \
     TEST_DECL_GROUP("slhdsa", test_wc_slhdsa_sha2_cb_only)
 
 #endif /* WOLFCRYPT_TEST_SLHDSA_H */
