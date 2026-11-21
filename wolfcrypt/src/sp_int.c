@@ -8136,30 +8136,28 @@ static int _sp_submod(const sp_int* a, const sp_int* b, const sp_int* m,
     unsigned int used = ((a->used >= m->used) ?
         ((a->used >= b->used) ? (a->used + 1U) : (b->used + 1U)) :
         ((b->used >= m->used)) ? (b->used + 1U) : (m->used + 1U));
-    DECL_SP_INT(t0, used);
-    DECL_SP_INT(t1, used);
+    DECL_SP_INT_ARRAY(t, used, 2);
 
-    ALLOC_SP_INT_SIZE(t0, used, err, NULL);
-    ALLOC_SP_INT_SIZE(t1, used, err, NULL);
+    ALLOC_SP_INT_ARRAY(t, used, 2, err, NULL);
     if (err == MP_OKAY) {
         /* Reduce a to less than m. */
         if (_sp_cmp(a, m) != MP_LT) {
-            err = sp_mod(a, m, t0);
-            a = t0;
+            err = sp_mod(a, m, t[0]);
+            a = t[0];
         }
     }
     if (err == MP_OKAY) {
         /* Reduce b to less than m. */
         if (_sp_cmp(b, m) != MP_LT) {
-            err = sp_mod(b, m, t1);
-            b = t1;
+            err = sp_mod(b, m, t[1]);
+            b = t[1];
         }
     }
     if (err == MP_OKAY) {
         /* Add m to a if a smaller than b. */
         if (_sp_cmp(a, b) == MP_LT) {
-            err = sp_add(a, m, t0);
-            a = t0;
+            err = sp_add(a, m, t[0]);
+            a = t[0];
         }
     }
     if (err == MP_OKAY) {
@@ -8167,8 +8165,7 @@ static int _sp_submod(const sp_int* a, const sp_int* b, const sp_int* m,
         err = sp_sub(a, b, r);
     }
 
-    FREE_SP_INT(t0, NULL);
-    FREE_SP_INT(t1, NULL);
+    FREE_SP_INT_ARRAY(t, NULL);
 #else /* WOLFSSL_SP_INT_NEGATIVE */
     sp_size_t used = (sp_size_t)((a->used >= b->used) ? a->used + 1 :
                                                         b->used + 1);
@@ -9379,6 +9376,33 @@ int sp_mod(const sp_int* a, const sp_int* m, sp_int* r)
  * File sp_mul.c contains code.
  */
 
+/* Move the operand that r aliases up by the other operand's length, so each
+ * result digit is written after the last read of the digit it replaces.
+ *
+ * @param [in]      a   SP integer to multiply.
+ * @param [in]      b   SP integer to multiply by.
+ * @param [in, out] r   SP integer to hold result.
+ * @param [out]     ad  Digits of a to read.
+ * @param [out]     bd  Digits of b to read.
+ */
+static void _sp_mul_move_alias(const sp_int* a, const sp_int* b, sp_int* r,
+    const sp_int_digit** ad, const sp_int_digit** bd)
+{
+    *ad = a->dp;
+    *bd = b->dp;
+    if (r == a) {
+        XMEMMOVE(r->dp + b->used, r->dp, a->used * sizeof(sp_int_digit));
+        *ad = r->dp + b->used;
+        if (r == b) {
+            *bd = *ad;
+        }
+    }
+    else if (r == b) {
+        XMEMMOVE(r->dp + a->used, r->dp, b->used * sizeof(sp_int_digit));
+        *bd = r->dp + a->used;
+    }
+}
+
 #ifdef SQR_MUL_ASM
 /* Multiply a by b into r where a and b have same number of digits. r = a * b
  *
@@ -9388,73 +9412,54 @@ int sp_mod(const sp_int* a, const sp_int* m, sp_int* r)
  * @param [in]  b  SP integer to multiply by.
  * @param [out] r  SP integer to hold result.
  *
- * @return  MP_OKAY otherwise.
- * @return  MP_MEM when dynamic memory allocation fails.
+ * @return  MP_OKAY on success.
  */
 static int _sp_mul_nxn(const sp_int* a, const sp_int* b, sp_int* r)
 {
-    int err = MP_OKAY;
     unsigned int i;
     int j;
     unsigned int k;
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    sp_int_digit* t = NULL;
-#elif defined(WOLFSSL_SP_DYN_STACK)
-    sp_int_digit t[a->used];
-#else
-    sp_int_digit t[SP_INT_DIGITS / 2];
-#endif
+    sp_int_digit l;
+    sp_int_digit h;
+    sp_int_digit o;
+    const sp_int_digit* dp;
+    const sp_int_digit* ad;
+    const sp_int_digit* bd;
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) * a->used, NULL,
-        DYNAMIC_TYPE_BIGINT);
-    if (t == NULL) {
-        err = MP_MEM;
-    }
-#endif
-    if (err == MP_OKAY) {
-        sp_int_digit l;
-        sp_int_digit h;
-        sp_int_digit o;
-        const sp_int_digit* dp;
+    _sp_mul_move_alias(a, b, r, &ad, &bd);
 
-        h = 0;
-        l = 0;
-        SP_ASM_MUL(h, l, a->dp[0], b->dp[0]);
-        t[0] = h;
-        h = 0;
-        o = 0;
-        for (k = 1; k <= (unsigned int)a->used - 1; k++) {
-            j = (int)k;
-            dp = a->dp;
-            for (; j >= 0; dp++, j--) {
-                SP_ASM_MUL_ADD(l, h, o, dp[0], b->dp[j]);
-            }
-            t[k] = l;
-            l = h;
-            h = o;
-            o = 0;
-        }
-        for (; k <= ((unsigned int)a->used - 1) * 2; k++) {
-            i = k - (sp_size_t)(b->used - 1);
-            dp = &b->dp[b->used - 1];
-            for (; i < a->used; i++, dp--) {
-                SP_ASM_MUL_ADD(l, h, o, a->dp[i], dp[0]);
-            }
-            r->dp[k] = l;
-            l = h;
-            h = o;
-            o = 0;
+    h = 0;
+    l = 0;
+    SP_ASM_MUL(h, l, ad[0], bd[0]);
+    r->dp[0] = h;
+    h = 0;
+    o = 0;
+    for (k = 1; k <= (unsigned int)a->used - 1; k++) {
+        j = (int)k;
+        dp = ad;
+        for (; j >= 0; dp++, j--) {
+            SP_ASM_MUL_ADD(l, h, o, dp[0], bd[j]);
         }
         r->dp[k] = l;
-        XMEMCPY(r->dp, t, a->used * sizeof(sp_int_digit));
-        r->used = (sp_size_t)(k + 1);
+        l = h;
+        h = o;
+        o = 0;
     }
+    for (; k <= ((unsigned int)a->used - 1) * 2; k++) {
+        i = k - (sp_size_t)(b->used - 1);
+        dp = &bd[b->used - 1];
+        for (; i < a->used; i++, dp--) {
+            SP_ASM_MUL_ADD(l, h, o, ad[i], dp[0]);
+        }
+        r->dp[k] = l;
+        l = h;
+        h = o;
+        o = 0;
+    }
+    r->dp[k] = l;
+    r->used = (sp_size_t)(k + 1);
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
-#endif
-    return err;
+    return MP_OKAY;
 }
 
 /* Multiply a by b into r. r = a * b
@@ -9463,72 +9468,53 @@ static int _sp_mul_nxn(const sp_int* a, const sp_int* b, sp_int* r)
  * @param [in]  b  SP integer to multiply by.
  * @param [out] r  SP integer to hold result.
  *
- * @return  MP_OKAY otherwise.
- * @return  MP_MEM when dynamic memory allocation fails.
+ * @return  MP_OKAY on success.
  */
 static int _sp_mul(const sp_int* a, const sp_int* b, sp_int* r)
 {
-    int err = MP_OKAY;
     sp_size_t i;
     int j;
     sp_size_t k;
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    sp_int_digit* t = NULL;
-#elif defined(WOLFSSL_SP_DYN_STACK)
-    sp_int_digit t[a->used + b->used];
-#else
-    sp_int_digit t[SP_INT_DIGITS];
-#endif
+    sp_int_digit l;
+    sp_int_digit h;
+    sp_int_digit o;
+    const sp_int_digit* ad;
+    const sp_int_digit* bd;
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) *
-        (size_t)(a->used + b->used), NULL, DYNAMIC_TYPE_BIGINT);
-    if (t == NULL) {
-        err = MP_MEM;
-    }
-#endif
-    if (err == MP_OKAY) {
-        sp_int_digit l;
-        sp_int_digit h;
-        sp_int_digit o;
+    _sp_mul_move_alias(a, b, r, &ad, &bd);
 
-        h = 0;
-        l = 0;
-        SP_ASM_MUL(h, l, a->dp[0], b->dp[0]);
-        t[0] = h;
-        h = 0;
+    h = 0;
+    l = 0;
+    SP_ASM_MUL(h, l, ad[0], bd[0]);
+    r->dp[0] = h;
+    h = 0;
+    o = 0;
+    for (k = 1; k <= (sp_size_t)(b->used - 1); k++) {
+        i = 0;
+        j = (int)k;
+        for (; (i < a->used) && (j >= 0); i++, j--) {
+            SP_ASM_MUL_ADD(l, h, o, ad[i], bd[j]);
+        }
+        r->dp[k] = l;
+        l = h;
+        h = o;
         o = 0;
-        for (k = 1; k <= (sp_size_t)(b->used - 1); k++) {
-            i = 0;
-            j = (int)k;
-            for (; (i < a->used) && (j >= 0); i++, j--) {
-                SP_ASM_MUL_ADD(l, h, o, a->dp[i], b->dp[j]);
-            }
-            t[k] = l;
-            l = h;
-            h = o;
-            o = 0;
-        }
-        for (; k <= (sp_size_t)((a->used - 1) + (b->used - 1)); k++) {
-            j = (int)(b->used - 1);
-            i = (sp_size_t)(k - (sp_size_t)j);
-            for (; (i < a->used) && (j >= 0); i++, j--) {
-                SP_ASM_MUL_ADD(l, h, o, a->dp[i], b->dp[j]);
-            }
-            t[k] = l;
-            l = h;
-            h = o;
-            o = 0;
-        }
-        t[k] = l;
-        r->used = (sp_size_t)(k + 1);
-        XMEMCPY(r->dp, t, r->used * sizeof(sp_int_digit));
     }
+    for (; k <= (sp_size_t)((a->used - 1) + (b->used - 1)); k++) {
+        j = (int)(b->used - 1);
+        i = (sp_size_t)(k - (sp_size_t)j);
+        for (; (i < a->used) && (j >= 0); i++, j--) {
+            SP_ASM_MUL_ADD(l, h, o, ad[i], bd[j]);
+        }
+        r->dp[k] = l;
+        l = h;
+        h = o;
+        o = 0;
+    }
+    r->dp[k] = l;
+    r->used = (sp_size_t)(k + 1);
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
-#endif
-    return err;
+    return MP_OKAY;
 }
 #else
 /* Multiply a by b into r. r = a * b
@@ -9537,85 +9523,71 @@ static int _sp_mul(const sp_int* a, const sp_int* b, sp_int* r)
  * @param [in]  b  SP integer to multiply by.
  * @param [out] r  SP integer to hold result.
  *
- * @return  MP_OKAY otherwise.
- * @return  MP_MEM when dynamic memory allocation fails.
+ * @return  MP_OKAY on success.
  */
 static int _sp_mul(const sp_int* a, const sp_int* b, sp_int* r)
 {
-    int err = MP_OKAY;
     sp_size_t i;
     int j;
     sp_size_t k;
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    sp_int_digit* t = NULL;
-#elif defined(WOLFSSL_SP_DYN_STACK)
-    sp_int_digit t[a->used + b->used];
-#else
-    sp_int_digit t[SP_INT_DIGITS];
+    sp_int_word w;
+    sp_int_word l;
+    sp_int_word h;
+#ifdef SP_WORD_OVERFLOW
+    sp_int_word o;
 #endif
+    const sp_int_digit* ad;
+    const sp_int_digit* bd;
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) *
-        (size_t)(a->used + b->used), NULL, DYNAMIC_TYPE_BIGINT);
-    if (t == NULL) {
-        err = MP_MEM;
-    }
+    _sp_mul_move_alias(a, b, r, &ad, &bd);
+
+    w = (sp_int_word)ad[0] * bd[0];
+    r->dp[0] = (sp_int_digit)w;
+    l = (sp_int_digit)(w >> SP_WORD_SIZE);
+    h = 0;
+#ifdef SP_WORD_OVERFLOW
+    o = 0;
 #endif
-    if (err == MP_OKAY) {
-        sp_int_word w;
-        sp_int_word l;
-        sp_int_word h;
-    #ifdef SP_WORD_OVERFLOW
-        sp_int_word o;
-    #endif
-
-        w = (sp_int_word)a->dp[0] * b->dp[0];
-        t[0] = (sp_int_digit)w;
-        l = (sp_int_digit)(w >> SP_WORD_SIZE);
-        h = 0;
-    #ifdef SP_WORD_OVERFLOW
-        o = 0;
-    #endif
-        for (k = 1; (int)k <= ((int)a->used - 1) + ((int)b->used - 1); k++) {
-            i = (sp_size_t)(k - (b->used - 1));
-            i &= (sp_size_t)(((unsigned int)i >> (sizeof(i) * 8 - 1)) - 1U);
-            j = (int)(k - i);
-            for (; (i < a->used) && (j >= 0); i++, j--) {
-                w = (sp_int_word)a->dp[i] * b->dp[j];
-                l += (sp_int_digit)w;
-                h += (sp_int_digit)(w >> SP_WORD_SIZE);
-            #ifdef SP_WORD_OVERFLOW
-                h += (sp_int_digit)(l >> SP_WORD_SIZE);
-                l &= SP_MASK;
-                o += (sp_int_digit)(h >> SP_WORD_SIZE);
-                h &= SP_MASK;
-            #endif
-            }
-            t[k] = (sp_int_digit)l;
-            l >>= SP_WORD_SIZE;
-            l += (sp_int_digit)h;
-            h >>= SP_WORD_SIZE;
+    for (k = 1; (int)k <= ((int)a->used - 1) + ((int)b->used - 1); k++) {
+        i = (sp_size_t)(k - (b->used - 1));
+        i &= (sp_size_t)(((unsigned int)i >> (sizeof(i) * 8 - 1)) - 1U);
+        j = (int)(k - i);
+        for (; (i < a->used) && (j >= 0); i++, j--) {
+            w = (sp_int_word)ad[i] * bd[j];
+            l += (sp_int_digit)w;
+            h += (sp_int_digit)(w >> SP_WORD_SIZE);
         #ifdef SP_WORD_OVERFLOW
-            h += o & SP_MASK;
-            o >>= SP_WORD_SIZE;
+            h += (sp_int_digit)(l >> SP_WORD_SIZE);
+            l &= SP_MASK;
+            o += (sp_int_digit)(h >> SP_WORD_SIZE);
+            h &= SP_MASK;
         #endif
         }
-        t[k] = (sp_int_digit)l;
-        r->used = (sp_size_t)(k + 1);
-        XMEMCPY(r->dp, t, r->used * sizeof(sp_int_digit));
+        r->dp[k] = (sp_int_digit)l;
+        l >>= SP_WORD_SIZE;
+        l += (sp_int_digit)h;
+        h >>= SP_WORD_SIZE;
+    #ifdef SP_WORD_OVERFLOW
+        h += o & SP_MASK;
+        o >>= SP_WORD_SIZE;
+    #endif
     }
+    r->dp[k] = (sp_int_digit)l;
+    r->used = (sp_size_t)(k + 1);
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
-#endif
-    return err;
+    return MP_OKAY;
 }
+#endif
+
+#if (SP_WORD_SIZE == 64 && SP_INT_BITS >= 256) && (defined(SQR_MUL_ASM) || \
+    !defined(WOLFSSL_SMALL_STACK) || defined(WOLFSSL_SP_NO_MALLOC))
+    #define SP_INT_MUL_SQR_4
 #endif
 
 #ifndef WOLFSSL_SP_SMALL
 #if defined(HAVE_ECC) && (!defined(WOLFSSL_HAVE_SP_ECC) || \
     defined(WOLFSSL_SP_MATH_ALL))
-#if (SP_WORD_SIZE == 64 && SP_INT_BITS >= 256)
+#ifdef SP_INT_MUL_SQR_4
 #ifndef SQR_MUL_ASM
 /* Multiply a by b and store in r: r = a * b
  *
@@ -9626,113 +9598,94 @@ static int _sp_mul(const sp_int* a, const sp_int* b, sp_int* r)
  * @param [out] r  SP integer result.
  *
  * @return  MP_OKAY on success.
- * @return  MP_MEM when dynamic memory allocation fails.
  */
 static int _sp_mul_4(const sp_int* a, const sp_int* b, sp_int* r)
 {
-    int err = MP_OKAY;
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    sp_int_word* w = NULL;
-#else
     sp_int_word w[16];
-#endif
     const sp_int_digit* da = a->dp;
     const sp_int_digit* db = b->dp;
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    w = (sp_int_word*)XMALLOC(sizeof(sp_int_word) * 16, NULL,
-        DYNAMIC_TYPE_BIGINT);
-    if (w == NULL) {
-        err = MP_MEM;
-    }
-#endif
+    w[0] = (sp_int_word)da[0] * db[0];
+    w[1] = (sp_int_word)da[0] * db[1];
+    w[2] = (sp_int_word)da[1] * db[0];
+    w[3] = (sp_int_word)da[0] * db[2];
+    w[4] = (sp_int_word)da[1] * db[1];
+    w[5] = (sp_int_word)da[2] * db[0];
+    w[6] = (sp_int_word)da[0] * db[3];
+    w[7] = (sp_int_word)da[1] * db[2];
+    w[8] = (sp_int_word)da[2] * db[1];
+    w[9] = (sp_int_word)da[3] * db[0];
+    w[10] = (sp_int_word)da[1] * db[3];
+    w[11] = (sp_int_word)da[2] * db[2];
+    w[12] = (sp_int_word)da[3] * db[1];
+    w[13] = (sp_int_word)da[2] * db[3];
+    w[14] = (sp_int_word)da[3] * db[2];
+    w[15] = (sp_int_word)da[3] * db[3];
 
-    if (err == MP_OKAY) {
-        w[0] = (sp_int_word)da[0] * db[0];
-        w[1] = (sp_int_word)da[0] * db[1];
-        w[2] = (sp_int_word)da[1] * db[0];
-        w[3] = (sp_int_word)da[0] * db[2];
-        w[4] = (sp_int_word)da[1] * db[1];
-        w[5] = (sp_int_word)da[2] * db[0];
-        w[6] = (sp_int_word)da[0] * db[3];
-        w[7] = (sp_int_word)da[1] * db[2];
-        w[8] = (sp_int_word)da[2] * db[1];
-        w[9] = (sp_int_word)da[3] * db[0];
-        w[10] = (sp_int_word)da[1] * db[3];
-        w[11] = (sp_int_word)da[2] * db[2];
-        w[12] = (sp_int_word)da[3] * db[1];
-        w[13] = (sp_int_word)da[2] * db[3];
-        w[14] = (sp_int_word)da[3] * db[2];
-        w[15] = (sp_int_word)da[3] * db[3];
+    r->dp[0] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[1];
+    w[0] += (sp_int_digit)w[2];
+    r->dp[1] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[1] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[1];
+    w[2] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[2];
+    w[0] += (sp_int_digit)w[3];
+    w[0] += (sp_int_digit)w[4];
+    w[0] += (sp_int_digit)w[5];
+    r->dp[2] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[3] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[3];
+    w[4] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[4];
+    w[5] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[5];
+    w[0] += (sp_int_digit)w[6];
+    w[0] += (sp_int_digit)w[7];
+    w[0] += (sp_int_digit)w[8];
+    w[0] += (sp_int_digit)w[9];
+    r->dp[3] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[6] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[6];
+    w[7] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[7];
+    w[8] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[8];
+    w[9] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[9];
+    w[0] += (sp_int_digit)w[10];
+    w[0] += (sp_int_digit)w[11];
+    w[0] += (sp_int_digit)w[12];
+    r->dp[4] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[10] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[10];
+    w[11] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[11];
+    w[12] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[12];
+    w[0] += (sp_int_digit)w[13];
+    w[0] += (sp_int_digit)w[14];
+    r->dp[5] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[13] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[13];
+    w[14] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[14];
+    w[0] += (sp_int_digit)w[15];
+    r->dp[6] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[15] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[15];
+    r->dp[7] = (sp_int_digit)w[0];
 
-        r->dp[0] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[1];
-        w[0] += (sp_int_digit)w[2];
-        r->dp[1] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[1] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[1];
-        w[2] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[2];
-        w[0] += (sp_int_digit)w[3];
-        w[0] += (sp_int_digit)w[4];
-        w[0] += (sp_int_digit)w[5];
-        r->dp[2] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[3] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[3];
-        w[4] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[4];
-        w[5] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[5];
-        w[0] += (sp_int_digit)w[6];
-        w[0] += (sp_int_digit)w[7];
-        w[0] += (sp_int_digit)w[8];
-        w[0] += (sp_int_digit)w[9];
-        r->dp[3] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[6] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[6];
-        w[7] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[7];
-        w[8] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[8];
-        w[9] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[9];
-        w[0] += (sp_int_digit)w[10];
-        w[0] += (sp_int_digit)w[11];
-        w[0] += (sp_int_digit)w[12];
-        r->dp[4] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[10] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[10];
-        w[11] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[11];
-        w[12] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[12];
-        w[0] += (sp_int_digit)w[13];
-        w[0] += (sp_int_digit)w[14];
-        r->dp[5] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[13] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[13];
-        w[14] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[14];
-        w[0] += (sp_int_digit)w[15];
-        r->dp[6] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[15] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[15];
-        r->dp[7] = (sp_int_digit)w[0];
+    r->used = 8;
 
-        r->used = 8;
-    }
-
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    XFREE(w, NULL, DYNAMIC_TYPE_BIGINT);
-#endif
-    return err;
+    return MP_OKAY;
 }
 #else /* SQR_MUL_ASM */
 /* Multiply a by b and store in r: r = a * b
@@ -9798,7 +9751,7 @@ static int _sp_mul_4(const sp_int* a, const sp_int* b, sp_int* r)
     return MP_OKAY;
 }
 #endif /* SQR_MUL_ASM */
-#endif /* SP_WORD_SIZE == 64 */
+#endif /* SP_INT_MUL_SQR_4 */
 #if (SP_WORD_SIZE == 64 && SP_INT_BITS >= 384)
 #ifdef SQR_MUL_ASM
 /* Multiply a by b and store in r: r = a * b
@@ -10335,11 +10288,16 @@ static int _sp_mul_16(const sp_int* a, const sp_int* b, sp_int* r)
 #endif
 
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-     t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) * 16, NULL,
-         DYNAMIC_TYPE_BIGINT);
-     if (t == NULL) {
-         err = MP_MEM;
-     }
+    if ((r == a) || (r == b)) {
+        t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) * 16, NULL,
+            DYNAMIC_TYPE_BIGINT);
+        if (t == NULL) {
+            err = MP_MEM;
+        }
+    }
+    else {
+        t = r->dp;
+    }
 #endif
     if (err == MP_OKAY) {
         SP_ASM_MUL(h, l, a->dp[0], b->dp[0]);
@@ -10717,12 +10675,16 @@ static int _sp_mul_16(const sp_int* a, const sp_int* b, sp_int* r)
         SP_ASM_MUL_ADD_NO(l, h, a->dp[15], b->dp[15]);
         r->dp[30] = l;
         r->dp[31] = h;
-        XMEMCPY(r->dp, t, 16 * sizeof(sp_int_digit));
+        if (t != r->dp) {
+            XMEMCPY(r->dp, t, 16 * sizeof(sp_int_digit));
+        }
         r->used = 32;
     }
 
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
+    if (t != r->dp) {
+        XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
+    }
 #endif
     return err;
 }
@@ -10756,11 +10718,16 @@ static int _sp_mul_24(const sp_int* a, const sp_int* b, sp_int* r)
 #endif
 
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-     t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) * 24, NULL,
-         DYNAMIC_TYPE_BIGINT);
-     if (t == NULL) {
-         err = MP_MEM;
-     }
+    if ((r == a) || (r == b)) {
+        t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) * 24, NULL,
+            DYNAMIC_TYPE_BIGINT);
+        if (t == NULL) {
+            err = MP_MEM;
+        }
+    }
+    else {
+        t = r->dp;
+    }
 #endif
     if (err == MP_OKAY) {
         SP_ASM_MUL(h, l, a->dp[0], b->dp[0]);
@@ -11522,12 +11489,16 @@ static int _sp_mul_24(const sp_int* a, const sp_int* b, sp_int* r)
         SP_ASM_MUL_ADD_NO(l, h, a->dp[23], b->dp[23]);
         r->dp[46] = l;
         r->dp[47] = h;
-        XMEMCPY(r->dp, t, 24 * sizeof(sp_int_digit));
+        if (t != r->dp) {
+            XMEMCPY(r->dp, t, 24 * sizeof(sp_int_digit));
+        }
         r->used = 48;
     }
 
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
+    if (t != r->dp) {
+        XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
+    }
 #endif
     return err;
 }
@@ -12242,12 +12213,12 @@ static int _sp_mul_nc(const sp_int* a, const sp_int* b, sp_int* r)
 #ifndef WOLFSSL_SP_SMALL
 #if defined(HAVE_ECC) && (!defined(WOLFSSL_HAVE_SP_ECC) || \
     defined(WOLFSSL_SP_MATH_ALL))
-#if (SP_WORD_SIZE == 64 && SP_INT_BITS >= 256)
+#ifdef SP_INT_MUL_SQR_4
     if ((a->used == 4) && (b->used == 4)) {
         err = _sp_mul_4(a, b, r);
     }
     else
-#endif /* SP_WORD_SIZE == 64 */
+#endif /* SP_INT_MUL_SQR_4 */
 #if (SP_WORD_SIZE == 64 && SP_INT_BITS >= 384)
 #ifdef SQR_MUL_ASM
     if ((a->used == 6) && (b->used == 6)) {
@@ -15444,70 +15415,54 @@ int sp_mul_2d(const sp_int* a, int e, sp_int* r)
  * @param [out] r  SP integer result.
  *
  * @return  MP_OKAY on success.
- * @return  MP_MEM when dynamic memory allocation fails.
  */
 static int _sp_sqr(const sp_int* a, sp_int* r)
 {
-    int err = MP_OKAY;
     sp_size_t i;
     int j;
     sp_size_t k;
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    sp_int_digit* t = NULL;
-#elif defined(WOLFSSL_SP_DYN_STACK)
-    sp_int_digit t[((a->used + 1) / 2) * 2 + 1];
-#else
-    sp_int_digit t[(SP_INT_DIGITS + 1) / 2 + 1];
-#endif
+    sp_int_digit l;
+    sp_int_digit h;
+    sp_int_digit o;
+    const sp_int_digit* ad = a->dp;
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    t = (sp_int_digit*)XMALLOC(
-        sizeof(sp_int_digit) * (size_t)(((a->used + 1) / 2) * 2 + 1), NULL,
-        DYNAMIC_TYPE_BIGINT);
-    if (t == NULL) {
-        err = MP_MEM;
+    if (r == a) {
+        XMEMMOVE(r->dp + a->used, r->dp, a->used * sizeof(sp_int_digit));
+        ad = r->dp + a->used;
     }
-#endif
-    if ((err == MP_OKAY) && (a->used <= 1)) {
-        sp_int_digit l;
-        sp_int_digit h;
 
+    if (a->used <= 1) {
         h = 0;
         l = 0;
-        SP_ASM_SQR(h, l, a->dp[0]);
+        SP_ASM_SQR(h, l, ad[0]);
         r->dp[0] = h;
         r->dp[1] = l;
     }
-    else if (err == MP_OKAY) {
-        sp_int_digit l;
-        sp_int_digit h;
-        sp_int_digit o;
-        sp_int_digit* p = t;
-
+    else {
         h = 0;
         l = 0;
-        SP_ASM_SQR(h, l, a->dp[0]);
-        t[0] = h;
+        SP_ASM_SQR(h, l, ad[0]);
+        r->dp[0] = h;
         h = 0;
         o = 0;
         for (k = 1; k < (sp_size_t)((a->used + 1) / 2); k++) {
             i = k;
             j = (int)(k - 1);
             for (; (j >= 0); i++, j--) {
-                SP_ASM_MUL_ADD2(l, h, o, a->dp[i], a->dp[j]);
+                SP_ASM_MUL_ADD2(l, h, o, ad[i], ad[j]);
             }
-            t[k * 2 - 1] = l;
+            r->dp[k * 2 - 1] = l;
             l = h;
             h = o;
             o = 0;
 
-            SP_ASM_SQR_ADD(l, h, o, a->dp[k]);
+            SP_ASM_SQR_ADD(l, h, o, ad[k]);
             i = (sp_size_t)(k + 1);
             j = (int)(k - 1);
             for (; (j >= 0); i++, j--) {
-                SP_ASM_MUL_ADD2(l, h, o, a->dp[i], a->dp[j]);
+                SP_ASM_MUL_ADD2(l, h, o, ad[i], ad[j]);
             }
-            t[k * 2] = l;
+            r->dp[k * 2] = l;
             l = h;
             h = o;
             o = 0;
@@ -15516,39 +15471,30 @@ static int _sp_sqr(const sp_int* a, sp_int* r)
             i = k;
             j = (int)(k - 1);
             for (; (i < a->used); i++, j--) {
-                SP_ASM_MUL_ADD2(l, h, o, a->dp[i], a->dp[j]);
+                SP_ASM_MUL_ADD2(l, h, o, ad[i], ad[j]);
             }
-            p[k * 2 - 1] = l;
+            r->dp[k * 2 - 1] = l;
             l = h;
             h = o;
             o = 0;
 
-            SP_ASM_SQR_ADD(l, h, o, a->dp[k]);
+            SP_ASM_SQR_ADD(l, h, o, ad[k]);
             i = (sp_size_t)(k + 1);
             j = (int)(k - 1);
             for (; (i < a->used); i++, j--) {
-                SP_ASM_MUL_ADD2(l, h, o, a->dp[i], a->dp[j]);
+                SP_ASM_MUL_ADD2(l, h, o, ad[i], ad[j]);
             }
-            p[k * 2] = l;
+            r->dp[k * 2] = l;
             l = h;
             h = o;
             o = 0;
-
-            p = r->dp;
         }
         r->dp[k * 2 - 1] = l;
-        XMEMCPY(r->dp, t, (size_t)(((a->used + 1) / 2) * 2 + 1) *
-            sizeof(sp_int_digit));
     }
 
-    if (err == MP_OKAY) {
-        r->used = (sp_size_t)(a->used * 2U);
-    }
+    r->used = (sp_size_t)(a->used * 2U);
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
-#endif
-    return err;
+    return MP_OKAY;
 }
 #else /* !SQR_MUL_ASM */
 /* Square a and store in r. r = a * a
@@ -15557,101 +15503,84 @@ static int _sp_sqr(const sp_int* a, sp_int* r)
  * @param [out] r  SP integer result.
  *
  * @return  MP_OKAY on success.
- * @return  MP_MEM when dynamic memory allocation fails.
  */
 static int _sp_sqr(const sp_int* a, sp_int* r)
 {
-    int err = MP_OKAY;
     sp_size_t i;
     int j;
     sp_size_t k;
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    sp_int_digit* t = NULL;
-#elif defined(WOLFSSL_SP_DYN_STACK)
-    sp_int_digit t[a->used * 2];
+#ifndef WOLFSSL_SP_INT_SQR_VOLATILE
+    sp_int_word w;
+    sp_int_word l;
+    sp_int_word h;
 #else
-    sp_int_digit t[SP_INT_DIGITS];
+    volatile sp_int_word w;
+    volatile sp_int_word l;
+    volatile sp_int_word h;
 #endif
+#ifdef SP_WORD_OVERFLOW
+    sp_int_word o;
+#endif
+    const sp_int_digit* ad = a->dp;
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) * (size_t)(a->used * 2),
-        NULL, DYNAMIC_TYPE_BIGINT);
-    if (t == NULL) {
-        err = MP_MEM;
+    if (r == a) {
+        XMEMMOVE(r->dp + a->used, r->dp, a->used * sizeof(sp_int_digit));
+        ad = r->dp + a->used;
     }
-#endif
-    if (err == MP_OKAY) {
-    #ifndef WOLFSSL_SP_INT_SQR_VOLATILE
-        sp_int_word w;
-        sp_int_word l;
-        sp_int_word h;
-    #else
-        volatile sp_int_word w;
-        volatile sp_int_word l;
-        volatile sp_int_word h;
-    #endif
-    #ifdef SP_WORD_OVERFLOW
-        sp_int_word o;
-    #endif
 
-        w = (sp_int_word)a->dp[0] * a->dp[0];
-        t[0] = (sp_int_digit)w;
-        l = (sp_int_digit)(w >> SP_WORD_SIZE);
-        h = 0;
-    #ifdef SP_WORD_OVERFLOW
-        o = 0;
-    #endif
-        for (k = 1; k <= (sp_size_t)((a->used - 1) * 2); k++) {
-            i = k / 2;
-            j = (int)(k - i);
-            if (i == (unsigned int)j) {
-                w = (sp_int_word)a->dp[i] * a->dp[j];
-                l += (sp_int_digit)w;
-                h += (sp_int_digit)(w >> SP_WORD_SIZE);
-            #ifdef SP_WORD_OVERFLOW
-                h += (sp_int_digit)(l >> SP_WORD_SIZE);
-                l &= SP_MASK;
-                o += (sp_int_digit)(h >> SP_WORD_SIZE);
-                h &= SP_MASK;
-            #endif
-            }
-            for (++i, --j; (i < a->used) && (j >= 0); i++, j--) {
-                w = (sp_int_word)a->dp[i] * a->dp[j];
-                l += (sp_int_digit)w;
-                h += (sp_int_digit)(w >> SP_WORD_SIZE);
-            #ifdef SP_WORD_OVERFLOW
-                h += (sp_int_digit)(l >> SP_WORD_SIZE);
-                l &= SP_MASK;
-                o += (sp_int_digit)(h >> SP_WORD_SIZE);
-                h &= SP_MASK;
-            #endif
-                l += (sp_int_digit)w;
-                h += (sp_int_digit)(w >> SP_WORD_SIZE);
-            #ifdef SP_WORD_OVERFLOW
-                h += (sp_int_digit)(l >> SP_WORD_SIZE);
-                l &= SP_MASK;
-                o += (sp_int_digit)(h >> SP_WORD_SIZE);
-                h &= SP_MASK;
-            #endif
-            }
-            t[k] = (sp_int_digit)l;
-            l >>= SP_WORD_SIZE;
-            l += (sp_int_digit)h;
-            h >>= SP_WORD_SIZE;
+    w = (sp_int_word)ad[0] * ad[0];
+    r->dp[0] = (sp_int_digit)w;
+    l = (sp_int_digit)(w >> SP_WORD_SIZE);
+    h = 0;
+#ifdef SP_WORD_OVERFLOW
+    o = 0;
+#endif
+    for (k = 1; k <= (sp_size_t)((a->used - 1) * 2); k++) {
+        i = k / 2;
+        j = (int)(k - i);
+        if (i == (unsigned int)j) {
+            w = (sp_int_word)ad[i] * ad[j];
+            l += (sp_int_digit)w;
+            h += (sp_int_digit)(w >> SP_WORD_SIZE);
         #ifdef SP_WORD_OVERFLOW
-            h += o & SP_MASK;
-            o >>= SP_WORD_SIZE;
+            h += (sp_int_digit)(l >> SP_WORD_SIZE);
+            l &= SP_MASK;
+            o += (sp_int_digit)(h >> SP_WORD_SIZE);
+            h &= SP_MASK;
         #endif
         }
-        t[k] = (sp_int_digit)l;
-        r->used = (sp_size_t)(k + 1);
-        XMEMCPY(r->dp, t, r->used * sizeof(sp_int_digit));
+        for (++i, --j; (i < a->used) && (j >= 0); i++, j--) {
+            w = (sp_int_word)ad[i] * ad[j];
+            l += (sp_int_digit)w;
+            h += (sp_int_digit)(w >> SP_WORD_SIZE);
+        #ifdef SP_WORD_OVERFLOW
+            h += (sp_int_digit)(l >> SP_WORD_SIZE);
+            l &= SP_MASK;
+            o += (sp_int_digit)(h >> SP_WORD_SIZE);
+            h &= SP_MASK;
+        #endif
+            l += (sp_int_digit)w;
+            h += (sp_int_digit)(w >> SP_WORD_SIZE);
+        #ifdef SP_WORD_OVERFLOW
+            h += (sp_int_digit)(l >> SP_WORD_SIZE);
+            l &= SP_MASK;
+            o += (sp_int_digit)(h >> SP_WORD_SIZE);
+            h &= SP_MASK;
+        #endif
+        }
+        r->dp[k] = (sp_int_digit)l;
+        l >>= SP_WORD_SIZE;
+        l += (sp_int_digit)h;
+        h >>= SP_WORD_SIZE;
+    #ifdef SP_WORD_OVERFLOW
+        h += o & SP_MASK;
+        o >>= SP_WORD_SIZE;
+    #endif
     }
+    r->dp[k] = (sp_int_digit)l;
+    r->used = (sp_size_t)(k + 1);
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
-#endif
-    return err;
+    return MP_OKAY;
 }
 #endif /* SQR_MUL_ASM */
 #endif /* !WOLFSSL_SP_MATH || !WOLFSSL_SP_SMALL */
@@ -15659,7 +15588,7 @@ static int _sp_sqr(const sp_int* a, sp_int* r)
 #ifndef WOLFSSL_SP_SMALL
 #if defined(HAVE_ECC) && (!defined(WOLFSSL_HAVE_SP_ECC) || \
     defined(WOLFSSL_SP_MATH_ALL))
-#if (SP_WORD_SIZE == 64 && SP_INT_BITS >= 256)
+#ifdef SP_INT_MUL_SQR_4
 #ifndef SQR_MUL_ASM
 /* Square a and store in r. r = a * a
  *
@@ -15669,101 +15598,81 @@ static int _sp_sqr(const sp_int* a, sp_int* r)
  * @param [out] r  SP integer result.
  *
  * @return  MP_OKAY on success.
- * @return  MP_MEM when dynamic memory allocation fails.
  */
 static int _sp_sqr_4(const sp_int* a, sp_int* r)
 {
-    int err = MP_OKAY;
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    sp_int_word* w = NULL;
-#else
     sp_int_word w[10];
-#endif
     const sp_int_digit* da = a->dp;
 
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    w = (sp_int_word*)XMALLOC(sizeof(sp_int_word) * 10, NULL,
-        DYNAMIC_TYPE_BIGINT);
-    if (w == NULL) {
-        err = MP_MEM;
-    }
-#endif
+    w[0] = (sp_int_word)da[0] * da[0];
+    w[1] = (sp_int_word)da[0] * da[1];
+    w[2] = (sp_int_word)da[0] * da[2];
+    w[3] = (sp_int_word)da[1] * da[1];
+    w[4] = (sp_int_word)da[0] * da[3];
+    w[5] = (sp_int_word)da[1] * da[2];
+    w[6] = (sp_int_word)da[1] * da[3];
+    w[7] = (sp_int_word)da[2] * da[2];
+    w[8] = (sp_int_word)da[2] * da[3];
+    w[9] = (sp_int_word)da[3] * da[3];
 
+    r->dp[0] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[1];
+    w[0] += (sp_int_digit)w[1];
+    r->dp[1] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[1] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[1];
+    w[0] += (sp_int_digit)w[1];
+    w[0] += (sp_int_digit)w[2];
+    w[0] += (sp_int_digit)w[2];
+    w[0] += (sp_int_digit)w[3];
+    r->dp[2] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[2] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[2];
+    w[0] += (sp_int_digit)w[2];
+    w[3] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[3];
+    w[0] += (sp_int_digit)w[4];
+    w[0] += (sp_int_digit)w[4];
+    w[0] += (sp_int_digit)w[5];
+    w[0] += (sp_int_digit)w[5];
+    r->dp[3] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[4] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[4];
+    w[0] += (sp_int_digit)w[4];
+    w[5] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[5];
+    w[0] += (sp_int_digit)w[5];
+    w[0] += (sp_int_digit)w[6];
+    w[0] += (sp_int_digit)w[6];
+    w[0] += (sp_int_digit)w[7];
+    r->dp[4] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[6] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[6];
+    w[0] += (sp_int_digit)w[6];
+    w[7] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[7];
+    w[0] += (sp_int_digit)w[8];
+    w[0] += (sp_int_digit)w[8];
+    r->dp[5] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[8] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[8];
+    w[0] += (sp_int_digit)w[8];
+    w[0] += (sp_int_digit)w[9];
+    r->dp[6] = (sp_int_digit)w[0];
+    w[0] >>= SP_WORD_SIZE;
+    w[9] >>= SP_WORD_SIZE;
+    w[0] += (sp_int_digit)w[9];
+    r->dp[7] = (sp_int_digit)w[0];
 
-    if (err == MP_OKAY) {
-        w[0] = (sp_int_word)da[0] * da[0];
-        w[1] = (sp_int_word)da[0] * da[1];
-        w[2] = (sp_int_word)da[0] * da[2];
-        w[3] = (sp_int_word)da[1] * da[1];
-        w[4] = (sp_int_word)da[0] * da[3];
-        w[5] = (sp_int_word)da[1] * da[2];
-        w[6] = (sp_int_word)da[1] * da[3];
-        w[7] = (sp_int_word)da[2] * da[2];
-        w[8] = (sp_int_word)da[2] * da[3];
-        w[9] = (sp_int_word)da[3] * da[3];
+    r->used = 8;
 
-        r->dp[0] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[1];
-        w[0] += (sp_int_digit)w[1];
-        r->dp[1] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[1] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[1];
-        w[0] += (sp_int_digit)w[1];
-        w[0] += (sp_int_digit)w[2];
-        w[0] += (sp_int_digit)w[2];
-        w[0] += (sp_int_digit)w[3];
-        r->dp[2] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[2] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[2];
-        w[0] += (sp_int_digit)w[2];
-        w[3] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[3];
-        w[0] += (sp_int_digit)w[4];
-        w[0] += (sp_int_digit)w[4];
-        w[0] += (sp_int_digit)w[5];
-        w[0] += (sp_int_digit)w[5];
-        r->dp[3] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[4] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[4];
-        w[0] += (sp_int_digit)w[4];
-        w[5] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[5];
-        w[0] += (sp_int_digit)w[5];
-        w[0] += (sp_int_digit)w[6];
-        w[0] += (sp_int_digit)w[6];
-        w[0] += (sp_int_digit)w[7];
-        r->dp[4] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[6] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[6];
-        w[0] += (sp_int_digit)w[6];
-        w[7] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[7];
-        w[0] += (sp_int_digit)w[8];
-        w[0] += (sp_int_digit)w[8];
-        r->dp[5] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[8] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[8];
-        w[0] += (sp_int_digit)w[8];
-        w[0] += (sp_int_digit)w[9];
-        r->dp[6] = (sp_int_digit)w[0];
-        w[0] >>= SP_WORD_SIZE;
-        w[9] >>= SP_WORD_SIZE;
-        w[0] += (sp_int_digit)w[9];
-        r->dp[7] = (sp_int_digit)w[0];
-
-        r->used = 8;
-    }
-
-#if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    XFREE(w, NULL, DYNAMIC_TYPE_BIGINT);
-#endif
-    return err;
+    return MP_OKAY;
 }
 #else /* SQR_MUL_ASM */
 /* Square a and store in r. r = a * a
@@ -15822,7 +15731,7 @@ static int _sp_sqr_4(const sp_int* a, sp_int* r)
     return MP_OKAY;
 }
 #endif /* SQR_MUL_ASM */
-#endif /* SP_WORD_SIZE == 64 */
+#endif /* SP_INT_MUL_SQR_4 */
 #if (SP_WORD_SIZE == 64 && SP_INT_BITS >= 384)
 #ifdef SQR_MUL_ASM
 /* Square a and store in r. r = a * a
@@ -16293,11 +16202,16 @@ static int _sp_sqr_16(const sp_int* a, sp_int* r)
 #endif
 
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-     t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) * 16, NULL,
-         DYNAMIC_TYPE_BIGINT);
-     if (t == NULL) {
-         err = MP_MEM;
-     }
+    if (r == a) {
+        t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) * 16, NULL,
+            DYNAMIC_TYPE_BIGINT);
+        if (t == NULL) {
+            err = MP_MEM;
+        }
+    }
+    else {
+        t = r->dp;
+    }
 #endif
     if (err == MP_OKAY) {
         SP_ASM_SQR(h, l, a->dp[0]);
@@ -16576,12 +16490,16 @@ static int _sp_sqr_16(const sp_int* a, sp_int* r)
         SP_ASM_SQR_ADD_NO(l, h, a->dp[15]);
         r->dp[30] = l;
         r->dp[31] = h;
-        XMEMCPY(r->dp, t, 16 * sizeof(sp_int_digit));
+        if (t != r->dp) {
+            XMEMCPY(r->dp, t, 16 * sizeof(sp_int_digit));
+        }
         r->used = 32;
     }
 
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
+    if (t != r->dp) {
+        XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
+    }
 #endif
     return err;
 }
@@ -16621,11 +16539,16 @@ static int _sp_sqr_24(const sp_int* a, sp_int* r)
 #endif
 
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-     t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) * 24, NULL,
-         DYNAMIC_TYPE_BIGINT);
-     if (t == NULL) {
-         err = MP_MEM;
-     }
+    if (r == a) {
+        t = (sp_int_digit*)XMALLOC(sizeof(sp_int_digit) * 24, NULL,
+            DYNAMIC_TYPE_BIGINT);
+        if (t == NULL) {
+            err = MP_MEM;
+        }
+    }
+    else {
+        t = r->dp;
+    }
 #endif
     if (err == MP_OKAY) {
         SP_ASM_SQR(h, l, a->dp[0]);
@@ -17148,12 +17071,16 @@ static int _sp_sqr_24(const sp_int* a, sp_int* r)
         SP_ASM_SQR_ADD_NO(l, h, a->dp[23]);
         r->dp[46] = l;
         r->dp[47] = h;
-        XMEMCPY(r->dp, t, 24 * sizeof(sp_int_digit));
+        if (t != r->dp) {
+            XMEMCPY(r->dp, t, 24 * sizeof(sp_int_digit));
+        }
         r->used = 48;
     }
 
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
-    XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
+    if (t != r->dp) {
+        XFREE(t, NULL, DYNAMIC_TYPE_BIGINT);
+    }
 #endif
     return err;
 }
@@ -17736,12 +17663,12 @@ static int _sp_sqr_nc(const sp_int* a, sp_int* r)
 #ifndef WOLFSSL_SP_SMALL
 #if defined(HAVE_ECC) && (!defined(WOLFSSL_HAVE_SP_ECC) || \
     defined(WOLFSSL_SP_MATH_ALL))
-#if (SP_WORD_SIZE == 64 && SP_INT_BITS >= 256)
+#ifdef SP_INT_MUL_SQR_4
     if (a->used == 4) {
         err = _sp_sqr_4(a, r);
     }
     else
-#endif /* SP_WORD_SIZE == 64 */
+#endif /* SP_INT_MUL_SQR_4 */
 #if (SP_WORD_SIZE == 64 && SP_INT_BITS >= 384)
 #ifdef SQR_MUL_ASM
     if (a->used == 6) {
@@ -20010,15 +19937,17 @@ static int _sp_prime_trials(const sp_int* a, int trials, int* result)
 {
     int err = MP_OKAY;
     int i;
-    DECL_SP_INT(n1, a->used + 1);
-    DECL_SP_INT(r, a->used + 1);
+    sp_int* n1 = NULL;
+    sp_int* r = NULL;
+    DECL_SP_INT_ARRAY(t, a->used + 1, 2);
     DECL_SP_INT(b, a->used * 2 + 1);
 
-    ALLOC_SP_INT(n1, a->used + 1, err, NULL);
-    ALLOC_SP_INT(r, a->used + 1, err, NULL);
+    ALLOC_SP_INT_ARRAY(t, a->used + 1U, 2, err, NULL);
     /* Allocate number that will hold modular exponentiation result. */
     ALLOC_SP_INT(b, a->used * 2 + 1, err, NULL);
     if (err == MP_OKAY) {
+        n1 = t[0];
+        r = t[1];
         _sp_init_size(n1, a->used + 1U);
         _sp_init_size(r, a->used + 1U);
         _sp_init_size(b, (sp_size_t)(a->used * 2U + 1U));
@@ -20041,8 +19970,7 @@ static int _sp_prime_trials(const sp_int* a, int trials, int* result)
 
     /* Free allocated temporary. */
     FREE_SP_INT(b, NULL);
-    FREE_SP_INT(r, NULL);
-    FREE_SP_INT(n1, NULL);
+    FREE_SP_INT_ARRAY(t, NULL);
     return err;
 }
 

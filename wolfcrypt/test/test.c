@@ -97704,6 +97704,80 @@ static wc_test_ret_t mp_test_mul_sqr(mp_int* a, mp_int* b, mp_int* r1,
     return 0;
 }
 
+#if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL)
+static wc_test_ret_t mp_test_mul_sqr_alias(mp_int* a, mp_int* b, mp_int* r1,
+    mp_int* r2, WC_RNG* rng)
+{
+    static const int sz[] = { 1, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96 };
+    wc_test_ret_t ret;
+    int i;
+    int j;
+
+    for (i = 0; i < (int)(sizeof(sz) / sizeof(*sz)); i++) {
+        for (j = 0; j < (int)(sizeof(sz) / sizeof(*sz)); j++) {
+            if (sz[i] + sz[j] > SP_INT_DIGITS)
+                continue;
+            ret = mp_rand(a, sz[i], rng);
+            if (ret != MP_OKAY)
+                return WC_TEST_RET_ENC_EC(ret);
+            ret = mp_rand(b, sz[j], rng);
+            if (ret != MP_OKAY)
+                return WC_TEST_RET_ENC_EC(ret);
+            ret = mp_mul(a, b, r1);
+            if (ret != MP_OKAY)
+                return WC_TEST_RET_ENC_EC(ret);
+
+            ret = mp_copy(a, r2);
+            if (ret != MP_OKAY)
+                return WC_TEST_RET_ENC_EC(ret);
+            ret = mp_mul(r2, b, r2);
+            if (ret != MP_OKAY)
+                return WC_TEST_RET_ENC_EC(ret);
+            if (mp_cmp(r1, r2) != MP_EQ)
+                return WC_TEST_RET_ENC_NC;
+
+            ret = mp_copy(b, r2);
+            if (ret != MP_OKAY)
+                return WC_TEST_RET_ENC_EC(ret);
+            ret = mp_mul(a, r2, r2);
+            if (ret != MP_OKAY)
+                return WC_TEST_RET_ENC_EC(ret);
+            if (mp_cmp(r1, r2) != MP_EQ)
+                return WC_TEST_RET_ENC_NC;
+        }
+
+        if (2 * sz[i] > SP_INT_DIGITS)
+            continue;
+        ret = mp_rand(a, sz[i], rng);
+        if (ret != MP_OKAY)
+            return WC_TEST_RET_ENC_EC(ret);
+        ret = mp_sqr(a, r1);
+        if (ret != MP_OKAY)
+            return WC_TEST_RET_ENC_EC(ret);
+
+        ret = mp_copy(a, r2);
+        if (ret != MP_OKAY)
+            return WC_TEST_RET_ENC_EC(ret);
+        ret = mp_sqr(r2, r2);
+        if (ret != MP_OKAY)
+            return WC_TEST_RET_ENC_EC(ret);
+        if (mp_cmp(r1, r2) != MP_EQ)
+            return WC_TEST_RET_ENC_NC;
+
+        ret = mp_copy(a, r2);
+        if (ret != MP_OKAY)
+            return WC_TEST_RET_ENC_EC(ret);
+        ret = mp_mul(r2, r2, r2);
+        if (ret != MP_OKAY)
+            return WC_TEST_RET_ENC_EC(ret);
+        if (mp_cmp(r1, r2) != MP_EQ)
+            return WC_TEST_RET_ENC_NC;
+    }
+
+    return 0;
+}
+#endif
+
 #if defined(WOLFSSL_SP_MATH_ALL) && defined(HAVE_ECC)
 /* Functional tests for the constant-time modular arithmetic used by ECC:
  * mp_addmod_ct, mp_submod_ct and mp_div_2_mod_ct.  These are not reached by
@@ -98898,6 +98972,10 @@ WOLFSSL_TEST_SUBROUTINE wc_test_ret_t mp_test(void)
 #endif
     if ((ret = mp_test_mul_sqr(a, b, r1, r2, &rng)) != 0)
         goto done;
+#if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL)
+    if ((ret = mp_test_mul_sqr_alias(a, b, r1, r2, &rng)) != 0)
+        goto done;
+#endif
 #if (!defined(NO_RSA) && \
     !defined(WOLFSSL_RSA_VERIFY_ONLY) && !defined(WOLFSSL_RSA_PUBLIC_ONLY)) || \
     defined(HAVE_ECC) || !defined(NO_DSA) || defined(OPENSSL_EXTRA)
