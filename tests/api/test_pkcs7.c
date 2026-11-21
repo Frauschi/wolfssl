@@ -10352,6 +10352,89 @@ int test_wc_PKCS7_KEMRI_UnusableRecipient(void)
     return EXPECT_RESULT();
 }
 
+/* A KTRI or PWRI this build cannot decrypt, ahead of the reader's KEMRI, is
+ * skipped. The first of two KEMRIs is retagged in place to make one. */
+int test_wc_PKCS7_KEMRI_UnsupportedRecipient(void)
+{
+    EXPECT_DECLS;
+#if defined(PKCS7_KEM_TESTS) && \
+    (defined(NO_RSA) || defined(NO_PWDBASED) || defined(NO_SHA))
+    const char* certs[2] = {
+        PKCS7_KEM_CERT(PKCS7_KEM_PARAM), PKCS7_KEM_CERT(PKCS7_KEM_PARAM)
+    };
+    /* id-ori-kem, 1.2.840.113549.1.9.16.13.3 */
+    const byte oriKem[] = {
+        0x06,0x0b,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x09,0x10,0x0d,0x03
+    };
+    byte* key = NULL;
+    byte* msg = NULL;
+    byte* bad = NULL;
+    byte plain[64];
+    word32 keySz = 0;
+    int msgSz = 0;
+    int hit = -1;
+    int pass;
+    int chunk;
+
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF * 2, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(bad = (byte*)XMALLOC(PKCS7_KEM_BUF * 2, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_KEY(PKCS7_KEM_PARAM), key, &keySz),
+        0);
+    ExpectIntGT(msgSz = pkcs7_kem_encode(certs, 2, 0, 0, msg,
+        PKCS7_KEM_BUF * 2), 0);
+    /* [4] 82 hi lo ahead of the first oriType */
+    ExpectIntGT(hit = pkcs7_kem_find(msg, msgSz, oriKem, (int)sizeof(oriKem)),
+        4);
+    if (EXPECT_SUCCESS())
+        ExpectIntEQ(msg[hit - 4], 0xa4);
+
+    for (pass = 0; pass < 2; pass++) {
+        if (EXPECT_SUCCESS())
+            XMEMCPY(bad, msg, (size_t)msgSz);
+    #ifdef NO_RSA
+        /* a bare SEQUENCE is a KeyTransRecipientInfo */
+        if (pass == 0 && EXPECT_SUCCESS())
+            bad[hit - 4] = 0x30;
+    #else
+        if (pass == 0)
+            continue;
+    #endif
+    #if defined(NO_PWDBASED) || defined(NO_SHA)
+        /* [3] with version 0 is a PasswordRecipientInfo */
+        if (pass == 1 && EXPECT_SUCCESS()) {
+            bad[hit - 4] = 0xa3;
+            bad[hit] = 0x02;
+            bad[hit + 1] = 0x01;
+            bad[hit + 2] = 0x00;
+        }
+    #else
+        if (pass == 1)
+            continue;
+    #endif
+        for (chunk = 0; chunk <= 1; chunk++) {
+        #ifdef NO_PKCS7_STREAM
+            if (chunk == 1)
+                break;
+        #endif
+            XMEMSET(plain, 0, sizeof(plain));
+            ExpectIntEQ(pkcs7_kem_decode(bad, msgSz, key, keySz, NULL, 0, 0,
+                chunk, NULL, plain, sizeof(plain)),
+                (int)sizeof(pkcs7KemContent));
+            ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+        }
+    }
+
+    XFREE(bad, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
 /* A key for the same parameter set decapsulates by implicit rejection, so
  * only the unwrap fails, and that has to read as not this recipient. */
 int test_wc_PKCS7_KEMRI_ForeignKey(void)

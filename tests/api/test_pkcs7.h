@@ -69,6 +69,7 @@ int test_wc_PKCS7_KEMRI_MultipleRecipients(void);
 int test_wc_PKCS7_KEMRI_Corrupted(void);
 int test_wc_PKCS7_AddRecipient_KEMRI(void);
 int test_wc_PKCS7_KEMRI_UnusableRecipient(void);
+int test_wc_PKCS7_KEMRI_UnsupportedRecipient(void);
 int test_wc_PKCS7_KEMRI_ForeignKey(void);
 int test_wc_PKCS7_KEMRI_SkidLength(void);
 int test_wc_PKCS7_KEMRI_SerialPadding(void);
@@ -250,6 +251,7 @@ int test_wc_PKCS7_VerifySignedData_NonSequence(void);
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_Corrupted),            \
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_AddRecipient_KEMRI),         \
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_UnusableRecipient),    \
+    TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_UnsupportedRecipient), \
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_ForeignKey),           \
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_SkidLength),           \
     TEST_DECL_GROUP("pkcs7_kem", test_wc_PKCS7_KEMRI_SerialPadding),        \

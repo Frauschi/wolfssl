@@ -15763,7 +15763,7 @@ static int wc_PKCS7_RecipientRejected(int ret, int recipFound)
         (ret != WC_NO_ERR_TRACE(BUFFER_E));
 }
 
-/* move idx past a KARI, KEKRI or PWRI whose handler failed part way */
+/* move idx past a RecipientInfo whose handler failed part way */
 static void wc_PKCS7_SkipRecipient(wc_PKCS7* pkcs7, word32* idx,
                                    word32 recipEnd)
 {
@@ -15778,6 +15778,31 @@ static void wc_PKCS7_SkipRecipient(wc_PKCS7* pkcs7, word32* idx,
     *idx = recipEnd;
 #endif
 }
+
+#if defined(NO_RSA) || defined(NO_PWDBASED) || defined(NO_SHA)
+/* read past a RecipientInfo this build cannot decrypt */
+static int wc_PKCS7_SkipUnsupportedRecipient(wc_PKCS7* pkcs7, byte* in,
+                                             word32 inSz, word32* idx)
+{
+#ifndef NO_PKCS7_STREAM
+    byte* pkiMsg = in;
+    int ret;
+
+    if (!pkcs7->stream->recipIndef) {
+        ret = wc_PKCS7_AddDataToStream(pkcs7, in, inSz,
+                                       pkcs7->stream->recipSkip, &pkiMsg, idx);
+        if (ret != 0)
+            return ret;
+    }
+#else
+    (void)pkcs7;
+    (void)in;
+    (void)inSz;
+    (void)idx;
+#endif
+    return NOT_COMPILED_IN;
+}
+#endif
 
 /* decode ASN.1 RecipientInfos SET, return 0 on success, < 0 on error */
 /* setEnd is in/out, non-NULL: index just past the last RecipientInfo, or 0
@@ -15817,7 +15842,7 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
             ret = wc_PKCS7_DecryptKtri(pkcs7, in, inSz, idx,
                                       decryptedKey, decryptedKeySz, recipFound);
         #else
-            return NOT_COMPILED_IN;
+            ret = wc_PKCS7_SkipUnsupportedRecipient(pkcs7, in, inSz, idx);
         #endif
             break;
 
@@ -15835,10 +15860,10 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
         #if !defined(NO_PWDBASED) && !defined(NO_SHA)
                 ret = wc_PKCS7_DecryptPwri(pkcs7, in, inSz, idx,
                                       decryptedKey, decryptedKeySz, recipFound);
-                break;
         #else
-                return NOT_COMPILED_IN;
+                ret = wc_PKCS7_SkipUnsupportedRecipient(pkcs7, in, inSz, idx);
         #endif
+                break;
 
         case WC_PKCS7_DECRYPT_ORI:
             ret = wc_PKCS7_DecryptOri(pkcs7, in, inSz, idx,
@@ -15860,11 +15885,10 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                 case WC_PKCS7_DECRYPT_KTRI:
                 case WC_PKCS7_DECRYPT_KTRI_2:
                 case WC_PKCS7_DECRYPT_KTRI_3:
+                #ifndef NO_RSA
                     retry = 1;
                     break;
-                case WC_PKCS7_DECRYPT_ORI:
-                    retry = (ret == WC_NO_ERR_TRACE(PKCS7_RECIP_E));
-                    break;
+                #endif
                 case WC_PKCS7_DECRYPT_KARI:
                 case WC_PKCS7_DECRYPT_KEKRI:
                 case WC_PKCS7_DECRYPT_PWRI:
@@ -15874,6 +15898,9 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                         retry = 1;
                     }
                 #endif
+                    break;
+                case WC_PKCS7_DECRYPT_ORI:
+                    retry = (ret == WC_NO_ERR_TRACE(PKCS7_RECIP_E));
                     break;
                 default:
                     break;
@@ -15925,20 +15952,29 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                 return ASN_PARSE_E;
             }
 
-        #ifndef NO_RSA
             /* found ktri */
+            recipEnd = *idx + (word32)length;
             #ifndef NO_PKCS7_STREAM
+            pkcs7->stream->recipIndef = 0;
+            pkcs7->stream->recipSkip = (word32)length;
             if ((ret = wc_PKCS7_StreamEndCase(pkcs7, &tmpIdx, idx)) != 0) {
                 break;
             }
             #endif
             wc_PKCS7_ChangeState(pkcs7, WC_PKCS7_DECRYPT_KTRI);
+        #ifndef NO_RSA
             ret = wc_PKCS7_DecryptKtri(pkcs7, in, inSz, idx,
                                       decryptedKey, decryptedKeySz,
                                       recipFound);
+        #else
+            ret = wc_PKCS7_SkipUnsupportedRecipient(pkcs7, in, inSz, idx);
+        #endif
             if (ret != 0) {
                 if (wc_PKCS7_RecipientRejected(ret, *recipFound)) {
                     lastErr = ret;
+                #ifdef NO_RSA
+                    wc_PKCS7_SkipRecipient(pkcs7, idx, recipEnd);
+                #endif
                     ret = wc_PKCS7_RecipientRetry(pkcs7, idx, &savedIdx,
                             &tmpIdx, decryptedKeySz, keyCap, setEnd);
                     if (ret != 0) {
@@ -15950,9 +15986,6 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                     return ret; /* found recipient and failed decrypt */
                 }
             }
-        #else
-            return NOT_COMPILED_IN;
-        #endif
         }
         else {
             word32 localIdx;
@@ -16061,7 +16094,6 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
 
             /* pwri is IMPLICIT[3] */
             } else if (tag == (ASN_CONSTRUCTED | ASN_CONTEXT_SPECIFIC | 3)) {
-        #if !defined(NO_PWDBASED) && !defined(NO_SHA)
                 (*idx)++;
 
                 if (GetLength_ex(pkiMsg, idx, &length, pkiMsgSz,
@@ -16091,9 +16123,13 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                 }
             #endif
                 wc_PKCS7_ChangeState(pkcs7, WC_PKCS7_DECRYPT_PWRI);
+            #if !defined(NO_PWDBASED) && !defined(NO_SHA)
                 ret = wc_PKCS7_DecryptPwri(pkcs7, in, inSz, idx,
                                            decryptedKey, decryptedKeySz,
                                            recipFound);
+            #else
+                ret = wc_PKCS7_SkipUnsupportedRecipient(pkcs7, in, inSz, idx);
+            #endif
                 if (ret != 0) {
                     if ((recipEnd == 0) ||
                             !wc_PKCS7_RecipientRejected(ret, *recipFound))
@@ -16107,9 +16143,6 @@ static int wc_PKCS7_DecryptRecipientInfos(wc_PKCS7* pkcs7, byte* in,
                     }
                     continue; /* try next recipient */
                 }
-        #else
-                return NOT_COMPILED_IN;
-        #endif
 
             /* ori is IMPLICIT[4] */
             } else if (tag == (ASN_CONSTRUCTED | ASN_CONTEXT_SPECIFIC | 4)) {
