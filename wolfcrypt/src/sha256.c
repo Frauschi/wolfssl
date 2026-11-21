@@ -427,9 +427,6 @@ wc_static_assert(sizeof(Sha256TScratch) == WC_SHA256_TSCRATCH_SIZE);
         do { if (sha256TScr == NULL) return BAD_FUNC_ARG; } while (0)
     #define WC_SHA256_TSCRATCH_WIPE(s) WC_DO_NOTHING /* wiped at Free */
 #else
-    /* Stack in big-stack builds, heap under WOLFSSL_SMALL_STACK, per the
-     * WC_DECLARE_VAR family (one allocation per public call -- the previous
-     * code allocated and freed per block under WOLFSSL_SMALL_STACK). */
     #ifdef WOLFSSL_CHECK_MEM_ZERO
         /* Zero first: the registration call takes const void*, and a
          * pointer to an uninitialized object trips -Wmaybe-uninitialized
@@ -446,20 +443,32 @@ wc_static_assert(sizeof(Sha256TScratch) == WC_SHA256_TSCRATCH_SIZE);
         #define WC_SHA256_TSCRATCH_MZ_ADD() WC_DO_NOTHING
         #define WC_SHA256_TSCRATCH_MZ_CHECK() WC_DO_NOTHING
     #endif
-    #define WC_SHA256_TSCRATCH_DECL(s) \
-        WC_DECLARE_VAR(sha256TScr, Sha256TScratch, 1, (s)->heap)
-    #define WC_SHA256_TSCRATCH_BEGIN(s)                                      \
-        do {                                                                 \
-            WC_ALLOC_VAR_EX(sha256TScr, Sha256TScratch, 1, (s)->heap,        \
-                            DYNAMIC_TYPE_TMP_BUFFER, return MEMORY_E);       \
-            WC_SHA256_TSCRATCH_MZ_ADD();                                     \
-        } while (0)
-    #define WC_SHA256_TSCRATCH_WIPE(s)                                       \
-        do {                                                                 \
-            ForceZero(sha256TScr, sizeof(Sha256TScratch));                   \
-            WC_SHA256_TSCRATCH_MZ_CHECK();                                   \
-            WC_FREE_VAR_EX(sha256TScr, (s)->heap, DYNAMIC_TYPE_TMP_BUFFER);  \
-        } while (0)
+    #if defined(WOLFSSL_SMALL_STACK) && !defined(SHA256_MANY_REGISTERS)
+        #define WC_SHA256_TSCRATCH_DECL(s) \
+            WC_DECLARE_VAR(sha256TScr, Sha256TScratch, 1, (s)->heap)
+        #define WC_SHA256_TSCRATCH_BEGIN(s)                                  \
+            do {                                                             \
+                WC_ALLOC_VAR_EX(sha256TScr, Sha256TScratch, 1, (s)->heap,    \
+                                DYNAMIC_TYPE_TMP_BUFFER, return MEMORY_E);   \
+                WC_SHA256_TSCRATCH_MZ_ADD();                                 \
+            } while (0)
+        #define WC_SHA256_TSCRATCH_WIPE(s)                                   \
+            do {                                                             \
+                ForceZero(sha256TScr, sizeof(Sha256TScratch));               \
+                WC_SHA256_TSCRATCH_MZ_CHECK();                               \
+                WC_FREE_VAR_EX(sha256TScr, (s)->heap,                        \
+                               DYNAMIC_TYPE_TMP_BUFFER);                     \
+            } while (0)
+    #else
+        #define WC_SHA256_TSCRATCH_DECL(s) \
+            Sha256TScratch sha256TScr[1]
+        #define WC_SHA256_TSCRATCH_BEGIN(s) WC_SHA256_TSCRATCH_MZ_ADD()
+        #define WC_SHA256_TSCRATCH_WIPE(s)                                   \
+            do {                                                             \
+                ForceZero(sha256TScr, sizeof(Sha256TScratch));               \
+                WC_SHA256_TSCRATCH_MZ_CHECK();                               \
+            } while (0)
+    #endif
 #endif
 
 #if defined(WOLFSSL_X86_64_BUILD) && defined(USE_INTEL_SPEEDUP) && \
@@ -1927,6 +1936,10 @@ static WC_INLINE int Transform_Sha256_Len(wc_Sha256* sha256, const byte* data,
 
     #ifndef XTRANSFORM
          #define XTRANSFORM(S, D)         Transform_Sha256(S, D)
+        #if !defined(WOLFSSL_USE_ESP32_CRYPT_HASH_HW) || \
+            defined(NO_WOLFSSL_ESP32_CRYPT_HASH_SHA256)
+            #define SHA256_HOIST_TSCRATCH
+        #endif
     #endif
 
 #ifndef SHA256_MANY_REGISTERS
@@ -2098,6 +2111,12 @@ static WC_INLINE int Transform_Sha256_Len(wc_Sha256* sha256, const byte* data,
         }
     }
 
+#ifdef SHA256_HOIST_TSCRATCH
+    #define SHA256_XTRANSFORM_SCR(S, D) Transform_Sha256_scr(S, D, sha256TScr)
+#else
+    #define SHA256_XTRANSFORM_SCR(S, D) XTRANSFORM(S, D)
+#endif
+
     /* do block size increments/updates */
     static WC_INLINE int Sha256Update(wc_Sha256* sha256, const byte* data,
         word32 len)
@@ -2105,11 +2124,22 @@ static WC_INLINE int Transform_Sha256_Len(wc_Sha256* sha256, const byte* data,
         int ret = 0;
         word32 blocksLen;
         byte* local;
+    #ifdef SHA256_HOIST_TSCRATCH
+        int useScr;
+        WC_SHA256_TSCRATCH_DECL(sha256);
+    #endif
 
         /* check that internal buffLen is valid */
         if (sha256->buffLen >= WC_SHA256_BLOCK_SIZE) {
             return BUFFER_E;
         }
+
+    #ifdef SHA256_HOIST_TSCRATCH
+        useScr = (len >= WC_SHA256_BLOCK_SIZE - sha256->buffLen);
+        if (useScr) {
+            WC_SHA256_TSCRATCH_BEGIN(sha256);
+        }
+    #endif
 
         /* add length for final */
         AddLength(sha256, len);
@@ -2171,7 +2201,7 @@ static WC_INLINE int Transform_Sha256_Len(wc_Sha256* sha256, const byte* data,
                 }
             #else
                 /* Always SW */
-                ret = XTRANSFORM(sha256, (const byte*)local);
+                ret = SHA256_XTRANSFORM_SCR(sha256, (const byte*)local);
             #endif
                 if (ret == 0)
                     sha256->buffLen = 0;
@@ -2264,7 +2294,7 @@ static WC_INLINE int Transform_Sha256_Len(wc_Sha256* sha256, const byte* data,
                     esp_sha256_process(sha256, (const byte*)local32);
                 }
             #else
-                ret = XTRANSFORM(sha256, (const byte*)local32);
+                ret = SHA256_XTRANSFORM_SCR(sha256, (const byte*)local32);
             #endif
 
                 if (ret != 0)
@@ -2279,6 +2309,11 @@ static WC_INLINE int Transform_Sha256_Len(wc_Sha256* sha256, const byte* data,
             sha256->buffLen = len;
         }
 
+    #ifdef SHA256_HOIST_TSCRATCH
+        if (useScr) {
+            WC_SHA256_TSCRATCH_WIPE(sha256);
+        }
+    #endif
         return ret;
     }
 
@@ -2326,6 +2361,9 @@ static WC_INLINE int Transform_Sha256_Len(wc_Sha256* sha256, const byte* data,
     {
         int ret;
         byte* local;
+    #ifdef SHA256_HOIST_TSCRATCH
+        WC_SHA256_TSCRATCH_DECL(sha256);
+    #endif
 
         /* we'll add a 0x80 byte at the end,
         ** so make sure we have appropriate buffer length. */
@@ -2333,6 +2371,10 @@ static WC_INLINE int Transform_Sha256_Len(wc_Sha256* sha256, const byte* data,
             /* exit with error code if there's a bad buffer size in buffLen */
             return BAD_STATE_E;
         } /* buffLen check */
+
+    #ifdef SHA256_HOIST_TSCRATCH
+        WC_SHA256_TSCRATCH_BEGIN(sha256);
+    #endif
 
         local = (byte*)sha256->buffer;
         local[sha256->buffLen++] = 0x80; /* add 1 */
@@ -2373,10 +2415,14 @@ static WC_INLINE int Transform_Sha256_Len(wc_Sha256* sha256, const byte* data,
                 ret = esp_sha256_process(sha256, (const byte*)local);
             }
         #else
-            ret = XTRANSFORM(sha256, (const byte*)local);
+            ret = SHA256_XTRANSFORM_SCR(sha256, (const byte*)local);
         #endif
-            if (ret != 0)
+            if (ret != 0) {
+            #ifdef SHA256_HOIST_TSCRATCH
+                WC_SHA256_TSCRATCH_WIPE(sha256);
+            #endif
                 return ret;
+            }
 
             sha256->buffLen = 0;
         }
@@ -2505,9 +2551,12 @@ static WC_INLINE int Transform_Sha256_Len(wc_Sha256* sha256, const byte* data,
             ret = esp_sha256_digest_process(sha256, 1);
         }
     #else
-        ret = XTRANSFORM(sha256, (const byte*)local);
+        ret = SHA256_XTRANSFORM_SCR(sha256, (const byte*)local);
     #endif
 
+    #ifdef SHA256_HOIST_TSCRATCH
+        WC_SHA256_TSCRATCH_WIPE(sha256);
+    #endif
         return ret;
     }
 
