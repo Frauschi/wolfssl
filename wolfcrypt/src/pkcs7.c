@@ -11177,6 +11177,8 @@ static int wc_PKCS7_DecryptContentEx(wc_PKCS7* pkcs7, word32 encryptOID,
     };
 
 #if defined(NO_AES) || (!defined(HAVE_AESGCM) && !defined(HAVE_AESCCM))
+    (void)iv;
+    (void)ivSz;
     (void)authTag;
     (void)authTagSz;
     (void)aad;
