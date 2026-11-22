@@ -11574,3 +11574,113 @@ int test_wc_PKCS7_DecodeEnvelopedData_IndefKekri(void)
 #endif
     return EXPECT_RESULT();
 }
+
+#if defined(PKCS7_KEM_TESTS) && defined(ASN_BER_TO_DER) && \
+    defined(HAVE_AES_CBC)
+typedef struct pkcs7KemStream {
+    byte* buf;
+    word32 sz;
+    word32 cap;
+} pkcs7KemStream;
+
+static int pkcs7_kem_stream_out(wc_PKCS7* pkcs7, const byte* output,
+    word32 outputSz, void* ctx)
+{
+    pkcs7KemStream* strm = (pkcs7KemStream*)ctx;
+
+    (void)pkcs7;
+    if (outputSz > strm->cap - strm->sz)
+        return BUFFER_E;
+    XMEMCPY(strm->buf + strm->sz, output, outputSz);
+    strm->sz += outputSz;
+    return 0;
+}
+#endif
+
+/* EnvelopedData encoded in stream mode, into a buffer and through the output
+ * callback, carries KEMRecipientInfo for several recipients. */
+int test_wc_PKCS7_KEMRI_StreamEncode(void)
+{
+    EXPECT_DECLS;
+#if defined(PKCS7_KEM_TESTS) && defined(ASN_BER_TO_DER) && \
+    defined(HAVE_AES_CBC)
+    const char* certs[2] = {
+        PKCS7_KEM_CERT(PKCS7_KEM_PARAM), PKCS7_KEM_CERT(PKCS7_KEM_PARAM)
+    };
+#ifndef NO_PKCS7_STREAM
+    const int chunks[] = { 0, 1 };
+#else
+    const int chunks[] = { 0 };
+#endif
+    pkcs7KemStream strm;
+    wc_PKCS7* pkcs7 = NULL;
+    byte* cert = NULL;
+    byte* key = NULL;
+    byte* msg = NULL;
+    byte plain[64];
+    word32 certSz = 0;
+    word32 keySz = 0;
+    int msgSz = 0;
+    int cb;
+    int i;
+    int k;
+
+    XMEMSET(&strm, 0, sizeof(strm));
+    ExpectNotNull(cert = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_load(certs[0], cert, &certSz), 0);
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_KEY(PKCS7_KEM_PARAM), key, &keySz),
+        0);
+
+    for (cb = 0; cb < 2 && EXPECT_SUCCESS(); cb++) {
+        ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+        if (pkcs7 != NULL) {
+            pkcs7->content    = (byte*)pkcs7KemContent;
+            pkcs7->contentSz  = (word32)sizeof(pkcs7KemContent);
+            pkcs7->contentOID = DATA;
+            pkcs7->encryptOID = PKCS7_KEM_CONTENT_ALG;
+        }
+        for (i = 0; i < 2; i++) {
+            ExpectIntGT(wc_PKCS7_AddRecipient_KEMRI(pkcs7, cert, certSz,
+                PKCS7_KEM_KDF, AES256_WRAP, NULL, 0, i == 0 ? CMS_SKID : 0),
+                0);
+        }
+        if (cb) {
+            strm.buf = msg;
+            strm.sz  = 0;
+            strm.cap = PKCS7_KEM_BUF;
+            ExpectIntEQ(wc_PKCS7_SetStreamMode(pkcs7, 1, NULL,
+                pkcs7_kem_stream_out, &strm), 0);
+            ExpectIntGT(msgSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, NULL, 0),
+                0);
+            ExpectIntEQ(msgSz, (int)strm.sz);
+        }
+        else {
+            ExpectIntEQ(wc_PKCS7_SetStreamMode(pkcs7, 1, NULL, NULL, NULL), 0);
+            ExpectIntGT(msgSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, msg,
+                PKCS7_KEM_BUF), 0);
+        }
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = NULL;
+
+        /* stream mode writes indefinite lengths */
+        ExpectIntEQ(msg[1], ASN_INDEF_LENGTH);
+        for (k = 0; k < (int)(sizeof(chunks) / sizeof(chunks[0])); k++) {
+            XMEMSET(plain, 0, sizeof(plain));
+            ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, cert, certSz,
+                0, chunks[k], NULL, plain, sizeof(plain)),
+                (int)sizeof(pkcs7KemContent));
+            ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+        }
+    }
+
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
