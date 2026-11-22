@@ -12173,10 +12173,11 @@ static int wc_PKCS7_SerialMatch(const byte* a, word32 aSz, const byte* b,
     return (aSz == bSz) && (XMEMCMP(a, b, aSz) == 0);
 }
 
-/* Recover the CEK from the KEMRecipientInfo in in with pkcs7->privateKey.
- * Return 0 on success, negative upon error */
+/* Recover the CEK from the KEMRecipientInfo in in; keyErr is set when the
+ * reader's own key fails to decode. Return 0 on success, negative on error */
 static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
-                                 byte* decryptedKey, word32* decryptedKeySz)
+                                 byte* decryptedKey, word32* decryptedKeySz,
+                                 int* keyErr)
 {
     MlKemKey* kem = NULL;
     byte* ss = NULL;
@@ -12191,16 +12192,19 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     word32 kemCtSz = 0, ukmSz = 0, encKeySz = 0, ssSz = 0;
     word32 keyIdx = 0;
     int length = 0, version = 0, kekLen = 0, level = 0, hashType = 0;
+    int certLevel = 0;
     int kemInited = 0;
     int ridMatch = 0;
+    int readerKem = 0;
     word32 ridEnd, nameStart, nameSz, snSz, ukmEnd;
     byte tag;
     int ret;
 
     if (pkcs7 == NULL || in == NULL || decryptedKey == NULL ||
-            decryptedKeySz == NULL) {
+            decryptedKeySz == NULL || keyErr == NULL) {
         return BAD_FUNC_ARG;
     }
+    *keyErr = 0;
     if (pkcs7->privateKey == NULL || pkcs7->privateKeySz == 0) {
         WOLFSSL_MSG("KEMRecipientInfo needs the recipient private key");
         return PKCS7_RECIP_E;
@@ -12268,6 +12272,12 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
     ret = wc_PKCS7_MlKemType((int)kemOID, &level);
     if (ret != 0) {
         WOLFSSL_MSG("KEMRecipientInfo does not name an ML-KEM algorithm");
+        return PKCS7_RECIP_E;
+    }
+    readerKem = (pkcs7->singleCert != NULL) &&
+        (wc_PKCS7_MlKemType((int)pkcs7->publicKeyOID, &certLevel) == 0);
+    if (readerKem && (kemOID != pkcs7->publicKeyOID)) {
+        WOLFSSL_MSG("KEMRecipientInfo kem is not the certificate's");
         return PKCS7_RECIP_E;
     }
 
@@ -12351,6 +12361,10 @@ static int wc_PKCS7_DecryptKemri(wc_PKCS7* pkcs7, const byte* in, word32 inSz,
         ret = wc_MlKemKey_PrivateKeyDecode(kem, pkcs7->privateKey,
                                            pkcs7->privateKeySz, &keyIdx);
         PRIVATE_KEY_LOCK();
+        if ((ret != 0) && readerKem) {
+            WOLFSSL_MSG("Reader's ML-KEM private key does not decode");
+            *keyErr = 1;
+        }
     }
     if (ret == 0)
         ret = wc_MlKemKey_SharedSecretSize(kem, &ssSz);
@@ -14889,6 +14903,9 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
     byte* oriValue;
     byte oriOID[MAX_OID_SZ];
     word32 keyCap;
+#ifdef WC_PKCS7_MLKEM_DECODE
+    int keyErr = 0;
+#endif
 
     byte* pkiMsg    = in;
     word32 pkiMsgSz = inSz;
@@ -14969,7 +14986,10 @@ static int wc_PKCS7_DecryptOri(wc_PKCS7* pkcs7, byte* in, word32 inSz,
                     (XMEMCMP(oriOID, oriKemOid, (word32)oriOIDSz) == 0)) {
                 *decryptedKeySz = keyCap;
                 ret = wc_PKCS7_DecryptKemri(pkcs7, oriValue, oriValueSz,
-                                            decryptedKey, decryptedKeySz);
+                                            decryptedKey, decryptedKeySz,
+                                            &keyErr);
+                if (keyErr)
+                    return ret;
             }
         #endif
 

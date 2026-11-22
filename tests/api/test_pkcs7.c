@@ -10081,8 +10081,8 @@ int test_wc_PKCS7_KEMRI_MultipleRecipients(void)
         ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, cert, certSz, 0,
             0, NULL, plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
         ExpectIntEQ(pkcs7_kem_load(keys[0], key, &keySz), 0);
-        ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, cert, certSz, 0,
-            0, NULL, plain, sizeof(plain)), WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+        ExpectIntLT(pkcs7_kem_decode(msg, msgSz, key, keySz, cert, certSz, 0,
+            0, NULL, plain, sizeof(plain)), 0);
     }
 
 #ifndef NO_PKCS7_STREAM
@@ -10478,6 +10478,68 @@ int test_wc_PKCS7_KEMRI_ForeignKey(void)
     DoExpectIntEQ(wc_FreeRng(&rng), 0);
     XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
     XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+    return EXPECT_RESULT();
+}
+
+/* With an ML-KEM reader certificate, a private key that does not decode for
+ * its parameter set ends the decode instead of reading as no recipient. */
+int test_wc_PKCS7_KEMRI_ReaderKeyError(void)
+{
+    EXPECT_DECLS;
+#ifdef PKCS7_KEM_TESTS
+    const char* certs[1] = { PKCS7_KEM_CERT(PKCS7_KEM_PARAM) };
+#ifndef NO_PKCS7_STREAM
+    const int chunks[] = { 0, 1 };
+#else
+    const int chunks[] = { 0 };
+#endif
+    byte* cert = NULL;
+    byte* key = NULL;
+    byte* msg = NULL;
+    byte plain[64];
+    word32 certSz = 0;
+    word32 keySz = 0;
+    int msgSz = 0;
+    int ret;
+    int t;
+    int k;
+
+    ExpectNotNull(cert = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(key = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectNotNull(msg = (byte*)XMALLOC(PKCS7_KEM_BUF, HEAP_HINT,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    ExpectIntEQ(pkcs7_kem_load(certs[0], cert, &certSz), 0);
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_KEY(PKCS7_KEM_PARAM), key, &keySz),
+        0);
+
+    for (t = 0; t < PKCS7_KEM_TYPES && EXPECT_SUCCESS(); t++) {
+        ExpectIntGT(msgSz = pkcs7_kem_encode(certs, 1, 0, t, msg,
+            PKCS7_KEM_BUF), 0);
+        for (k = 0; k < (int)(sizeof(chunks) / sizeof(chunks[0])); k++) {
+            ret = pkcs7_kem_decode(msg, msgSz, key, keySz / 2, cert, certSz,
+                t, chunks[k], NULL, plain, sizeof(plain));
+            ExpectIntLT(ret, 0);
+            ExpectIntNE(ret, WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+        }
+    }
+#ifdef PKCS7_KEM_ALT_PARAM
+    ExpectIntEQ(pkcs7_kem_load(PKCS7_KEM_KEY(PKCS7_KEM_ALT_PARAM), key,
+        &keySz), 0);
+    ExpectIntGT(msgSz = pkcs7_kem_encode(certs, 1, 0, 0, msg, PKCS7_KEM_BUF),
+        0);
+    ret = pkcs7_kem_decode(msg, msgSz, key, keySz, cert, certSz, 0, 0, NULL,
+        plain, sizeof(plain));
+    ExpectIntLT(ret, 0);
+    ExpectIntNE(ret, WC_NO_ERR_TRACE(PKCS7_RECIP_E));
+    ExpectIntNE(ret, WC_NO_ERR_TRACE(PKCS7_OID_E));
+#endif
+
+    XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(cert, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
 #endif
     return EXPECT_RESULT();
 }

@@ -2011,6 +2011,13 @@ int wc_PKCS7_SetOriDecryptCb(wc_PKCS7* pkcs7, CallbackOriDecrypt cb);
     PasswordRecipientInfo of indefinite length ends the decode, as it has no
     end to skip to.
 
+    The reader sets pkcs7->privateKey to its ML-KEM private key in DER, in
+    the RFC 9935 seed, expanded or both form. A build with
+    WOLFSSL_MLKEM_NO_MAKE_KEY cannot expand a seed and takes only the
+    expanded form. When the reader's certificate is ML-KEM and a
+    KEMRecipientInfo names it, a private key that does not decode for the
+    certificate's parameter set ends the decode with the decode error.
+
     An ML-KEM certificate given to wc_PKCS7_InitWithCert() becomes a
     KEMRecipientInfo at encode time with HKDF_SHA256_OID and
     pkcs7->keyWrapOID. With keyWrapOID unset it uses the RFC 9936 mandatory
