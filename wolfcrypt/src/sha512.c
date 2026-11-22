@@ -145,13 +145,7 @@
     #undef WC_C_DYNAMIC_FALLBACK
 #endif
 
-/* Caller-owned transient scratch for the C transform: the 16-entry message
- * schedule window, so one ForceZero when the public call returns wipes it,
- * instead of a per-block wipe inside the transform.  The working variables T
- * stay a local of the transform: through a pointer they cannot be kept in
- * registers across the 80 rounds (measured ~9% on the C transform), so they
- * keep their small per-block wipe.  Natural alignment suffices; only the C
- * transform uses this. */
+/* Message schedule window of the C transform. */
 typedef struct Sha512TScratch {
     word64 W[16];
 } Sha512TScratch;
@@ -172,39 +166,11 @@ wc_static_assert(sizeof(Sha512TScratch) == WC_SHA512_TSCRATCH_SIZE);
         do { if (sha512TScr == NULL) return BAD_FUNC_ARG; } while (0)
     #define WC_SHA512_TSCRATCH_WIPE(s) WC_DO_NOTHING /* wiped at Free */
 #else
-    /* Stack in big-stack builds, heap under WOLFSSL_SMALL_STACK, per the
-     * WC_DECLARE_VAR family (one allocation per public call -- the previous
-     * code allocated and freed per block under WOLFSSL_SMALL_STACK). */
-    #ifdef WOLFSSL_CHECK_MEM_ZERO
-        /* Zero first: the registration call takes const void*, and a
-         * pointer to an uninitialized object trips -Wmaybe-uninitialized
-         * under -Werror; a deterministic start also suits the checker. */
-        #define WC_SHA512_TSCRATCH_MZ_ADD()                       \
-            do {                                                             \
-                XMEMSET(sha512TScr, 0, sizeof(Sha512TScratch));                   \
-                wc_MemZero_Add("Sha512 transform scratch", sha512TScr,      \
-                               sizeof(Sha512TScratch));                       \
-            } while (0)
-        #define WC_SHA512_TSCRATCH_MZ_CHECK() \
-            wc_MemZero_Check(sha512TScr, sizeof(Sha512TScratch))
-    #else
-        #define WC_SHA512_TSCRATCH_MZ_ADD() WC_DO_NOTHING
-        #define WC_SHA512_TSCRATCH_MZ_CHECK() WC_DO_NOTHING
-    #endif
+    /* The schedule window is built in place in the block buffer. */
     #define WC_SHA512_TSCRATCH_DECL(s) \
-        WC_DECLARE_VAR(sha512TScr, Sha512TScratch, 1, (s)->heap)
-    #define WC_SHA512_TSCRATCH_BEGIN(s)                                      \
-        do {                                                                 \
-            WC_ALLOC_VAR_EX(sha512TScr, Sha512TScratch, 1, (s)->heap,        \
-                            DYNAMIC_TYPE_TMP_BUFFER, return MEMORY_E);       \
-            WC_SHA512_TSCRATCH_MZ_ADD();                                     \
-        } while (0)
-    #define WC_SHA512_TSCRATCH_WIPE(s)                                       \
-        do {                                                                 \
-            ForceZero(sha512TScr, sizeof(Sha512TScratch));                   \
-            WC_SHA512_TSCRATCH_MZ_CHECK();                                   \
-            WC_FREE_VAR_EX(sha512TScr, (s)->heap, DYNAMIC_TYPE_TMP_BUFFER);  \
-        } while (0)
+        Sha512TScratch* sha512TScr = (Sha512TScratch*)(s)->buffer
+    #define WC_SHA512_TSCRATCH_BEGIN(s) WC_DO_NOTHING
+    #define WC_SHA512_TSCRATCH_WIPE(s) WC_DO_NOTHING
 #endif
 
 #if defined(WOLFSSL_X86_64_BUILD) && defined(USE_INTEL_SPEEDUP)
@@ -2111,7 +2077,11 @@ static const word64 K512[80] = {
     W64LIT(0x5fcb6fab3ad6faec), W64LIT(0x6c44198c4a475817)
 };
 
+#ifdef WOLFSSL_SMALL_STACK_CACHE
 #define blk0(i) (W[i] = sha512->buffer[i])
+#else
+#define blk0(i) (W[i])
+#endif
 
 #define blk2(i) (\
                W[ (i)     & 15] += \
@@ -2148,7 +2118,13 @@ static int _Transform_Sha512_scr(wc_Sha512* sha512,
     const word64* K = K512;
     word32 j;
     word64 T[8];
+#ifdef WOLFSSL_SMALL_STACK_CACHE
     word64* WC_RESTRICT W = scr->W;
+#else
+    word64* WC_RESTRICT W = sha512->buffer;
+
+    (void)scr;
+#endif
 
     /* Copy digest to working vars */
     XMEMCPY(T, sha512->digest, sizeof(T));
@@ -2182,18 +2158,11 @@ static int _Transform_Sha512_scr(wc_Sha512* sha512,
     sha512->digest[6] += g(0);
     sha512->digest[7] += h(0);
 
-    /* W is the caller's Sha512TScratch, wiped with one ForceZero when the
-     * public call returns.  T is wiped here: keeping it register-resident
-     * requires it to be a local, and its wipe is one cache line. */
     ForceZero(T, sizeof(T));
     return 0;
 }
 
-/* Compatibility entry with per-call scratch, for the dispatch arms,
- * function-pointer tables, and single-block callers, all of whose signatures
- * stay unchanged.  Bulk callers hoist one scratch across their block loop and
- * call _Transform_Sha512_scr() directly, so the wipe runs once per public
- * call rather than once per block. */
+/* Entry for the dispatch arms and function-pointer tables. */
 static WC_MAYBE_UNUSED int _Transform_Sha512(wc_Sha512* sha512)
 {
     int ret;
