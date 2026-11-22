@@ -6260,6 +6260,109 @@ int test_wc_PKCS7_MultipleRecipients(void)
     return EXPECT_RESULT();
 }
 
+/* A recovered content-encryption key must have the size the content cipher
+ * takes; the AES-128 content here is relabelled as AES-256. */
+int test_wc_PKCS7_DecodeEnvelopedData_CekSize(void)
+{
+    EXPECT_DECLS;
+#if defined(HAVE_PKCS7) && defined(HAVE_AES_CBC) && \
+    defined(WOLFSSL_AES_128) && defined(WOLFSSL_AES_256) && \
+    defined(HAVE_AES_KEYWRAP)
+    /* aes128-CBC and aes128-GCM, 2.16.840.1.101.3.4.1.2 and .6 */
+    static const byte aesArc[] = {
+        0x06,0x09,0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x01
+    };
+    static const byte kek[16] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    static const byte keyId[1] = { 0x01 };
+    static const byte content[] = { 0x6B, 0x65, 0x6B };
+#ifndef NO_PKCS7_STREAM
+    const int chunks[] = { 0, 1 };
+#else
+    const int chunks[] = { 0 };
+#endif
+    wc_PKCS7* pkcs7 = NULL;
+    byte msg[512];
+    byte plain[64];
+    int msgSz = 0;
+    int chunk;
+    int pos;
+    int fed;
+    int n;
+    int ret;
+    int j;
+    int k;
+
+    /* j == 0: EnvelopedData, j == 1: AuthEnvelopedData */
+    for (j = 0; j < 2 && EXPECT_SUCCESS(); j++) {
+    #ifndef HAVE_AESGCM
+        if (j == 1)
+            break;
+    #endif
+        ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+        if (pkcs7 != NULL) {
+            pkcs7->content    = (byte*)content;
+            pkcs7->contentSz  = (word32)sizeof(content);
+            pkcs7->contentOID = DATA;
+            pkcs7->encryptOID = (j == 1) ? AES128GCMb : AES128CBCb;
+        }
+        ExpectIntGT(wc_PKCS7_AddRecipient_KEKRI(pkcs7, AES128_WRAP, (byte*)kek,
+            sizeof(kek), (byte*)keyId, sizeof(keyId), NULL, NULL, 0, NULL, 0,
+            0), 0);
+    #ifdef HAVE_AESGCM
+        if (j == 1) {
+            ExpectIntGT(msgSz = wc_PKCS7_EncodeAuthEnvelopedData(pkcs7, msg,
+                sizeof(msg)), 0);
+        }
+        else
+    #endif
+        {
+            ExpectIntGT(msgSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, msg,
+                sizeof(msg)), 0);
+        }
+        wc_PKCS7_Free(pkcs7);
+        pkcs7 = NULL;
+
+        for (pos = 0; pos + (int)sizeof(aesArc) < msgSz; pos++) {
+            if (XMEMCMP(msg + pos, aesArc, sizeof(aesArc)) == 0 &&
+                    msg[pos + sizeof(aesArc)] == ((j == 1) ? 0x06 : 0x02))
+                break;
+        }
+        ExpectIntLT(pos + (int)sizeof(aesArc), msgSz);
+        if (EXPECT_SUCCESS())
+            msg[pos + sizeof(aesArc)] += 40; /* aes256-CBC .42, -GCM .46 */
+
+        for (k = 0; k < (int)(sizeof(chunks) / sizeof(chunks[0])); k++) {
+            chunk = (chunks[k] == 0) ? msgSz : chunks[k];
+            ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+            if (pkcs7 != NULL) {
+                pkcs7->privateKey   = (byte*)kek;
+                pkcs7->privateKeySz = sizeof(kek);
+            }
+            ret = WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E);
+            for (fed = 0; pkcs7 != NULL && fed < msgSz &&
+                    ret == WC_NO_ERR_TRACE(WC_PKCS7_WANT_READ_E); fed += n) {
+                n = (msgSz - fed < chunk) ? (msgSz - fed) : chunk;
+            #ifdef HAVE_AESGCM
+                if (j == 1) {
+                    ret = wc_PKCS7_DecodeAuthEnvelopedData(pkcs7, msg + fed,
+                        (word32)n, plain, sizeof(plain));
+                }
+                else
+            #endif
+                {
+                    ret = wc_PKCS7_DecodeEnvelopedData(pkcs7, msg + fed,
+                        (word32)n, plain, sizeof(plain));
+                }
+            }
+            ExpectIntEQ(ret, WC_NO_ERR_TRACE(WC_KEY_SIZE_E));
+            wc_PKCS7_Free(pkcs7);
+            pkcs7 = NULL;
+        }
+    }
+#endif
+    return EXPECT_RESULT();
+}
+
 /*
  * Testing wc_PKCS7_GetEnvelopedDataKariRid().
  */

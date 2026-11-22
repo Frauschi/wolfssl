@@ -202,6 +202,7 @@ struct PKCS7State {
     word32 recipientStart; /* index the recipient set starts at */
     word32 recipientRemain; /* recipient set bytes not yet stepped over */
     word32 recipSkip; /* handler start to the end of its RecipientInfo */
+    word32 cekSz;     /* size of the recovered content-encryption key */
     byte tmpIv[MAX_CONTENT_IV_SIZE]; /* store IV if needed */
 #ifdef WC_PKCS7_STREAM_DEBUG
     word32 peakUsed; /* most bytes used for struct at any one time */
@@ -317,6 +318,7 @@ static void wc_PKCS7_ResetStream(wc_PKCS7* pkcs7)
         pkcs7->stream->recipientRemain = 0;
         pkcs7->stream->recipSkip       = 0;
         pkcs7->stream->recipIndef      = 0;
+        pkcs7->stream->cekSz           = 0;
         pkcs7->stream->hashType     = WC_HASH_TYPE_NONE;
     }
 }
@@ -16517,6 +16519,20 @@ static int PKCS7_CacheEncryptedContent(wc_PKCS7* pkcs7, byte* in, word32 inSz)
 #endif
 
 
+/* Size the content cipher key must have, or 0 to skip the check. KTRI hides a
+ * failed RSA unwrap behind a fake CEK, so a size check there is an oracle. */
+static word32 wc_PKCS7_CekSizeToCheck(wc_PKCS7* pkcs7, word32 decryptedKeySz)
+{
+    switch (pkcs7->state) {
+        case WC_PKCS7_DECRYPT_KTRI:
+        case WC_PKCS7_DECRYPT_KTRI_2:
+        case WC_PKCS7_DECRYPT_KTRI_3:
+            return 0;
+        default:
+            return decryptedKeySz;
+    }
+}
+
 /* unwrap and decrypt PKCS#7 envelopedData object, return decoded size */
 int wc_PKCS7_DecodeEnvelopedData(wc_PKCS7* pkcs7, byte* in,
                                          word32 inSz, byte* output,
@@ -16530,6 +16546,7 @@ int wc_PKCS7_DecodeEnvelopedData(wc_PKCS7* pkcs7, byte* in,
     word32 setEnd = 0;
     word32 contentType = 0, encOID = 0;
     word32 decryptedKeySz = MAX_ENCRYPTED_KEY_SZ;
+    word32 cekSz = 0;
 
     int expBlockSz = 0, blockKeySz = 0;
     byte  tmpIvBuf[MAX_CONTENT_IV_SIZE];
@@ -16667,7 +16684,9 @@ int wc_PKCS7_DecodeEnvelopedData(wc_PKCS7* pkcs7, byte* in,
 
             if (ret != 0)
                 break;
+            cekSz = wc_PKCS7_CekSizeToCheck(pkcs7, decryptedKeySz);
         #ifndef NO_PKCS7_STREAM
+            pkcs7->stream->cekSz = cekSz;
             /* advance idx past recipient info set if not all recipients
              * parsed */
             if (pkcs7->stream->length > 0) {
@@ -16787,6 +16806,14 @@ int wc_PKCS7_DecodeEnvelopedData(wc_PKCS7* pkcs7, byte* in,
             blockKeySz = wc_PKCS7_GetOIDKeySize((int)encOID);
             if (ret == 0 && blockKeySz < 0) {
                 ret = blockKeySz;
+            }
+
+        #ifndef NO_PKCS7_STREAM
+            cekSz = pkcs7->stream->cekSz;
+        #endif
+            if (ret == 0 && cekSz != 0 && cekSz != (word32)blockKeySz) {
+                WOLFSSL_MSG("CEK size does not match the content cipher");
+                ret = WC_KEY_SIZE_E;
             }
 
             expBlockSz = wc_PKCS7_GetOIDBlockSize((int)encOID);
@@ -18024,6 +18051,7 @@ int wc_PKCS7_DecodeAuthEnvelopedData(wc_PKCS7* pkcs7, byte* in,
     word32 setEnd = 0;
     word32 contentType = 0, encOID = 0;
     word32 decryptedKeySz = 0;
+    word32 cekSz = 0;
     byte* pkiMsg = in;
     word32 pkiMsgSz = inSz;
 
@@ -18162,8 +18190,11 @@ int wc_PKCS7_DecodeAuthEnvelopedData(wc_PKCS7* pkcs7, byte* in,
                 break;
             }
 
+            cekSz = wc_PKCS7_CekSizeToCheck(pkcs7, decryptedKeySz);
+
             /* step over the recipients left unread after the match */
         #ifndef NO_PKCS7_STREAM
+            pkcs7->stream->cekSz = cekSz;
             if (pkcs7->stream->length > 0) {
                 /* buffered: see WC_PKCS7_ENV_2 */
                 idx = pkcs7->stream->recipientRemain;
@@ -18274,6 +18305,14 @@ int wc_PKCS7_DecodeAuthEnvelopedData(wc_PKCS7* pkcs7, byte* in,
                 if (blockKeySz < 0) {
                     ret = blockKeySz;
                 }
+            }
+
+        #ifndef NO_PKCS7_STREAM
+            cekSz = pkcs7->stream->cekSz;
+        #endif
+            if (ret == 0 && cekSz != 0 && cekSz != (word32)blockKeySz) {
+                WOLFSSL_MSG("CEK size does not match the content cipher");
+                ret = WC_KEY_SIZE_E;
             }
 
             if (ret == 0) {

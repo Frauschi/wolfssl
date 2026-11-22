@@ -63,6 +63,7 @@ int test_wc_PKCS7_EncodeDecodeEnvelopedData(void);
 int test_wc_PKCS7_IndefiniteRecipientSet(void);
 int test_wc_PKCS7_SetAESKeyWrapUnwrapCb(void);
 int test_wc_PKCS7_MultipleRecipients(void);
+int test_wc_PKCS7_DecodeEnvelopedData_CekSize(void);
 int test_wc_PKCS7_KEMRI_OriCallbackFallback(void);
 int test_wc_PKCS7_KEMRI_IndefiniteChunked(void);
 int test_wc_PKCS7_KEMRI_MultipleRecipients(void);
@@ -211,6 +212,7 @@ int test_wc_PKCS7_VerifySignedData_NonSequence(void);
     TEST_PKCS7_KTRI_BADRSAPAD_DECL                                          \
     TEST_DECL_GROUP("pkcs7_ed", test_wc_PKCS7_SetAESKeyWrapUnwrapCb),       \
     TEST_DECL_GROUP("pkcs7_ed", test_wc_PKCS7_MultipleRecipients),          \
+    TEST_DECL_GROUP("pkcs7_ed", test_wc_PKCS7_DecodeEnvelopedData_CekSize), \
     TEST_DECL_GROUP("pkcs7_ed",                                             \
         test_wc_PKCS7_DecodeEnvelopedData_KariSameIssuer),                  \
     TEST_DECL_GROUP("pkcs7_ed", test_wc_PKCS7_DecodeEnvelopedData_OriNotOurs), \

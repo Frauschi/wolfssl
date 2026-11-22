@@ -1955,7 +1955,8 @@ int wc_PKCS7_SetOriDecryptCtx(wc_PKCS7* pkcs7, void* ctx);
 
     The callback returns 0 once it has written the content-encryption key and
     its length. On entry *decryptedKeySz holds the size of decryptedKey; a
-    larger length on return ends the decode with BUFFER_E. Any non-zero return
+    larger length on return ends the decode with BUFFER_E, and a length other
+    than the content cipher's key size with WC_KEY_SIZE_E. Any non-zero return
     other than MEMORY_E means this OtherRecipientInfo yielded no key; the
     decoder treats that as "not this recipient" and carries on with the next
     RecipientInfo in the set, so a message naming several recipients stays
