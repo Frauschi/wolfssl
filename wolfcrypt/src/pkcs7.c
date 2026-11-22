@@ -12140,11 +12140,15 @@ out:
     return ret;
 }
 
-/* RFC 9936 Section 2.1 mandatory KDF and wrap for a singleCert recipient */
+/* RFC 9936 Section 2.1 mandatory KDF, and its wrap unless keyWrapOID is set */
 static int wc_PKCS7_AddSingleCertKemri(wc_PKCS7* pkcs7)
 {
-    int wrapOID = (pkcs7->publicKeyOID == ML_KEM_512k) ? AES128_WRAP :
+    int wrapOID = pkcs7->keyWrapOID;
+
+    if (wrapOID == 0) {
+        wrapOID = (pkcs7->publicKeyOID == ML_KEM_512k) ? AES128_WRAP :
                                                          AES256_WRAP;
+    }
 
     return wc_PKCS7_AddRecipient_KEMRI(pkcs7, pkcs7->singleCert,
         pkcs7->singleCertSz, HKDF_SHA256_OID, wrapOID, pkcs7->ukm,

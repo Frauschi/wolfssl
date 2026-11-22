@@ -2012,9 +2012,10 @@ int wc_PKCS7_SetOriDecryptCb(wc_PKCS7* pkcs7, CallbackOriDecrypt cb);
     end to skip to.
 
     An ML-KEM certificate given to wc_PKCS7_InitWithCert() becomes a
-    KEMRecipientInfo at encode time with the RFC 9936 mandatory algorithms:
-    HKDF_SHA256_OID, and AES128_WRAP for ML-KEM-512 or AES256_WRAP otherwise.
-    It uses pkcs7->ukm when set. Any other KDF or wrap needs this function.
+    KEMRecipientInfo at encode time with HKDF_SHA256_OID and
+    pkcs7->keyWrapOID. With keyWrapOID unset it uses the RFC 9936 mandatory
+    wrap, AES128_WRAP for ML-KEM-512 or AES256_WRAP otherwise. It uses
+    pkcs7->ukm when set. Any other KDF needs this function.
 
     \return size of the encoded RecipientInfo on success
     \return negative on error

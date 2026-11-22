@@ -10678,6 +10678,8 @@ int test_wc_PKCS7_KEMRI_SingleCert(void)
     int msgSz = 0;
     int n = 0;
     int i;
+    int w;
+    int is512;
     char path[64];
 
 #if defined(WOLFSSL_WC_ML_KEM_512) && !defined(WOLFSSL_NO_ML_KEM) && \
@@ -10705,32 +10707,42 @@ int test_wc_PKCS7_KEMRI_SingleCert(void)
             params[i]);
         ExpectIntEQ(pkcs7_kem_load(path, key, &keySz), 0);
 
-        ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
-        ExpectIntEQ(wc_PKCS7_InitWithCert(pkcs7, cert, certSz), 0);
-        if (pkcs7 != NULL) {
-            pkcs7->content    = (byte*)pkcs7KemContent;
-            pkcs7->contentSz  = (word32)sizeof(pkcs7KemContent);
-            pkcs7->contentOID = DATA;
-            pkcs7->encryptOID = PKCS7_KEM_CONTENT_ALG;
-        }
-        ExpectIntGT(msgSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, msg,
-            PKCS7_KEM_BUF), 0);
-        wc_PKCS7_Free(pkcs7);
-        pkcs7 = NULL;
+        is512 = (XSTRCMP(params[i], "512") == 0);
+        /* w == 1 sets keyWrapOID to the wrap the default would not pick */
+        for (w = 0; w < 2; w++) {
+            ExpectNotNull(pkcs7 = wc_PKCS7_New(HEAP_HINT, testDevId));
+            ExpectIntEQ(wc_PKCS7_InitWithCert(pkcs7, cert, certSz), 0);
+            if (pkcs7 != NULL) {
+                pkcs7->content    = (byte*)pkcs7KemContent;
+                pkcs7->contentSz  = (word32)sizeof(pkcs7KemContent);
+                pkcs7->contentOID = DATA;
+                pkcs7->encryptOID = PKCS7_KEM_CONTENT_ALG;
+                if (w == 1)
+                    pkcs7->keyWrapOID = is512 ? AES256_WRAP : AES128_WRAP;
+            }
+            ExpectIntGT(msgSz = wc_PKCS7_EncodeEnvelopedData(pkcs7, msg,
+                PKCS7_KEM_BUF), 0);
+            wc_PKCS7_Free(pkcs7);
+            pkcs7 = NULL;
 
-        ExpectIntGT(pkcs7_kem_find(msg, msgSz, hkdfSha256,
-            (int)sizeof(hkdfSha256)), 0);
-        if (XSTRCMP(params[i], "512") == 0) {
-            ExpectIntGT(pkcs7_kem_find(msg, msgSz, aes128Wrap,
-                (int)sizeof(aes128Wrap)), 0);
+            ExpectIntGT(pkcs7_kem_find(msg, msgSz, hkdfSha256,
+                (int)sizeof(hkdfSha256)), 0);
+            if (is512 == (w == 0)) {
+                ExpectIntGT(pkcs7_kem_find(msg, msgSz, aes128Wrap,
+                    (int)sizeof(aes128Wrap)), 0);
+            }
+            else {
+                ExpectIntGT(pkcs7_kem_find(msg, msgSz, aes256Wrap,
+                    (int)sizeof(aes256Wrap)), 0);
+            }
+            ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, cert, certSz,
+                0, 0, NULL, plain, sizeof(plain)),
+                (int)sizeof(pkcs7KemContent));
+            ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
+        #ifndef WOLFSSL_AES_128
+            break;
+        #endif
         }
-        else {
-            ExpectIntGT(pkcs7_kem_find(msg, msgSz, aes256Wrap,
-                (int)sizeof(aes256Wrap)), 0);
-        }
-        ExpectIntEQ(pkcs7_kem_decode(msg, msgSz, key, keySz, cert, certSz, 0,
-            0, NULL, plain, sizeof(plain)), (int)sizeof(pkcs7KemContent));
-        ExpectBufEQ(plain, pkcs7KemContent, sizeof(pkcs7KemContent));
     }
     XFREE(msg, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
     XFREE(key, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
