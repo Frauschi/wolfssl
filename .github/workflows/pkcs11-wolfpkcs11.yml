@@ -1,0 +1,101 @@
+name: PKCS#11 client against wolfPKCS11
+
+# START OF COMMON SECTION
+on:
+  push:
+    branches: [ 'release/**' ]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [ '*' ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+# END OF COMMON SECTION
+
+env:
+  # Bump deliberately: a wolfPKCS11 change can fail this job on its own.
+  WOLFPKCS11_REF: 60f5aa0fb117a3a12233b8bf047d48076402e86d
+
+jobs:
+  pkcs11dev:
+    name: testwolfcrypt and unit.test through wolfPKCS11
+    if: ${{ (github.repository_owner == 'wolfssl') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout wolfSSL
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Checkout wolfPKCS11
+        uses: actions/checkout@v5
+        with:
+          repository: wolfSSL/wolfPKCS11
+          ref: ${{ env.WOLFPKCS11_REF }}
+          path: wolfPKCS11
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install dependencies
+        uses: ./.github/actions/install-apt-deps
+        with:
+          packages: build-essential autoconf automake libtool
+          ghcr-debs-tag: ubuntu-24.04-minimal
+
+      - name: Build the static wolfSSL for wolfPKCS11
+        run: |
+          mkdir "$RUNNER_TEMP/wolfssl-backing"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/wolfssl-backing"
+          cd "$RUNNER_TEMP/wolfssl-backing"
+          ./autogen.sh
+          ./configure --prefix="$RUNNER_TEMP/backing-install" \
+              --enable-static --disable-shared --with-pic \
+              --enable-cryptonly --enable-all-crypto \
+              --enable-mldsa --enable-mlkem --enable-lms --enable-xmss \
+              --enable-aeskeywrap --enable-aescts --enable-scrypt --enable-md5 \
+              --disable-examples --disable-crypttests \
+              CFLAGS="-DWOLFSSL_PUBLIC_MP -DWC_RSA_DIRECT -DHAVE_AES_ECB"
+          make -j"$(nproc)"
+          make install
+
+      - name: Build wolfPKCS11 with wolfSSL linked in
+        working-directory: wolfPKCS11
+        run: |
+          ./autogen.sh
+          ./configure CPPFLAGS="-I$RUNNER_TEMP/backing-install/include" \
+              --with-static-wolfssl="$RUNNER_TEMP/backing-install/lib/libwolfssl.a" \
+              --enable-mldsa --enable-mlkem \
+              --enable-lms-private --enable-xmss-private \
+              --enable-aesecb --enable-aesctr --enable-aesccm --enable-aescts \
+              --enable-sha3
+          make -j"$(nproc)"
+          lib=$(readlink -f src/.libs/libwolfpkcs11.so)
+          if readelf -d "$lib" | grep -q 'NEEDED.*libwolfssl'; then
+              echo "::error::libwolfpkcs11.so depends on libwolfssl"
+              exit 1
+          fi
+          echo "WOLFSSL_PKCS11DEV_MODULE=$lib" >> "$GITHUB_ENV"
+
+      - name: Build wolfSSL with pkcs11dev
+        run: |
+          ./autogen.sh
+          ./configure --enable-all --enable-pkcs11 --enable-pkcs11dev \
+              CFLAGS="-DTEST_ALWAYS_RUN_TO_END"
+          make -j"$(nproc)" wolfcrypt/test/testwolfcrypt tests/unit.test
+
+      - name: Run testwolfcrypt through wolfPKCS11
+        run: |
+          export WOLFPKCS11_TOKEN_PATH="$RUNNER_TEMP/token-wc"
+          mkdir -p "$WOLFPKCS11_TOKEN_PATH"
+          ./wolfcrypt/test/testwolfcrypt
+
+      - name: Run unit.test through wolfPKCS11
+        run: |
+          export WOLFPKCS11_TOKEN_PATH="$RUNNER_TEMP/token-unit"
+          mkdir -p "$WOLFPKCS11_TOKEN_PATH"
+          ./tests/unit.test
