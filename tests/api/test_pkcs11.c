@@ -983,6 +983,23 @@ int test_wc_Pkcs11_EcdsaSigDecode(void)
     static const byte emptyS[] = {
         0x30, 0x05, 0x02, 0x01, 0x01, 0x02, 0x00
     };
+    static const byte negativeR[] = {
+        0x30, 0x06, 0x02, 0x01, 0x80, 0x02, 0x01, 0x01
+    };
+#ifndef WOLFSSL_ASN_INT_LEAD_0_ANY
+    static const byte paddedS[] = {
+        0x30, 0x07, 0x02, 0x01, 0x01, 0x02, 0x02, 0x00, 0x01
+    };
+#endif
+#ifndef NO_STRICT_ECDSA_LEN
+    static const byte trailingS[] = {
+        0x30, 0x08, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01, 0x00, 0x00
+    };
+#endif
+    const byte* nonDer[3];
+    word32 nonDerSz[3];
+    int nonDerCnt = 0;
+    int j;
     static const byte hash[] = { 0x00 };
     byte oversizedR[40];
     byte oversizedS[40];
@@ -1130,6 +1147,27 @@ int test_wc_Pkcs11_EcdsaSigDecode(void)
         ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token),
             WC_NO_ERR_TRACE(ASN_PARSE_E));
         ExpectIntEQ(test_pkcs11_verify_init_calls, 0);
+        ExpectIntEQ(test_pkcs11_verify_calls, 0);
+    }
+
+    nonDer[nonDerCnt] = negativeR;
+    nonDerSz[nonDerCnt++] = (word32)sizeof(negativeR);
+#ifndef WOLFSSL_ASN_INT_LEAD_0_ANY
+    nonDer[nonDerCnt] = paddedS;
+    nonDerSz[nonDerCnt++] = (word32)sizeof(paddedS);
+#endif
+#ifndef NO_STRICT_ECDSA_LEN
+    nonDer[nonDerCnt] = trailingS;
+    nonDerSz[nonDerCnt++] = (word32)sizeof(trailingS);
+#endif
+    for (j = 0; ret == 0 && j < nonDerCnt; j++) {
+        info.pk.eccverify.sig = nonDer[j];
+        info.pk.eccverify.siglen = nonDerSz[j];
+        res = 0;
+        test_pkcs11_verify_init_calls = 0;
+        test_pkcs11_verify_calls = 0;
+        ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token),
+            WC_NO_ERR_TRACE(ASN_PARSE_E));
         ExpectIntEQ(test_pkcs11_verify_calls, 0);
     }
 

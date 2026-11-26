@@ -4098,6 +4098,31 @@ static word32 Pkcs11ECDSASig_Encode(byte* sig, word32 sz)
 
 #ifdef HAVE_ECC_VERIFY
 /**
+ * Check that INTEGER content is a positive number in minimal DER form.
+ *
+ * @param  [in]  in   INTEGER content.
+ * @param  [in]  len  Length of content.
+ * @return  1 when the encoding is accepted.
+ * @return  0 otherwise.
+ */
+static int Pkcs11ECDSASig_IntOk(const byte* in, word32 len)
+{
+    int ok = 1;
+
+#ifndef WOLFSSL_ASN_INT_LEAD_0_ANY
+    if ((in[0] & 0x80) != 0)
+        ok = 0;
+    else if (len > 1 && in[0] == 0x00 && (in[1] & 0x80) == 0)
+        ok = 0;
+#else
+    (void)in;
+    (void)len;
+#endif
+
+    return ok;
+}
+
+/**
  * Decode the ECDSA signature.
  * ASN.1 DER encode SEQ { INT, INT } converted to two fixed with values.
  *
@@ -4148,6 +4173,8 @@ static int Pkcs11ECDSASig_Decode(const byte* in, word32 inSz, byte* sig,
     /* Check there is space for INT data */
     if (ret == 0 && len > inSz - i)
         ret = ASN_PARSE_E;
+    if (ret == 0 && !Pkcs11ECDSASig_IntOk(in + i, len))
+        ret = ASN_PARSE_E;
     if (ret == 0) {
         /* Skip leading zero */
         if (in[i] == 0x00) {
@@ -4177,6 +4204,13 @@ static int Pkcs11ECDSASig_Decode(const byte* in, word32 inSz, byte* sig,
         ret = ASN_PARSE_E;
     /* Check there is space for INT data */
     if (ret == 0 && len > inSz - i)
+        ret = ASN_PARSE_E;
+#ifndef NO_STRICT_ECDSA_LEN
+    /* Nothing may follow s. */
+    if (ret == 0 && len != inSz - i)
+        ret = ASN_PARSE_E;
+#endif
+    if (ret == 0 && !Pkcs11ECDSASig_IntOk(in + i, len))
         ret = ASN_PARSE_E;
     if (ret == 0) {
         /* Skip leading zero */
