@@ -2916,4 +2916,158 @@ int test_wc_Pkcs11_TokenOpenDropsPin(void)
     return EXPECT_RESULT();
 }
 
+
+#if defined(HAVE_AESGCM) && !defined(NO_AES) && !defined(NO_PKCS11_AES) && \
+    !defined(NO_PKCS11_AESGCM)
+static CK_RV    test_pkcs11_gcm_init_rv = CKR_OK;
+static CK_RV    test_pkcs11_gcm_final_rv = CKR_OK;
+static byte     test_pkcs11_gcm_buf[64];
+static CK_ULONG test_pkcs11_gcm_len = 0;
+
+static CK_RV test_pkcs11_gcm_mech_info(CK_SLOT_ID slotId,
+    CK_MECHANISM_TYPE type, CK_MECHANISM_INFO_PTR info)
+{
+    (void)slotId;
+
+    if (type != CKM_AES_GCM)
+        return CKR_MECHANISM_INVALID;
+    XMEMSET(info, 0, sizeof(*info));
+    info->flags = CKF_ENCRYPT | CKF_DECRYPT;
+    return CKR_OK;
+}
+
+static CK_RV test_pkcs11_gcm_decrypt_init(CK_SESSION_HANDLE session,
+    CK_MECHANISM_PTR mechanism, CK_OBJECT_HANDLE key)
+{
+    (void)session;
+    (void)mechanism;
+    (void)key;
+
+    test_pkcs11_gcm_len = 0;
+    return test_pkcs11_gcm_init_rv;
+}
+
+/* Holds all data back until the tag is checked in the final call. */
+static CK_RV test_pkcs11_gcm_decrypt_update(CK_SESSION_HANDLE session,
+    CK_BYTE_PTR in, CK_ULONG inLen, CK_BYTE_PTR out, CK_ULONG_PTR outLen)
+{
+    (void)session;
+    (void)out;
+
+    if (inLen > sizeof(test_pkcs11_gcm_buf) - test_pkcs11_gcm_len)
+        return TEST_CKR_GENERAL_ERROR;
+    XMEMCPY(test_pkcs11_gcm_buf + test_pkcs11_gcm_len, in, inLen);
+    test_pkcs11_gcm_len += inLen;
+    *outLen = 0;
+    return CKR_OK;
+}
+
+static CK_RV test_pkcs11_gcm_decrypt_final(CK_SESSION_HANDLE session,
+    CK_BYTE_PTR out, CK_ULONG_PTR outLen)
+{
+    CK_ULONG len;
+
+    (void)session;
+
+    if (test_pkcs11_gcm_final_rv != CKR_OK)
+        return test_pkcs11_gcm_final_rv;
+    if (test_pkcs11_gcm_len < WC_AES_BLOCK_SIZE)
+        return TEST_CKR_GENERAL_ERROR;
+    len = test_pkcs11_gcm_len - WC_AES_BLOCK_SIZE;
+    if (*outLen < len)
+        return TEST_CKR_GENERAL_ERROR;
+    XMEMCPY(out, test_pkcs11_gcm_buf, len);
+    *outLen = len;
+    return CKR_OK;
+}
+#endif
+
+int test_wc_Pkcs11_AesGcmDecrypt(void)
+{
+    EXPECT_DECLS;
+#if defined(HAVE_AESGCM) && !defined(NO_AES) && !defined(NO_PKCS11_AES) && \
+    !defined(NO_PKCS11_AESGCM)
+    static const byte key[16] = { 0x01 };
+    static const byte iv[GCM_NONCE_MID_SZ] = { 0x02 };
+    static const byte tag[WC_AES_BLOCK_SIZE] = { 0x03 };
+    byte in[20];
+    byte out[20];
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    wc_CryptoInfo info;
+    Aes aes;
+#ifdef WOLF_PRIVATE_KEY_ID
+    static CK_OBJECT_CLASS secretCls = CKO_SECRET_KEY;
+    static CK_KEY_TYPE aesType = CKK_AES;
+    static byte aesId[] = { 0x16 };
+    CK_ATTRIBUTE idTmpl[] = {
+        { CKA_CLASS,    &secretCls, sizeof(secretCls) },
+        { CKA_KEY_TYPE, &aesType,   sizeof(aesType)   },
+        { CKA_ID,       aesId,      sizeof(aesId)     }
+    };
+    CK_OBJECT_HANDLE obj = 0;
+#endif
+
+    test_pkcs11_store_setup(&token, &func);
+    func.C_GetMechanismInfo = test_pkcs11_gcm_mech_info;
+    func.C_DecryptInit = test_pkcs11_gcm_decrypt_init;
+    func.C_DecryptUpdate = test_pkcs11_gcm_decrypt_update;
+    func.C_DecryptFinal = test_pkcs11_gcm_decrypt_final;
+    XMEMSET(in, 0x5a, sizeof(in));
+    XMEMSET(out, 0, sizeof(out));
+    ExpectIntEQ(wc_AesInit(&aes, NULL, INVALID_DEVID), 0);
+    XMEMCPY(aes.devKey, key, sizeof(key));
+    aes.keylen = (int)sizeof(key);
+
+    XMEMSET(&info, 0, sizeof(info));
+    info.algo_type = WC_ALGO_TYPE_CIPHER;
+    info.cipher.type = WC_CIPHER_AES_GCM;
+    info.cipher.enc = 0;
+    info.cipher.aesgcm_dec.aes = &aes;
+    info.cipher.aesgcm_dec.out = out;
+    info.cipher.aesgcm_dec.in = in;
+    info.cipher.aesgcm_dec.sz = sizeof(in);
+    info.cipher.aesgcm_dec.iv = iv;
+    info.cipher.aesgcm_dec.ivSz = sizeof(iv);
+    info.cipher.aesgcm_dec.authTag = tag;
+    info.cipher.aesgcm_dec.authTagSz = sizeof(tag);
+
+    test_pkcs11_gcm_init_rv = CKR_OK;
+    test_pkcs11_gcm_final_rv = CKR_OK;
+    ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token), 0);
+    ExpectBufEQ(out, in, sizeof(in));
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+
+    test_pkcs11_gcm_final_rv = CKR_ENCRYPTED_DATA_INVALID;
+    ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token),
+        WC_NO_ERR_TRACE(AES_GCM_AUTH_E));
+    test_pkcs11_gcm_final_rv = CKR_AEAD_DECRYPT_FAILED;
+    ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token),
+        WC_NO_ERR_TRACE(AES_GCM_AUTH_E));
+    test_pkcs11_gcm_final_rv = CKR_OK;
+
+    info.cipher.aesgcm_dec.out = NULL;
+    info.cipher.aesgcm_dec.in = NULL;
+    info.cipher.aesgcm_dec.sz = 0;
+    ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token), 0);
+
+    /* Software takes over parameters the token refuses for a key in memory. */
+    test_pkcs11_gcm_init_rv = CKR_MECHANISM_PARAM_INVALID;
+    ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token),
+        WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE));
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+#ifdef WOLF_PRIVATE_KEY_ID
+    ExpectIntEQ(test_pkcs11_store_create(1, idTmpl, 3, &obj), CKR_OK);
+    XMEMCPY(aes.id, aesId, sizeof(aesId));
+    aes.idLen = (int)sizeof(aesId);
+    ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token),
+        WC_NO_ERR_TRACE(WC_HW_E));
+    aes.idLen = 0;
+#endif
+    test_pkcs11_gcm_init_rv = CKR_OK;
+
+    wc_AesFree(&aes);
+#endif
+    return EXPECT_RESULT();
+}
 #endif /* TEST_PKCS11_ECDSA */

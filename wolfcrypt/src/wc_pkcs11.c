@@ -6110,11 +6110,16 @@ static int Pkcs11AesGcmEncrypt(Pkcs11Session* session, wc_CryptoInfo* info)
 
         rv = session->func->C_EncryptInit(session->handle, &mech, key);
         PKCS11_RV("C_EncryptInit", rv);
-        if (rv != CKR_OK) {
+        /* The key is in memory, so software can take an IV the token refuses. */
+        if (rv == CKR_MECHANISM_PARAM_INVALID && aes->idLen == 0 &&
+                aes->labelLen == 0) {
+            ret = CRYPTOCB_UNAVAILABLE;
+        }
+        else if (rv != CKR_OK) {
             ret = WC_HW_E;
         }
     }
-    if (ret == 0) {
+    if (ret == 0 && info->cipher.aesgcm_enc.sz > 0) {
         outLen = info->cipher.aesgcm_enc.sz;
         rv = session->func->C_EncryptUpdate(session->handle,
                                         (CK_BYTE_PTR)info->cipher.aesgcm_enc.in,
@@ -6163,7 +6168,13 @@ static int Pkcs11AesGcmDecrypt(Pkcs11Session* session, wc_CryptoInfo* info)
     CK_OBJECT_HANDLE   key = NULL_PTR;
     CK_MECHANISM       mech;
     CK_ULONG           outLen;
-    word32             len;
+    byte*              out = info->cipher.aesgcm_dec.out;
+    byte               noOut[1];
+    word32             done = 0;
+
+    /* A NULL output buffer would make the token only report a length. */
+    if (out == NULL)
+        out = noOut;
 
     /* Check operation is supported. */
     ret = Pkcs11MechAvail(session, CKM_AES_GCM, &mechInfo);
@@ -6203,44 +6214,53 @@ static int Pkcs11AesGcmDecrypt(Pkcs11Session* session, wc_CryptoInfo* info)
 
         rv = session->func->C_DecryptInit(session->handle, &mech, key);
         PKCS11_RV("C_DecryptInit", rv);
-        if (rv != CKR_OK) {
+        if (rv == CKR_MECHANISM_PARAM_INVALID && aes->idLen == 0 &&
+                aes->labelLen == 0) {
+            ret = CRYPTOCB_UNAVAILABLE;
+        }
+        else if (rv != CKR_OK) {
             ret = WC_HW_E;
         }
     }
-    if (ret == 0) {
-        outLen = len = info->cipher.aesgcm_dec.sz;
+    if (ret == 0 && info->cipher.aesgcm_dec.sz > 0) {
+        outLen = info->cipher.aesgcm_dec.sz;
         rv = session->func->C_DecryptUpdate(session->handle,
                                         (CK_BYTE_PTR)info->cipher.aesgcm_dec.in,
-                                        info->cipher.aesgcm_dec.sz,
-                                        info->cipher.aesgcm_dec.out,
+                                        info->cipher.aesgcm_dec.sz, out,
                                         &outLen);
         PKCS11_RV("C_DecryptUpdate", rv);
-        if (rv != CKR_OK) {
+        if (rv != CKR_OK || outLen > info->cipher.aesgcm_dec.sz) {
             ret = WC_HW_E;
+        }
+        else {
+            done = (word32)outLen;
         }
     }
     if (ret == 0) {
         /* Put authentication tag in as encrypted data. */
-        outLen = len = (len + info->cipher.aesgcm_dec.authTagSz -
-                                                                (word32)outLen);
+        outLen = info->cipher.aesgcm_dec.sz - done;
         rv = session->func->C_DecryptUpdate(session->handle,
                                    (CK_BYTE_PTR)info->cipher.aesgcm_dec.authTag,
                                    info->cipher.aesgcm_dec.authTagSz,
-                                   info->cipher.aesgcm_dec.out,
-                                   &outLen);
+                                   out + done, &outLen);
         PKCS11_RV("C_DecryptUpdate", rv);
-        if (rv != CKR_OK) {
+        if (rv != CKR_OK || outLen > info->cipher.aesgcm_dec.sz - done) {
             ret = WC_HW_E;
+        }
+        else {
+            done += (word32)outLen;
         }
     }
     if (ret == 0) {
-        outLen = len = (len - (word32)outLen);
         /* Decrypted data comes out now. */
-        rv = session->func->C_DecryptFinal(session->handle,
-                                           info->cipher.aesgcm_dec.out,
+        outLen = info->cipher.aesgcm_dec.sz - done;
+        rv = session->func->C_DecryptFinal(session->handle, out + done,
                                            &outLen);
         PKCS11_RV("C_DecryptFinal", rv);
-        if (rv != CKR_OK) {
+        if (rv == CKR_ENCRYPTED_DATA_INVALID || rv == CKR_AEAD_DECRYPT_FAILED) {
+            ret = AES_GCM_AUTH_E;
+        }
+        else if (rv != CKR_OK) {
             ret = WC_HW_E;
         }
     }
