@@ -4245,12 +4245,45 @@ static int Pkcs11GetEccParams(Pkcs11Session* session, CK_OBJECT_HANDLE privKey,
 
 #ifdef HAVE_ECC_SIGN
 /**
+ * Check whether the caller chose the signing nonce, which a token cannot use.
+ *
+ * @param  key  [in]  ECC key to sign with.
+ * @return  1 when k is set or deterministic.
+ * @return  0 otherwise.
+ */
+static int Pkcs11EccSignKChosen(ecc_key* key)
+{
+    int chosen = 0;
+
+#if defined(WOLFSSL_ECDSA_DETERMINISTIC_K) || \
+    defined(WOLFSSL_ECDSA_DETERMINISTIC_K_VARIANT)
+    if (key->deterministic)
+        chosen = 1;
+#endif
+#if defined(WOLFSSL_ECDSA_SET_K) || defined(WOLFSSL_ECDSA_SET_K_ONE_LOOP) || \
+    defined(WOLFSSL_ECDSA_DETERMINISTIC_K) || \
+    defined(WOLFSSL_ECDSA_DETERMINISTIC_K_VARIANT)
+#ifndef WOLFSSL_NO_MALLOC
+    if (key->sign_k != NULL)
+        chosen = 1;
+#else
+    if (key->sign_k_set)
+        chosen = 1;
+#endif
+#endif
+    (void)key;
+
+    return chosen;
+}
+
+/**
  * Performs the ECDSA signing operation.
  *
  * @param  session  [in]  Session object.
  * @param  info     [in]  Cryptographic operation data.
  * @return  WC_HW_E when a PKCS#11 library call fails or the signature has
  *          the wrong length.
+ * @return  CRYPTOCB_UNAVAILABLE when k is chosen for an in-memory key.
  * @return  0 on success.
  */
 static int Pkcs11ECDSA_Sign(Pkcs11Session* session, wc_CryptoInfo* info)
@@ -4274,6 +4307,11 @@ static int Pkcs11ECDSA_Sign(Pkcs11Session* session, wc_CryptoInfo* info)
     }
     if (ret == 0 && info->pk.eccsign.out == NULL) {
         ret = BAD_FUNC_ARG;
+    }
+    if (ret == 0 && info->pk.eccsign.key->devCtx == NULL &&
+            PKCS11_ECC_HAS_PRIV(info->pk.eccsign.key) &&
+            Pkcs11EccSignKChosen(info->pk.eccsign.key)) {
+        ret = CRYPTOCB_UNAVAILABLE;
     }
     if (ret == 0) {
         WOLFSSL_MSG("PKCS#11: EC Signing Operation");

@@ -1907,6 +1907,14 @@ int test_wc_Pkcs11_EcKeyUsage(void)
     byte sig[ECC_MAX_SIG_SIZE];
     word32 sigLen = sizeof(sig);
 #endif
+#if defined(HAVE_ECC_SIGN) && (defined(WOLFSSL_ECDSA_DETERMINISTIC_K) || \
+    defined(WOLFSSL_ECDSA_DETERMINISTIC_K_VARIANT))
+    static CK_OBJECT_CLASS privCls = CKO_PRIVATE_KEY;
+    CK_ATTRIBUTE privTmpl[] = {
+        { CKA_CLASS, &privCls, sizeof(privCls) }
+    };
+    CK_OBJECT_HANDLE obj = 0;
+#endif
 #ifndef NO_PKCS11_ECDH
     byte secret[sizeof(test_pkcs11_secret)];
     word32 secretLen = sizeof(secret);
@@ -2070,6 +2078,23 @@ int test_wc_Pkcs11_EcKeyUsage(void)
     ExpectIntEQ(test_pkcs11_last_priv.sign, CK_TRUE);
     ExpectIntEQ(test_pkcs11_last_priv.derive, CK_FALSE);
     ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+#if defined(WOLFSSL_ECDSA_DETERMINISTIC_K) || \
+    defined(WOLFSSL_ECDSA_DETERMINISTIC_K_VARIANT)
+    /* Software signs a key in memory with the k the caller chose. */
+    test_pkcs11_reset();
+    ExpectIntEQ(wc_ecc_set_deterministic(&soft, 1), 0);
+    sigLen = sizeof(sig);
+    ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token),
+        WC_NO_ERR_TRACE(CRYPTOCB_UNAVAILABLE));
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    /* The token still signs with a key it holds. */
+    ExpectIntEQ(test_pkcs11_store_create(1, privTmpl, 1, &obj), CKR_OK);
+    soft.devCtx = (void*)(wc_ptr_t)obj;
+    sigLen = sizeof(sig);
+    ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token), 0);
+    soft.devCtx = NULL;
+    ExpectIntEQ(wc_ecc_set_deterministic(&soft, 0), 0);
+#endif
 #endif
 #ifndef NO_PKCS11_ECDH
     test_pkcs11_reset();
