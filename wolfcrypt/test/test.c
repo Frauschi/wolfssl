@@ -57479,18 +57479,21 @@ static wc_test_ret_t ecc_test_custom_curves(WC_RNG* rng)
 
     /* test use of custom curve - using BRAINPOOLP256R1 for test */
 #if defined(HAVE_ECC_BRAINPOOL) && !defined(HAVE_INTEL_QA)
-    #ifndef WOLFSSL_ECC_CURVE_STATIC
-        WOLFSSL_SMALL_STACK_STATIC const ecc_oid_t ecc_oid_brainpoolp256r1[] = {
-            0x2B,0x24,0x03,0x03,0x02,0x08,0x01,0x01,0x07
-        };
-        #define ecc_oid_brainpoolp256r1_sz \
-              (sizeof(ecc_oid_brainpoolp256r1) / sizeof(ecc_oid_t))
+    #ifdef HAVE_OID_ENCODING
+        #define CODED_TEST_BRAINPOOLP256R1    {1,3,36,3,3,2,8,1,1,7}
+        #define CODED_TEST_BRAINPOOLP256R1_SZ 10
     #else
-        #define ecc_oid_brainpoolp256r1 { \
-            0x2B,0x24,0x03,0x03,0x02,0x08,0x01,0x01,0x07 \
-        }
-        #define ecc_oid_brainpoolp256r1_sz 9
+        #define CODED_TEST_BRAINPOOLP256R1 \
+            {0x2B,0x24,0x03,0x03,0x02,0x08,0x01,0x01,0x07}
+        #define CODED_TEST_BRAINPOOLP256R1_SZ 9
     #endif
+    #ifndef WOLFSSL_ECC_CURVE_STATIC
+        WOLFSSL_SMALL_STACK_STATIC const ecc_oid_t ecc_oid_brainpoolp256r1[] =
+            CODED_TEST_BRAINPOOLP256R1;
+    #else
+        #define ecc_oid_brainpoolp256r1 CODED_TEST_BRAINPOOLP256R1
+    #endif
+    #define ecc_oid_brainpoolp256r1_sz CODED_TEST_BRAINPOOLP256R1_SZ
     #define ecc_oid_brainpoolp256r1_sum 104
 
     WOLFSSL_SMALL_STACK_STATIC const ecc_set_type ecc_dp_brainpool256r1 = {
