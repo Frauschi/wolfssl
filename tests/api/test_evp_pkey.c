@@ -389,6 +389,49 @@ int test_wolfSSL_EVP_MD_hmac_signing(void)
 }
 
 /* Verify that EVP_DigestVerifyFinal rejects zero-length HMAC tags. */
+/* Testing that a final on an HMAC a device holds ends the operation. */
+int test_wolfSSL_EVP_MD_hmac_signing_device(void)
+{
+    EXPECT_DECLS;
+#if defined(OPENSSL_EXTRA) && !defined(NO_HMAC) && !defined(NO_SHA256) && \
+    defined(WOLF_CRYPTO_CB) && !defined(WOLF_CRYPTO_CB_FIND) && \
+    !defined(HAVE_SELFTEST) && !defined(HAVE_FIPS)
+    static const unsigned char testKey[] = {
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+        0x0b, 0x0b, 0x0b, 0x0b
+    };
+    static const char testData[] = "Hi There";
+    static const unsigned char testResult[] = {
+        0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53,
+        0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b, 0xf1, 0x2b,
+        0x88, 0x1d, 0xc2, 0x00, 0xc9, 0x83, 0x3d, 0xa7,
+        0x26, 0xe9, 0x37, 0x6c, 0x2e, 0x32, 0xcf, 0xf7
+    };
+    unsigned char check[WC_SHA256_DIGEST_SIZE];
+    size_t checkSz = sizeof(check);
+    WOLFSSL_EVP_PKEY* key = NULL;
+    WOLFSSL_EVP_MD_CTX mdCtx;
+
+    ExpectNotNull(key = wolfSSL_EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL,
+                                                testKey, (int)sizeof(testKey)));
+    wolfSSL_EVP_MD_CTX_init(&mdCtx);
+    ExpectIntEQ(wolfSSL_EVP_DigestSignInit(&mdCtx, NULL, wolfSSL_EVP_sha256(),
+        NULL, key), 1);
+    ExpectIntEQ(wolfSSL_EVP_DigestSignUpdate(&mdCtx, testData,
+        (unsigned int)XSTRLEN(testData)), 1);
+    mdCtx.hash.hmac.devCtx = (void*)&mdCtx; /* placeholder for device state */
+    ExpectIntEQ(wolfSSL_EVP_DigestSignFinal(&mdCtx, check, &checkSz), 1);
+    ExpectBufEQ(check, testResult, sizeof(testResult));
+    ExpectIntEQ(wolfSSL_EVP_DigestSignUpdate(&mdCtx, testData, 4), 0);
+    checkSz = sizeof(check);
+    ExpectIntEQ(wolfSSL_EVP_DigestSignFinal(&mdCtx, check, &checkSz), 0);
+    ExpectIntEQ(wolfSSL_EVP_MD_CTX_cleanup(&mdCtx), 1);
+    wolfSSL_EVP_PKEY_free(key);
+#endif
+    return EXPECT_RESULT();
+}
+
 int test_wolfSSL_EVP_DigestVerify_HMAC_zero_len_forgery(void)
 {
     EXPECT_DECLS;

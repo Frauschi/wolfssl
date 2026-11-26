@@ -1121,6 +1121,68 @@ int test_wc_HmacFree_CryptoCb(void)
     return EXPECT_RESULT();
 } /* END test_wc_HmacFree_CryptoCb */
 
+/*
+ * Testing that an Hmac keeps its own copy of the raw key for a device, and
+ * that wc_HmacCopy() refuses to share the running state a device holds.
+ */
+int test_wc_HmacCryptoCb_KeyCopy(void)
+{
+    EXPECT_DECLS;
+#if !defined(NO_HMAC) && !defined(NO_SHA256) && defined(WOLF_CRYPTO_CB) && \
+    !defined(WOLFSSL_NO_MALLOC) && !defined(WOLFSSL_KCAPI_HMAC) && \
+    !defined(HAVE_SELFTEST) && !defined(HAVE_FIPS)
+    Hmac hmac;
+    Hmac copy;
+    byte key[16];
+    byte exp[16];
+    byte* longKey = NULL;
+
+    XMEMSET(key, 0x11, sizeof(key));
+    XMEMSET(exp, 0x11, sizeof(exp));
+    XMEMSET(&copy, 0, sizeof(copy));
+
+    ExpectIntEQ(wc_CryptoCb_RegisterDevice(TEST_HMAC_CRYPTOCB_DEVID,
+        test_hmac_cryptocb_fallback_cb, NULL), 0);
+    ExpectIntEQ(wc_HmacInit(&hmac, NULL, TEST_HMAC_CRYPTOCB_DEVID), 0);
+    ExpectIntEQ(wc_HmacSetKey(&hmac, WC_SHA256, key, sizeof(key)), 0);
+    XMEMSET(key, 0x22, sizeof(key));
+    ExpectNotNull(hmac.keyRaw);
+    ExpectPtrNE(hmac.keyRaw, key);
+    ExpectBufEQ(hmac.keyRaw, exp, sizeof(exp));
+
+    ExpectIntEQ(wc_HmacCopy(&hmac, &copy), 0);
+    ExpectPtrNE(copy.keyRaw, hmac.keyRaw);
+    ExpectBufEQ(copy.keyRaw, exp, sizeof(exp));
+    wc_HmacFree(&copy);
+
+    hmac.devCtx = (void*)&hmac; /* placeholder for state held by a device */
+    ExpectIntEQ(wc_HmacCopy(&hmac, &copy), WC_NO_ERR_TRACE(BAD_STATE_E));
+    wc_HmacFree(&hmac);
+
+    /* The copy is sized by the key, as keyLen only holds 16 bits. */
+    ExpectNotNull(longKey = (byte*)XMALLOC(0x10001, NULL,
+        DYNAMIC_TYPE_TMP_BUFFER));
+    if (longKey != NULL)
+        XMEMSET(longKey, 0x33, 0x10001);
+    ExpectIntEQ(wc_HmacInit(&hmac, NULL, TEST_HMAC_CRYPTOCB_DEVID), 0);
+    ExpectIntEQ(wc_HmacSetKey(&hmac, WC_SHA256, longKey, 0x10001), 0);
+    ExpectIntEQ(hmac.keyRawSz, 0x10001);
+    wc_HmacFree(&hmac);
+    XFREE(longKey, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+
+#ifndef WOLF_CRYPTO_CB_FIND
+    /* Without a device only software uses the key, so it is not copied. */
+    ExpectIntEQ(wc_HmacInit(&hmac, NULL, INVALID_DEVID), 0);
+    ExpectIntEQ(wc_HmacSetKey(&hmac, WC_SHA256, key, sizeof(key)), 0);
+    ExpectPtrEq(hmac.keyRaw, key);
+    wc_HmacFree(&hmac);
+#endif
+
+    wc_CryptoCb_UnRegisterDevice(TEST_HMAC_CRYPTOCB_DEVID);
+#endif
+    return EXPECT_RESULT();
+} /* END test_wc_HmacCryptoCb_KeyCopy */
+
 #if !defined(NO_HMAC) && !defined(NO_SHA256) && defined(WOLF_CRYPTO_CB) && \
     defined(WOLF_PRIVATE_KEY_ID) && !defined(HAVE_SELFTEST) && \
     !defined(HAVE_FIPS) && !defined(WOLFSSL_KCAPI)

@@ -1521,6 +1521,13 @@ int wolfSSL_HmacCopy(Hmac* dst, Hmac* src)
     heap = NULL;
 #endif
 
+#ifdef WOLF_CRYPTO_CB
+    /* A device holds the running state, so there is no state to copy here. */
+    if (src->devCtx != NULL) {
+        return 0;
+    }
+#endif
+
     /* Initialize the destination object to reset state. */
     if (wc_HmacInit(dst, heap, 0) != 0) {
         ret = 0;
@@ -1790,6 +1797,11 @@ int wolfSSL_HMAC_CTX_copy(WOLFSSL_HMAC_CTX* dst, WOLFSSL_HMAC_CTX* src)
     if ((dst == NULL) || (src == NULL)) {
         ret = 0;
     }
+#ifdef WOLF_CRYPTO_CB
+    if ((ret == 1) && (src->hmac.devCtx != NULL)) {
+        ret = 0;
+    }
+#endif
 
     if (ret == 1) {
         /* Release what dst held, such as its key copy. */

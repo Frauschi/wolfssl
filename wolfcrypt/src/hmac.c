@@ -592,6 +592,12 @@ int wc_HmacCopy(Hmac* src, Hmac* dst) {
     }
 #endif
 
+#ifdef WOLF_CRYPTO_CB
+    /* A device holds the running state, which the two objects cannot share. */
+    if ((ret == 0) && (dst->devCtx != NULL) && (dst->devCtx == src->devCtx))
+        ret = BAD_STATE_E;
+#endif
+
     if (ret != 0) {
         /* Release whichever deep copies succeeded before zeroing dst, lest
          * their owned sub-objects leak.

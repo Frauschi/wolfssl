@@ -5062,13 +5062,25 @@ static int wolfSSL_evp_digest_pk_init(WOLFSSL_EVP_MD_CTX *ctx,
 
 /* Finalize an EVP_DigestSign/Verify operation - common part only.
  * Finalize a digest for RSA and ECC keys, or HMAC for HMAC key.
- * Copies the digest so that you can keep updating.
+ * Copies the digest so that you can keep updating, except for an HMAC that a
+ * device holds: that operation ends here.
  */
 static int wolfssl_evp_digest_pk_final(WOLFSSL_EVP_MD_CTX *ctx,
                                        unsigned char *md, unsigned int* mdlen)
 {
     int  ret;
 
+#ifdef WOLF_CRYPTO_CB
+    /* A device holds the running HMAC state, which cannot be copied. */
+    if (ctx->isHMAC && ctx->hash.hmac.devCtx != NULL) {
+        ret = (wc_HmacFinal(&ctx->hash.hmac, md) == 0);
+        /* Later updates and finals fail on the freed object. */
+        wc_HmacFree(&ctx->hash.hmac);
+        ctx->hash.hmac.macType = WC_HASH_TYPE_NONE;
+        ctx->hash.hmac.devId = INVALID_DEVID;
+        return ret;
+    }
+#endif
     if (ctx->isHMAC) {
 #ifdef WOLFSSL_SMALL_STACK
         Hmac *hmacCopy = (Hmac *)XMALLOC(sizeof(Hmac), NULL, DYNAMIC_TYPE_OPENSSL);
