@@ -43,6 +43,9 @@
 #ifdef WOLFSSL_SWDEV
 #include "swdev/swdev_loader.h"
 #endif
+#ifdef WOLFSSL_PKCS11DEV
+#include "pkcs11dev/pkcs11dev_loader.h"
+#endif
 
 int allTesting = 1;
 int apiTesting = 1;
@@ -275,6 +278,12 @@ int unit_test(int argc, char** argv)
             goto exit;
         }
     #endif
+    #ifdef WOLFSSL_PKCS11DEV
+        if ((ret = wc_Pkcs11Dev_Init()) != 0) {
+            fprintf(stderr, "wc_Pkcs11Dev_Init failed: %d\n", (int)ret);
+            goto exit;
+        }
+    #endif
 
         XMEMSET(&wc_args, 0, sizeof(wc_args));
         wolfcrypt_test(&wc_args);
@@ -285,6 +294,9 @@ int unit_test(int argc, char** argv)
 
     #ifdef WOLFSSL_SWDEV
         wc_SwDev_Cleanup();
+    #endif
+    #ifdef WOLFSSL_PKCS11DEV
+        wc_Pkcs11Dev_Cleanup();
     #endif
 
         if ((ret = wolfCrypt_Cleanup()) != 0) {
@@ -351,12 +363,23 @@ int unit_test(int argc, char** argv)
         goto exit;
     }
     #endif
+    #ifdef WOLFSSL_PKCS11DEV
+    if (wolfCrypt_Init() != 0 || wc_Pkcs11Dev_Init() != 0) {
+        fprintf(stderr, "wc_Pkcs11Dev_Init before SuiteTest failed\n");
+        ret = 1;
+        goto exit;
+    }
+    #endif
     if ((ret = SuiteTest(argc, argv)) != 0) {
         fprintf(stderr, "suite test failed with %d\n", ret);
         goto exit;
     }
     #ifdef WOLFSSL_SWDEV
     wc_SwDev_Cleanup();
+    wolfCrypt_Cleanup();
+    #endif
+    #ifdef WOLFSSL_PKCS11DEV
+    wc_Pkcs11Dev_Cleanup();
     wolfCrypt_Cleanup();
     #endif
 #endif

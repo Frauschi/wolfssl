@@ -12743,6 +12743,24 @@ then
     AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_SWDEV -DWOLF_CRYPTO_CB_FIND"
 fi
 
+# pkcs11dev: route the test programs' crypto through a PKCS#11 module
+AC_ARG_ENABLE([pkcs11dev],
+    [AS_HELP_STRING([--enable-pkcs11dev],[Run wolfCrypt tests through the PKCS#11 module named by WOLFSSL_PKCS11DEV_MODULE (default: disabled). Requires --enable-pkcs11 and --enable-cryptocb])],
+    [ ENABLED_PKCS11DEV=$enableval ],
+    [ ENABLED_PKCS11DEV=no ]
+)
+
+if test "$ENABLED_PKCS11DEV" = "yes"
+then
+    if test "$ENABLED_PKCS11" = "no" || test "$ENABLED_CRYPTOCB" != "yes"; then
+        AC_MSG_ERROR([--enable-pkcs11dev requires --enable-pkcs11 and --enable-cryptocb])
+    fi
+    if test "$ENABLED_SWDEV" = "yes"; then
+        AC_MSG_ERROR([--enable-pkcs11dev cannot be combined with --enable-swdev])
+    fi
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_PKCS11DEV -DWOLF_CRYPTO_CB_FIND"
+fi
+
 
 # Asynchronous Crypto
 AC_ARG_ENABLE([asynccrypt],
@@ -14344,6 +14362,10 @@ then
         AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_SWDEV -DWOLF_CRYPTO_CB_FIND"
         AM_CCASFLAGS="$AM_CCASFLAGS -DWOLFSSL_SWDEV -DWOLF_CRYPTO_CB_FIND"
     ])
+    AS_IF([test "x$ENABLED_PKCS11DEV" = "xyes"],[
+        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_PKCS11DEV -DWOLF_CRYPTO_CB_FIND"
+        AM_CCASFLAGS="$AM_CCASFLAGS -DWOLFSSL_PKCS11DEV -DWOLF_CRYPTO_CB_FIND"
+    ])
 
     # Generate assembly-safe user_settings_asm.h (just preprocessor directives
     # from user_settings.h).
@@ -14935,6 +14957,7 @@ AM_CONDITIONAL([BUILD_ASYNCCRYPT],[test "x$ENABLED_ASYNCCRYPT" = "xyes"])
 AM_CONDITIONAL([BUILD_WOLFEVENT],[test "x$ENABLED_ASYNCCRYPT" = "xyes" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_CRYPTOCB],[test "x$ENABLED_CRYPTOCB" = "xyes" || test "x$ENABLED_USERSETTINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_SWDEV],[test "x$ENABLED_SWDEV" = "xyes"])
+AM_CONDITIONAL([BUILD_PKCS11DEV],[test "x$ENABLED_PKCS11DEV" = "xyes"])
 AM_CONDITIONAL([BUILD_PSK],[test "x$ENABLED_PSK" = "xyes"])
 AM_CONDITIONAL([BUILD_TRUST_PEER_CERT],[test "x$ENABLED_TRUSTED_PEER_CERT" = "xyes"])
 AM_CONDITIONAL([BUILD_PKI],[test "x$ENABLED_PKI" = "xyes"])

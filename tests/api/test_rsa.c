@@ -1435,7 +1435,8 @@ int test_wc_RsaDecrypt_BoundsCheck(void)
     EXPECT_DECLS;
 #if !defined(NO_RSA) && defined(WC_RSA_NO_PADDING) && \
     (defined(USE_CERT_BUFFERS_1024) || defined(USE_CERT_BUFFERS_2048)) && \
-    defined(WOLFSSL_PUBLIC_MP) && !defined(NO_RSA_BOUNDS_CHECK)
+    defined(WOLFSSL_PUBLIC_MP) && !defined(NO_RSA_BOUNDS_CHECK) && \
+    !defined(WOLFSSL_PKCS11DEV)
     WC_RNG rng;
     RsaKey key;
     byte flatC[256];

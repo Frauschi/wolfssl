@@ -669,8 +669,11 @@ int test_wc_ecc_signVerify_hash(void)
         WC_NO_ERR_TRACE(ECC_BAD_ARG_E));
     ExpectIntEQ(wc_ecc_sign_hash(digest, digestlen, sig, NULL, &rng, &key),
         WC_NO_ERR_TRACE(ECC_BAD_ARG_E));
+#ifndef WOLFSSL_PKCS11DEV
+    /* A token signs without the caller's RNG. */
     ExpectIntEQ(wc_ecc_sign_hash(digest, digestlen, sig, &siglen, NULL, &key),
         WC_NO_ERR_TRACE(ECC_BAD_ARG_E));
+#endif
     ExpectIntEQ(wc_ecc_sign_hash(digest, digestlen, sig, &siglen, &rng, NULL),
         WC_NO_ERR_TRACE(ECC_BAD_ARG_E));
 #if (!defined(HAVE_FIPS) || FIPS_VERSION_GT(7,0)) && !defined(HAVE_SELFTEST)
@@ -1101,7 +1104,8 @@ int test_wc_ecc_order_wider_than_field(void)
     !defined(WOLFSSL_ATECC508A) && !defined(WOLFSSL_ATECC608A) && \
     !defined(WOLFSSL_MICROCHIP_TA100) && \
     !defined(WOLFSSL_SILABS_SE_ACCEL) && !defined(WOLFSSL_SE050) && \
-    !defined(WOLFSSL_KCAPI_ECC) && !defined(WOLF_CRYPTO_CB_ONLY_ECC)
+    !defined(WOLFSSL_KCAPI_ECC) && !defined(WOLF_CRYPTO_CB_ONLY_ECC) && \
+    !defined(WOLFSSL_PKCS11DEV)
 #define TEST_ECC_SHARED_SECRET_AT_INFINITY
 
 /* Agree with a private scalar equal to the curve order n. Every point on these
@@ -6609,6 +6613,9 @@ static int ecc_keygen_clear_cb(int devIdArg, wc_CryptoInfo* info, void* ctx)
 #ifdef WOLFSSL_SWDEV
     #include <tests/swdev/swdev_loader.h>
 #endif
+#ifdef WOLFSSL_PKCS11DEV
+    #include <tests/pkcs11dev/pkcs11dev_loader.h>
+#endif
 static int ecc_keygen_find_cb(int devIdArg, int algoType)
 {
     if ((devIdArg == INVALID_DEVID) && (algoType == WC_ALGO_TYPE_PK))
@@ -6629,8 +6636,14 @@ static int ecc_keygen_sw_cb(int devIdArg, wc_CryptoInfo* info, void* ctx)
     if ((info->algo_type == WC_ALGO_TYPE_PK) &&
             (info->pk.type == WC_PK_TYPE_EC_KEYGEN)) {
         info->pk.eckg.key->devId = INVALID_DEVID;
+    #ifdef WOLFSSL_PKCS11DEV
+        wc_CryptoCb_SetDeviceFindCb(NULL);
+    #endif
         ret = wc_ecc_make_key_ex(info->pk.eckg.rng, info->pk.eckg.size,
             info->pk.eckg.key, info->pk.eckg.curveId);
+    #ifdef WOLFSSL_PKCS11DEV
+        wc_CryptoCb_SetDeviceFindCb(wc_Pkcs11Dev_FindCb);
+    #endif
         info->pk.eckg.key->devId = devIdArg;
     }
     return ret;
@@ -6708,6 +6721,8 @@ int test_wc_ecc_make_key_id_dev(void)
     wc_ecc_free(&key);
 #ifdef WOLFSSL_SWDEV
     wc_CryptoCb_SetDeviceFindCb(wc_SwDev_FindCb);
+#elif defined(WOLFSSL_PKCS11DEV)
+    wc_CryptoCb_SetDeviceFindCb(wc_Pkcs11Dev_FindCb);
 #else
     wc_CryptoCb_SetDeviceFindCb(NULL);
 #endif

@@ -1270,7 +1270,8 @@ int test_wc_HmacId_NoDevice(void)
     EXPECT_DECLS;
 #if !defined(NO_HMAC) && !defined(NO_SHA256) && \
     defined(WOLF_PRIVATE_KEY_ID) && !defined(HAVE_SELFTEST) && \
-    !defined(HAVE_FIPS) && !defined(WOLFSSL_KCAPI)
+    !defined(HAVE_FIPS) && !defined(WOLFSSL_KCAPI) && \
+    !defined(WOLFSSL_PKCS11DEV)
     Hmac hmac;
     byte id[] = { 0x01, 0x02, 0x03, 0x04 };
     byte key[] = "hmac key";
@@ -1935,6 +1936,9 @@ static int test_hmac_oneshot_dev_cb(int cbDevId, wc_CryptoInfo* info,
 #ifdef WOLFSSL_SWDEV
     #include <tests/swdev/swdev_loader.h>
 #endif
+#ifdef WOLFSSL_PKCS11DEV
+    #include <tests/pkcs11dev/pkcs11dev_loader.h>
+#endif
 /* Set to send the next HMAC call that has no device ID to the test device.
  * It is used once, so that the calls the device makes stay in software. */
 static int test_hmac_oneshot_find_next = 0;
@@ -2156,6 +2160,7 @@ int test_wc_HmacGenerate_CryptoCb_OneShot(void)
     ExpectIntEQ(dev.updates, 1);
     wc_HmacFree(&hmac);
 
+#ifndef WOLFSSL_PKCS11DEV
     /* Without a device ID the key on the device is not replaced by an empty
      * key. The call fails and the context still names the key. */
     tagSz = sizeof(ref);
@@ -2173,6 +2178,7 @@ int test_wc_HmacGenerate_CryptoCb_OneShot(void)
     ExpectIntEQ(hmac.idLen, (int)sizeof(id));
     ExpectIntEQ(dev.oneShots + dev.updates + dev.finals, 0);
     wc_HmacFree(&hmac);
+#endif
 
 #ifdef WOLF_CRYPTO_CB_FIND
     /* A finder can give a call that has no device ID to the device. The
@@ -2206,6 +2212,8 @@ int test_wc_HmacGenerate_CryptoCb_OneShot(void)
     /* Put back the finder the test harness uses. */
 #ifdef WOLFSSL_SWDEV
     wc_CryptoCb_SetDeviceFindCb(wc_SwDev_FindCb);
+#elif defined(WOLFSSL_PKCS11DEV)
+    wc_CryptoCb_SetDeviceFindCb(wc_Pkcs11Dev_FindCb);
 #else
     wc_CryptoCb_SetDeviceFindCb(NULL);
 #endif

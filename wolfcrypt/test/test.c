@@ -78,6 +78,9 @@
 #ifdef WOLFSSL_SWDEV
     #include "../../tests/swdev/swdev_loader.h"
 #endif
+#ifdef WOLFSSL_PKCS11DEV
+    #include "../../tests/pkcs11dev/pkcs11dev_loader.h"
+#endif
 
 #if defined(WC_ECC_NONBLOCK) && defined(WOLFSSL_PUBLIC_MP) && \
     defined(HAVE_ECC_SIGN) && defined(HAVE_ECC_VERIFY) && \
@@ -4154,6 +4157,13 @@ options: [-s max_relative_stack_bytes] [-m max_relative_heap_memory_bytes]\n\
             err_sys("Error with wc_SwDev_Init!\n", args.return_code);
         }
 #endif
+#ifdef WOLFSSL_PKCS11DEV
+        if ((ret = wc_Pkcs11Dev_Init()) != 0) {
+            printf("wc_Pkcs11Dev_Init failed %d\n", (int)ret);
+            args.return_code = WC_TEST_RET_ENC_EC(ret);
+            err_sys("Error with wc_Pkcs11Dev_Init!\n", args.return_code);
+        }
+#endif
 
 #ifdef HAVE_WC_INTROSPECTION
         printf("Math: %s\n", wc_GetMathInfo());
@@ -4169,6 +4179,9 @@ options: [-s max_relative_stack_bytes] [-m max_relative_heap_memory_bytes]\n\
 
 #ifdef WOLFSSL_SWDEV
         wc_SwDev_Cleanup();
+#endif
+#ifdef WOLFSSL_PKCS11DEV
+        wc_Pkcs11Dev_Cleanup();
 #endif
 
         if ((ret = wolfCrypt_Cleanup()) != 0) {

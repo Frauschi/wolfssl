@@ -55,7 +55,7 @@ int test_wolfSSL_hmac_includes_evp(void)
  * MAC OpenSSL compatibility API Testing
  ******************************************************************************/
 
-#if defined(OPENSSL_EXTRA) && !defined(NO_HMAC)
+#if defined(OPENSSL_EXTRA) && !defined(NO_HMAC) && !defined(WOLFSSL_PKCS11DEV)
 /* helper function for test_wolfSSL_HMAC_CTX, digest size is expected to be a
  * buffer of 64 bytes.
  *
@@ -226,7 +226,7 @@ int test_wolfSSL_HMAC_CTX_cleanup_zeroize(void)
 int test_wolfSSL_HMAC_CTX(void)
 {
     EXPECT_DECLS;
-#if defined(OPENSSL_EXTRA) && !defined(NO_HMAC)
+#if defined(OPENSSL_EXTRA) && !defined(NO_HMAC) && !defined(WOLFSSL_PKCS11DEV)
     unsigned char digest[64];
     int digestSz;
     WOLFSSL_HMAC_CTX* hmac_ctx = NULL;

@@ -12745,6 +12745,9 @@ static int cbDirectHandle = 0;
 #ifdef WOLFSSL_SWDEV
     #include <tests/swdev/swdev_loader.h>
 #endif
+#ifdef WOLFSSL_PKCS11DEV
+    #include <tests/pkcs11dev/pkcs11dev_loader.h>
+#endif
 /* Finder for the find-mode section: sends "no device" to the mock */
 static int test_CryptoCb_AesDirect_FindCb(int currentId, int algoType)
 {
@@ -13009,6 +13012,8 @@ int test_wc_CryptoCb_AesDirect(void)
     /* Put back the finder the test harness uses */
 #ifdef WOLFSSL_SWDEV
     wc_CryptoCb_SetDeviceFindCb(wc_SwDev_FindCb);
+#elif defined(WOLFSSL_PKCS11DEV)
+    wc_CryptoCb_SetDeviceFindCb(wc_Pkcs11Dev_FindCb);
 #else
     wc_CryptoCb_SetDeviceFindCb(NULL);
 #endif
@@ -16152,6 +16157,9 @@ static int test_CryptoCb_AesDevKey_Cb(int devId, wc_CryptoInfo* info,
 #ifdef WOLFSSL_SWDEV
     #include <tests/swdev/swdev_loader.h>
 #endif
+#ifdef WOLFSSL_PKCS11DEV
+    #include <tests/pkcs11dev/pkcs11dev_loader.h>
+#endif
 /* Finder that sends an Aes with no device to the test device. */
 static int test_CryptoCb_AesDevKey_FindCb(int devId, int algoType)
 {
@@ -16228,6 +16236,8 @@ int test_wc_CryptoCb_AesSetKeyDirect_DevKey(void)
     /* Put back the finder the test harness uses */
 #ifdef WOLFSSL_SWDEV
     wc_CryptoCb_SetDeviceFindCb(wc_SwDev_FindCb);
+#elif defined(WOLFSSL_PKCS11DEV)
+    wc_CryptoCb_SetDeviceFindCb(wc_Pkcs11Dev_FindCb);
 #else
     wc_CryptoCb_SetDeviceFindCb(NULL);
 #endif

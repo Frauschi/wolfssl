@@ -29,6 +29,9 @@
 #include <wolfssl/wolfcrypt/ecc.h>
 #include <wolfssl/wolfcrypt/random.h>
 #include <wolfssl/wolfcrypt/wc_pkcs11.h>
+#ifdef WOLFSSL_PKCS11DEV
+    #include <tests/pkcs11dev/pkcs11dev_loader.h>
+#endif
 
 #if defined(HAVE_ECC) && !defined(NO_PKCS11_ECC) && \
     !defined(NO_ECC256) && !defined(NO_ECC_SECP)
@@ -1725,8 +1728,15 @@ static int test_pkcs11_make_ecc(ecc_key* key, WC_RNG* rng, const byte* id,
 {
     int ret = wc_ecc_init_id(key, (unsigned char*)id, idLen, NULL,
         INVALID_DEVID);
+#ifdef WOLFSSL_PKCS11DEV
+    /* Keep this software key off the harness token. */
+    wc_CryptoCb_SetDeviceFindCb(NULL);
+#endif
     if (ret == 0)
         ret = wc_ecc_make_key(rng, 32, key);
+#ifdef WOLFSSL_PKCS11DEV
+    wc_CryptoCb_SetDeviceFindCb(wc_Pkcs11Dev_FindCb);
+#endif
 #ifdef WOLFSSL_ASYNC_CRYPT
     if (ret == WC_NO_ERR_TRACE(WC_PENDING_E))
         ret = wc_AsyncWait(ret, &key->asyncDev, WC_ASYNC_FLAG_NONE);

@@ -71,6 +71,9 @@
 #ifdef WOLFSSL_SWDEV
 #include "swdev/swdev_loader.h"
 #endif
+#ifdef WOLFSSL_PKCS11DEV
+#include "pkcs11dev/pkcs11dev_loader.h"
+#endif
 
 /* for testing compatibility layer callbacks */
 #include "examples/server/server.h"
@@ -40766,6 +40769,8 @@ static int test_wc_CryptoCb_Hmac_Find(void)
     /* restore whatever find callback the harness installed */
 #ifdef WOLFSSL_SWDEV
     wc_CryptoCb_SetDeviceFindCb(wc_SwDev_FindCb);
+#elif defined(WOLFSSL_PKCS11DEV)
+    wc_CryptoCb_SetDeviceFindCb(wc_Pkcs11Dev_FindCb);
 #else
     wc_CryptoCb_SetDeviceFindCb(NULL);
 #endif
@@ -41042,6 +41047,8 @@ static int test_wc_CryptoCb_Aes_SetKey_Find(void)
     }
 #ifdef WOLFSSL_SWDEV
     wc_CryptoCb_SetDeviceFindCb(wc_SwDev_FindCb);
+#elif defined(WOLFSSL_PKCS11DEV)
+    wc_CryptoCb_SetDeviceFindCb(wc_Pkcs11Dev_FindCb);
 #else
     wc_CryptoCb_SetDeviceFindCb(NULL);
 #endif
@@ -50203,6 +50210,9 @@ static void TestSetup(void)
      * tore down wolfCrypt and wiped gCryptoDev. */
     (void)wc_SwDev_Init();
 #endif
+#ifdef WOLFSSL_PKCS11DEV
+    (void)wc_Pkcs11Dev_Init();
+#endif
 }
 
 static void TestCleanup(void)
@@ -50213,6 +50223,9 @@ static void TestCleanup(void)
 #endif /* OPENSSL_EXTRA || DEBUG_WOLFSSL_VERBOSE */
 #ifdef WOLFSSL_SWDEV
     wc_SwDev_Cleanup();
+#endif
+#ifdef WOLFSSL_PKCS11DEV
+    wc_Pkcs11Dev_Cleanup();
 #endif
 }
 
@@ -50445,6 +50458,12 @@ int ApiTest(void)
         res = 1;
     }
 #endif
+#ifdef WOLFSSL_PKCS11DEV
+    if (res == 0 && wc_Pkcs11Dev_Init() != 0) {
+        printf("wc_Pkcs11Dev_Init failed\n");
+        res = 1;
+    }
+#endif
 
     #ifdef WOLFSSL_DUMP_MEMIO_STREAM
     if (res == 0) {
@@ -50538,6 +50557,9 @@ int ApiTest(void)
 
 #ifdef WOLFSSL_SWDEV
     wc_SwDev_Cleanup();
+#endif
+#ifdef WOLFSSL_PKCS11DEV
+    wc_Pkcs11Dev_Cleanup();
 #endif
 
 #ifdef WOLFCRYPT_ONLY

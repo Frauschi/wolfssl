@@ -17,6 +17,9 @@ wolfcrypt_test_testwolfcrypt_SOURCES     += tests/swdev/swdev_loader.c
 wolfcrypt_test_testwolfcrypt_LDADD       += $(top_builddir)/tests/swdev/build/swdev.o $(LIBM)
 wolfcrypt_test_testwolfcrypt_DEPENDENCIES += $(top_builddir)/tests/swdev/build/swdev.o
 endif
+if BUILD_PKCS11DEV
+wolfcrypt_test_testwolfcrypt_SOURCES     += tests/pkcs11dev/pkcs11dev_loader.c
+endif
 noinst_HEADERS += wolfcrypt/test/test.h wolfcrypt/test/test_paths.h.in
 endif
 endif
