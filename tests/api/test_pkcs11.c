@@ -1292,6 +1292,7 @@ static int           test_pkcs11_ecdsa_verify_only = 0;
 static int           test_pkcs11_fail_modulus = 0;
 static int           test_pkcs11_fail_keygen = 0;
 static int           test_pkcs11_fail_readable = 0;
+static byte          test_pkcs11_last_mod0 = 0;
 static byte          test_pkcs11_ec_point[2 + 65];
 static TestPkcs11Obj test_pkcs11_last_priv;
 static const byte    test_pkcs11_secret[32] = { 0x5a, 0x5a };
@@ -1370,6 +1371,9 @@ static CK_ULONG test_pkcs11_apply(TestPkcs11Obj* obj, CK_ATTRIBUTE_PTR tmpl,
         }
         else if (tmpl[i].type == CKA_SENSITIVE) {
             obj->readable = !*(CK_BBOOL*)tmpl[i].pValue;
+        }
+        else if (tmpl[i].type == CKA_MODULUS && tmpl[i].ulValueLen > 0) {
+            test_pkcs11_last_mod0 = *(byte*)tmpl[i].pValue;
         }
         else if (tmpl[i].type == CKA_LABEL &&
                  tmpl[i].ulValueLen <= TEST_PKCS11_MAX_ID_LEN) {
@@ -3133,4 +3137,67 @@ int test_wc_Pkcs11_AesGcmDecrypt(void)
 #endif
     return EXPECT_RESULT();
 }
+
+#if !defined(NO_RSA) && !defined(NO_PKCS11_RSA) && \
+    defined(HAVE_WOLF_BIGINT) && defined(WOLFSSL_PUBLIC_MP)
+static CK_RV test_pkcs11_rsa_enc_mech_info(CK_SLOT_ID slotId,
+    CK_MECHANISM_TYPE type, CK_MECHANISM_INFO_PTR info)
+{
+    CK_RV rv = test_pkcs11_store_mech_info(slotId, type, info);
+
+    if (rv == CKR_OK)
+        info->flags |= CKF_ENCRYPT;
+    return rv;
+}
+#endif
+
+int test_wc_Pkcs11_RsaRawRefresh(void)
+{
+    EXPECT_DECLS;
+#if !defined(NO_RSA) && !defined(NO_PKCS11_RSA) && \
+    defined(HAVE_WOLF_BIGINT) && defined(WOLFSSL_PUBLIC_MP)
+    byte mod[sizeof(test_pkcs11_modulus)];
+    byte in[sizeof(test_pkcs11_modulus)];
+    byte out[sizeof(test_pkcs11_modulus)];
+    word32 outLen = sizeof(out);
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    wc_CryptoInfo info;
+    RsaKey key;
+
+    test_pkcs11_store_setup(&token, &func);
+    func.C_GetMechanismInfo = test_pkcs11_rsa_enc_mech_info;
+    func.C_EncryptInit = test_pkcs11_store_decrypt_init;
+    func.C_Encrypt = test_pkcs11_store_decrypt;
+    XMEMCPY(mod, test_pkcs11_modulus, sizeof(mod));
+    XMEMSET(in, 0, sizeof(in));
+    ExpectIntEQ(wc_InitRsaKey(&key, NULL), 0);
+    ExpectIntEQ(wc_RsaPublicKeyDecodeRaw(mod, sizeof(mod),
+        test_pkcs11_exponent, sizeof(test_pkcs11_exponent), &key), 0);
+
+    XMEMSET(&info, 0, sizeof(info));
+    info.algo_type = WC_ALGO_TYPE_PK;
+    info.pk.type = WC_PK_TYPE_RSA;
+    info.pk.rsa.in = in;
+    info.pk.rsa.inLen = sizeof(in);
+    info.pk.rsa.out = out;
+    info.pk.rsa.outLen = &outLen;
+    info.pk.rsa.type = RSA_PUBLIC_ENCRYPT;
+    info.pk.rsa.key = &key;
+    test_pkcs11_last_mod0 = 0;
+    ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token), 0);
+    ExpectIntEQ(test_pkcs11_last_mod0, mod[0]);
+
+    /* Setting the integer alone, as RSA_set0_key() does, reaches the token. */
+    mod[0] ^= 0x01;
+    ExpectIntEQ(mp_read_unsigned_bin(&key.n, mod, sizeof(mod)), 0);
+    outLen = sizeof(out);
+    ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token), 0);
+    ExpectIntEQ(test_pkcs11_last_mod0, mod[0]);
+
+    DoExpectIntEQ(wc_FreeRsaKey(&key), 0);
+#endif
+    return EXPECT_RESULT();
+}
+
 #endif /* TEST_PKCS11_ECDSA */

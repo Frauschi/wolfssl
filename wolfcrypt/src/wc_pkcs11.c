@@ -1453,6 +1453,52 @@ static int Pkcs11CreateSecretKey(CK_OBJECT_HANDLE* key, Pkcs11Session* session,
 }
 #endif
 
+#ifndef NO_RSA
+/**
+ * Set the raw form of the RSA key numbers from their integers.
+ *
+ * @param  [in, out]  rsaKey  RSA key.
+ * @param  [in]       priv    Whether to set the private key numbers too.
+ * @return  MEMORY_E when dynamic memory allocation fails.
+ * @return  0 on success.
+ */
+static int Pkcs11RsaSetRaw(RsaKey* rsaKey, int priv)
+{
+    int     ret = 0;
+    int     i;
+    int     cnt = 2;
+    mp_int* num[8];
+
+    num[0] = &rsaKey->n;
+    num[1] = &rsaKey->e;
+#if !defined(WOLFSSL_RSA_PUBLIC_ONLY) && defined(WOLFSSL_KEY_GEN)
+    if (priv) {
+        num[2] = &rsaKey->d;
+        num[3] = &rsaKey->p;
+        num[4] = &rsaKey->q;
+        num[5] = &rsaKey->dP;
+        num[6] = &rsaKey->dQ;
+        num[7] = &rsaKey->u;
+        cnt = 8;
+    }
+#else
+    (void)priv;
+#endif
+    /* Rebuild every time as the integers may have changed since. */
+    for (i = 0; ret == 0 && i < cnt; i++) {
+        if (mp_iszero(num[i])) {
+            wc_bigint_zero(&num[i]->raw);
+            wc_bigint_free(&num[i]->raw);
+        }
+        else {
+            ret = wc_mp_to_bigint(num[i], &num[i]->raw);
+        }
+    }
+
+    return ret;
+}
+#endif /* !NO_RSA */
+
 #if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
 /**
  * Create a PKCS#11 object containing the RSA private key data.
@@ -1468,6 +1514,8 @@ static int Pkcs11CreateRsaPrivateKey(CK_OBJECT_HANDLE* privateKey,
                                      RsaKey* rsaKey, int permanent)
 {
     int             ret = 0;
+    int             i;
+    int             j;
     CK_RV           rv;
     /* Empty entries for optional label/ID. */
     CK_ATTRIBUTE    keyTemplate[] = {
@@ -1489,6 +1537,10 @@ static int Pkcs11CreateRsaPrivateKey(CK_OBJECT_HANDLE* privateKey,
     /* Mandatory entries + 2 optional. */
     CK_ULONG        keyTmplCnt = sizeof(keyTemplate) / sizeof(*keyTemplate) - 2;
 
+    ret = Pkcs11RsaSetRaw(rsaKey, 1);
+    if (ret != 0)
+        return ret;
+
     /* Set the modulus and private key data. */
     keyTemplate[ 4].pValue     = rsaKey->n.raw.buf;
     keyTemplate[ 4].ulValueLen = rsaKey->n.raw.len;
@@ -1506,6 +1558,13 @@ static int Pkcs11CreateRsaPrivateKey(CK_OBJECT_HANDLE* privateKey,
     keyTemplate[10].ulValueLen = rsaKey->u.raw.len;
     keyTemplate[11].pValue     = rsaKey->e.raw.buf;
     keyTemplate[11].ulValueLen = rsaKey->e.raw.len;
+    /* A key made from n, e and d alone has no CRT numbers to give. */
+    for (i = 6, j = 6; i <= 10; i++) {
+        if (keyTemplate[i].ulValueLen != 0)
+            keyTemplate[j++] = keyTemplate[i];
+    }
+    keyTemplate[j++] = keyTemplate[11];
+    keyTmplCnt = (CK_ULONG)j;
 
     if (permanent && rsaKey->labelLen > 0) {
         keyTemplate[keyTmplCnt].type       = CKA_LABEL;
@@ -2749,13 +2808,19 @@ static int Pkcs11FindRsaKey(CK_OBJECT_HANDLE* key, CK_OBJECT_CLASS keyClass,
         { CKA_MODULUS,         NULL,        0                  },
     };
     CK_ULONG        keyTmplCnt = sizeof(keyTemplate) / sizeof(*keyTemplate);
+    int             ret;
 
-    /* Set the modulus. */
-    keyTemplate[2].pValue     = rsaKey->n.raw.buf;
-    keyTemplate[2].ulValueLen = rsaKey->n.raw.len;
+    ret = Pkcs11RsaSetRaw(rsaKey, 0);
+    if (ret == 0) {
+        /* Set the modulus. */
+        keyTemplate[2].pValue     = rsaKey->n.raw.buf;
+        keyTemplate[2].ulValueLen = rsaKey->n.raw.len;
 
-    return Pkcs11FindKeyByTemplate(key, session, keyTemplate, keyTmplCnt,
-                                                                        &count);
+        ret = Pkcs11FindKeyByTemplate(key, session, keyTemplate, keyTmplCnt,
+                                      &count);
+    }
+
+    return ret;
 }
 
 /**
@@ -2781,19 +2846,22 @@ static int Pkcs11RsaPublicKey(Pkcs11Session* session, RsaKey* rsaKey,
     CK_ULONG        keyTmplCnt = sizeof(keyTemplate) / sizeof(*keyTemplate);
 
     if (sessionKey) {
-        /* Set the modulus and public exponent data. */
-        keyTemplate[3].pValue     = rsaKey->n.raw.buf;
-        keyTemplate[3].ulValueLen = rsaKey->n.raw.len;
-        keyTemplate[4].pValue     = rsaKey->e.raw.buf;
-        keyTemplate[4].ulValueLen = rsaKey->e.raw.len;
+        ret = Pkcs11RsaSetRaw(rsaKey, 0);
+        if (ret == 0) {
+            /* Set the modulus and public exponent data. */
+            keyTemplate[3].pValue     = rsaKey->n.raw.buf;
+            keyTemplate[3].ulValueLen = rsaKey->n.raw.len;
+            keyTemplate[4].pValue     = rsaKey->e.raw.buf;
+            keyTemplate[4].ulValueLen = rsaKey->e.raw.len;
 
-        PKCS11_DUMP_TEMPLATE("RSA Public Key", keyTemplate, keyTmplCnt);
-        /* Create an object containing public key data for device to use. */
-        rv = session->func->C_CreateObject(session->handle, keyTemplate,
-                                                    keyTmplCnt, publicKey);
-        PKCS11_RV("C_CreateObject", rv);
-        if (rv != CKR_OK) {
-            ret = WC_HW_E;
+            PKCS11_DUMP_TEMPLATE("RSA Public Key", keyTemplate, keyTmplCnt);
+            /* Create an object containing public key data for device. */
+            rv = session->func->C_CreateObject(session->handle, keyTemplate,
+                                                        keyTmplCnt, publicKey);
+            PKCS11_RV("C_CreateObject", rv);
+            if (rv != CKR_OK) {
+                ret = WC_HW_E;
+            }
         }
     }
     else if (rsaKey->labelLen > 0) {
