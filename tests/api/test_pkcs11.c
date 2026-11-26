@@ -1232,6 +1232,7 @@ typedef struct TestPkcs11Obj {
     CK_BBOOL        sign;
     CK_BBOOL        derive;
     CK_BBOOL        decrypt;
+    CK_BBOOL        readable;
 } TestPkcs11Obj;
 
 static const byte test_pkcs11_modulus[256] = { 0xc0, 0x01 };
@@ -1252,6 +1253,7 @@ static int           test_pkcs11_no_ecdsa = 0;
 static int           test_pkcs11_ecdsa_verify_only = 0;
 static int           test_pkcs11_fail_modulus = 0;
 static int           test_pkcs11_fail_keygen = 0;
+static int           test_pkcs11_fail_readable = 0;
 static byte          test_pkcs11_ec_point[2 + 65];
 static TestPkcs11Obj test_pkcs11_last_priv;
 static const byte    test_pkcs11_secret[32] = { 0x5a, 0x5a };
@@ -1269,6 +1271,7 @@ static void test_pkcs11_reset(void)
     test_pkcs11_fail_pub_create = 0;
     test_pkcs11_fail_modulus = 0;
     test_pkcs11_fail_keygen = 0;
+    test_pkcs11_fail_readable = 0;
 }
 
 static TestPkcs11Obj* test_pkcs11_obj(CK_OBJECT_HANDLE h)
@@ -1327,6 +1330,9 @@ static CK_ULONG test_pkcs11_apply(TestPkcs11Obj* obj, CK_ATTRIBUTE_PTR tmpl,
         else if (tmpl[i].type == CKA_DECRYPT) {
             obj->decrypt = *(CK_BBOOL*)tmpl[i].pValue;
         }
+        else if (tmpl[i].type == CKA_SENSITIVE) {
+            obj->readable = !*(CK_BBOOL*)tmpl[i].pValue;
+        }
         else if (tmpl[i].type == CKA_LABEL &&
                  tmpl[i].ulValueLen <= TEST_PKCS11_MAX_ID_LEN) {
             XMEMCPY(obj->label, tmpl[i].pValue, tmpl[i].ulValueLen);
@@ -1355,6 +1361,9 @@ static CK_RV test_pkcs11_store_create(CK_SESSION_HANDLE session,
     (void)test_pkcs11_apply(&test_pkcs11_objs[i], tmpl, cnt);
     if (test_pkcs11_fail_pub_create &&
             test_pkcs11_objs[i].cls == CKO_PUBLIC_KEY)
+        return TEST_CKR_GENERAL_ERROR;
+    if (test_pkcs11_fail_readable && test_pkcs11_objs[i].readable &&
+            test_pkcs11_objs[i].cls == CKO_PRIVATE_KEY)
         return TEST_CKR_GENERAL_ERROR;
     test_pkcs11_objs[i].used = 1;
     if (test_pkcs11_objs[i].cls == CKO_PRIVATE_KEY)
@@ -2075,7 +2084,20 @@ int test_wc_Pkcs11_EcKeyUsage(void)
     ExpectBufEQ(secret, test_pkcs11_secret, sizeof(test_pkcs11_secret));
     ExpectIntEQ(test_pkcs11_last_priv.sign, CK_FALSE);
     ExpectIntEQ(test_pkcs11_last_priv.derive, CK_TRUE);
+    ExpectIntEQ(test_pkcs11_last_priv.readable, CK_TRUE);
     ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+
+    /* A token that refuses a readable private key gets a sensitive one. */
+    test_pkcs11_reset();
+    test_pkcs11_fail_readable = 1;
+    XMEMSET(secret, 0, sizeof(secret));
+    secretLen = sizeof(secret);
+    ExpectIntEQ(wc_Pkcs11_CryptoDevCb(1, &info, &token), 0);
+    ExpectBufEQ(secret, test_pkcs11_secret, sizeof(test_pkcs11_secret));
+    ExpectIntEQ(test_pkcs11_last_priv.derive, CK_TRUE);
+    ExpectIntEQ(test_pkcs11_last_priv.readable, CK_FALSE);
+    ExpectIntEQ(test_pkcs11_count(CK_FALSE), 0);
+    test_pkcs11_fail_readable = 0;
 #endif
 
     wc_CryptoCb_UnRegisterDevice(TEST_PKCS11_DEVID);

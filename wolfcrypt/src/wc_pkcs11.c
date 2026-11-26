@@ -108,6 +108,8 @@ static CK_KEY_TYPE rsaKeyType   = CKK_RSA;
 static CK_KEY_TYPE ecKeyType    = CKK_EC;
 #define PKCS11_ECC_SIGN     0x01
 #define PKCS11_ECC_DERIVE   0x02
+/* Not sensitive and extractable, so a derived secret can be read back. */
+#define PKCS11_ECC_READABLE 0x04
 #endif
 #if defined(WOLFSSL_HAVE_MLKEM)
 /* Pointer to ML-KEM key type required for templates. */
@@ -1664,7 +1666,8 @@ static int Pkcs11CreateEccPublicKey(CK_OBJECT_HANDLE* publicKey,
  * @param  privateKey   [out]  Handle to private key object.
  * @param  session      [in]   Session object.
  * @param  private_key  [in]   ECC private key.
- * @param  usage        [in]   PKCS11_ECC_SIGN and/or PKCS11_ECC_DERIVE.
+ * @param  usage        [in]   PKCS11_ECC_SIGN, PKCS11_ECC_DERIVE and/or
+ *                             PKCS11_ECC_READABLE.
  * @return  WC_HW_E when a PKCS#11 library call fails.
  * @return  0 on success.
  */
@@ -1675,7 +1678,7 @@ static int Pkcs11CreateEccPrivateKey(CK_OBJECT_HANDLE* privateKey,
     int             ret = 0;
     CK_RV           rv;
     CK_UTF8CHAR     params[ECC_MAX_OID_LEN];
-    /* Empty entries for optional sign/derive/label/ID. */
+    /* Empty entries for optional sign/derive/sensitive/extractable/label/ID. */
     CK_ATTRIBUTE    keyTemplate[] = {
         { CKA_CLASS,     &privKeyClass, sizeof(privKeyClass) },
         { CKA_KEY_TYPE,  &ecKeyType,    sizeof(ecKeyType)    },
@@ -1684,10 +1687,12 @@ static int Pkcs11CreateEccPrivateKey(CK_OBJECT_HANDLE* privateKey,
         { 0,             NULL,          0                    },
         { 0,             NULL,          0                    },
         { 0,             NULL,          0                    },
+        { 0,             NULL,          0                    },
+        { 0,             NULL,          0                    },
         { 0,             NULL,          0                    }
     };
-    /* Mandatory entries + 4 optional. */
-    CK_ULONG        keyTmplCnt = sizeof(keyTemplate) / sizeof(*keyTemplate) - 4;
+    /* Mandatory entries + 6 optional. */
+    CK_ULONG        keyTmplCnt = sizeof(keyTemplate) / sizeof(*keyTemplate) - 6;
 
     if ((usage & PKCS11_ECC_SIGN) != 0) {
         keyTemplate[keyTmplCnt].type       = CKA_SIGN;
@@ -1697,6 +1702,16 @@ static int Pkcs11CreateEccPrivateKey(CK_OBJECT_HANDLE* privateKey,
     }
     if ((usage & PKCS11_ECC_DERIVE) != 0) {
         keyTemplate[keyTmplCnt].type       = CKA_DERIVE;
+        keyTemplate[keyTmplCnt].pValue     = &ckTrue;
+        keyTemplate[keyTmplCnt].ulValueLen = sizeof(ckTrue);
+        keyTmplCnt++;
+    }
+    if ((usage & PKCS11_ECC_READABLE) != 0) {
+        keyTemplate[keyTmplCnt].type       = CKA_SENSITIVE;
+        keyTemplate[keyTmplCnt].pValue     = &ckFalse;
+        keyTemplate[keyTmplCnt].ulValueLen = sizeof(ckFalse);
+        keyTmplCnt++;
+        keyTemplate[keyTmplCnt].type       = CKA_EXTRACTABLE;
         keyTemplate[keyTmplCnt].pValue     = &ckTrue;
         keyTemplate[keyTmplCnt].ulValueLen = sizeof(ckTrue);
         keyTmplCnt++;
@@ -3922,9 +3937,17 @@ static int Pkcs11ECDH(Pkcs11Session* session, wc_CryptoInfo* info)
             privateKey = (CK_OBJECT_HANDLE)(wc_ptr_t)
                          info->pk.ecdh.private_key->devCtx;
         }
-        else if ((sessionKey = PKCS11_ECC_HAS_PRIV(info->pk.ecdh.private_key)))
+        else if ((sessionKey =
+                      PKCS11_ECC_HAS_PRIV(info->pk.ecdh.private_key))) {
             ret = Pkcs11CreateEccPrivateKey(&privateKey, session,
+                                 info->pk.ecdh.private_key,
+                                 PKCS11_ECC_DERIVE | PKCS11_ECC_READABLE);
+            /* A token may refuse a private key that is not sensitive. */
+            if (ret == WC_NO_ERR_TRACE(WC_HW_E)) {
+                ret = Pkcs11CreateEccPrivateKey(&privateKey, session,
                                  info->pk.ecdh.private_key, PKCS11_ECC_DERIVE);
+            }
+        }
         else if (info->pk.ecdh.private_key->labelLen > 0) {
             ret = Pkcs11FindKeyByLabel(&privateKey, CKO_PRIVATE_KEY, CKK_EC,
                                        session,
