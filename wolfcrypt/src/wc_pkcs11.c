@@ -981,6 +981,13 @@ static int Pkcs11Token_Init(Pkcs11Token* token, Pkcs11Dev* dev, int slotId,
         token->pinDropped = 0;
         token->version = dev->version;
         token->heap = dev->heap;
+    #ifndef SINGLE_THREADED
+        token->loginLockInit = 0;
+        if (wc_InitMutex(&token->loginLock) == 0)
+            token->loginLockInit = 1;
+        else
+            ret = BAD_MUTEX_E;
+    #endif
     }
 
     XFREE(slot, dev->heap, DYNAMIC_TYPE_TMP_BUFFER);
@@ -1018,6 +1025,23 @@ static int Pkcs11Token_SetPin(Pkcs11Token* token, const unsigned char* userPin,
 }
 
 /**
+ * Free the token's login lock.
+ *
+ * @param  [in]  token  Token object.
+ */
+static void Pkcs11Token_FreeLock(Pkcs11Token* token)
+{
+#ifndef SINGLE_THREADED
+    if (token->loginLockInit) {
+        wc_FreeMutex(&token->loginLock);
+        token->loginLockInit = 0;
+    }
+#else
+    (void)token;
+#endif
+}
+
+/**
  * Set up a token for use. Lookup by slotId or tokenName. Set User PIN.
  *
  * @param  [in]  token      Token object.
@@ -1047,8 +1071,11 @@ int wc_Pkcs11Token_Init(Pkcs11Token* token, Pkcs11Dev* dev, int slotId,
         ret = BAD_FUNC_ARG;
     else
         ret = Pkcs11Token_Init(token, dev, slotId, tokenName, tokenNameSz);
-    if (ret == 0 && userPin != NULL)
+    if (ret == 0 && userPin != NULL) {
         ret = Pkcs11Token_SetPin(token, userPin, userPinSz);
+        if (ret != 0)
+            Pkcs11Token_FreeLock(token);
+    }
 
     return ret;
 }
@@ -1102,8 +1129,11 @@ int wc_Pkcs11Token_InitName(Pkcs11Token* token, Pkcs11Dev* dev,
         ret = BAD_FUNC_ARG;
     else
         ret = Pkcs11Token_Init(token, dev, -1, tokenName, (size_t)tokenNameSz);
-    if (ret == 0 && userPin != NULL)
+    if (ret == 0 && userPin != NULL) {
         ret = Pkcs11Token_SetPin(token, userPin, userPinSz);
+        if (ret != 0)
+            Pkcs11Token_FreeLock(token);
+    }
 
     return ret;
 }
@@ -1160,7 +1190,55 @@ void wc_Pkcs11Token_Final(Pkcs11Token* token)
         token->handle = NULL_PTR;
         Pkcs11Token_ClearPin(token);
         token->pinDropped = 0;
+        Pkcs11Token_FreeLock(token);
     }
+}
+
+/**
+ * Log in as the user unless the application is logged in already.
+ *
+ * @param  [in]  token   Token object.
+ * @param  [in]  handle  Open session on the token.
+ * @return  BAD_MUTEX_E when locking fails.
+ * @return  WC_HW_E when logging in fails.
+ * @return  0 on success.
+ */
+static int Pkcs11Login(Pkcs11Token* token, CK_SESSION_HANDLE handle)
+{
+    int             ret = 0;
+    CK_RV           rv;
+    CK_SESSION_INFO info;
+    int             loggedIn = 0;
+#ifndef SINGLE_THREADED
+    int             locked = 0;
+
+    /* Logins in parallel can use up the PIN attempts a token allows. */
+    if (token->loginLockInit) {
+        if (wc_LockMutex(&token->loginLock) != 0)
+            return BAD_MUTEX_E;
+        locked = 1;
+    }
+#endif
+
+    if (token->func->C_GetSessionInfo != NULL) {
+        rv = token->func->C_GetSessionInfo(handle, &info);
+        loggedIn = (rv == CKR_OK) && (info.state == CKS_RO_USER_FUNCTIONS ||
+                                      info.state == CKS_RW_USER_FUNCTIONS);
+    }
+    if (!loggedIn) {
+        rv = token->func->C_Login(handle, CKU_USER, token->userPin,
+                                  token->userPinSz);
+        PKCS11_RV("C_Login", rv);
+        /* Another token in this process may have logged in already. */
+        if (rv != CKR_OK && rv != CKR_USER_ALREADY_LOGGED_IN)
+            ret = WC_HW_E;
+    }
+
+#ifndef SINGLE_THREADED
+    if (locked)
+        wc_UnLockMutex(&token->loginLock);
+#endif
+    return ret;
 }
 
 /**
@@ -1200,14 +1278,9 @@ static int Pkcs11OpenSession(Pkcs11Token* token, Pkcs11Session* session,
                 ret = WC_HW_E;
             }
             if (ret == 0 && token->userPinLogin) {
-                rv = token->func->C_Login(session->handle, CKU_USER,
-                                              token->userPin, token->userPinSz);
-                PKCS11_RV("C_Login", rv);
-                /* Another token in this process may have logged in already. */
-                if (rv != CKR_OK && rv != CKR_USER_ALREADY_LOGGED_IN) {
+                ret = Pkcs11Login(token, session->handle);
+                if (ret != 0)
                     token->func->C_CloseSession(session->handle);
-                    ret = WC_HW_E;
-                }
             }
         }
     }

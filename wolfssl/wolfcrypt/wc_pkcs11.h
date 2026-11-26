@@ -66,6 +66,10 @@ typedef struct Pkcs11Token {
     WC_BITFIELD       pinDropped:1;     /* PIN discarded after logging in     */
     int               version;          /* Pkcs11InterfaceVersionType         */
     void*             heap;             /* Heap for the copy of the PIN       */
+#ifndef SINGLE_THREADED
+    wolfSSL_Mutex     loginLock;        /* One login at a time                */
+    WC_BITFIELD       loginLockInit:1;  /* loginLock is initialized           */
+#endif
 } Pkcs11Token;
 
 typedef struct Pkcs11Session {

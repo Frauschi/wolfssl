@@ -71,6 +71,9 @@ extern "C" {
 #define CKU_USER                              1UL
 #define CKU_CONTEXT_SPECIFIC                  2UL
 
+#define CKS_RO_USER_FUNCTIONS                 1UL
+#define CKS_RW_USER_FUNCTIONS                 3UL
+
 #define CKF_RW_SESSION                        0x00000002UL
 #define CKF_SERIAL_SESSION                    0x00000004UL
 

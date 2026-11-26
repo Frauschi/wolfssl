@@ -2984,6 +2984,66 @@ int test_wc_Pkcs11_TokenOpenDropsPin(void)
 }
 
 
+static CK_STATE test_pkcs11_session_state = 0;
+
+static CK_RV test_pkcs11_session_info(CK_SESSION_HANDLE session,
+    CK_SESSION_INFO_PTR info)
+{
+    (void)session;
+
+    XMEMSET(info, 0, sizeof(*info));
+    info->state = test_pkcs11_session_state;
+    return CKR_OK;
+}
+
+int test_wc_Pkcs11_LoginSkip(void)
+{
+    EXPECT_DECLS;
+#ifdef HAVE_ECC_SIGN
+    static const unsigned char pin[] = "1234";
+    static const byte id[] = { 0x14 };
+    Pkcs11Dev dev;
+    Pkcs11Token token;
+    CK_FUNCTION_LIST func;
+    ecc_key key;
+    WC_RNG rng;
+    int haveRng = 0;
+
+    test_pkcs11_store_setup(&token, &func);
+    func.C_GetSlotInfo = test_pkcs11_slot_info;
+    func.C_OpenSession = test_pkcs11_open_session;
+    func.C_Login = test_pkcs11_login;
+    func.C_Logout = test_pkcs11_logout;
+    func.C_CloseSession = test_pkcs11_close_session;
+    func.C_CloseAllSessions = test_pkcs11_close_all;
+    func.C_GetSessionInfo = test_pkcs11_session_info;
+    XMEMSET(&dev, 0, sizeof(dev));
+    dev.func = &func;
+    dev.version = WC_PCKS11VERSION_2_40;
+    XMEMSET(&key, 0, sizeof(key));
+    ExpectIntEQ(wc_InitRng(&rng), 0);
+    if (EXPECT_SUCCESS())
+        haveRng = 1;
+    ExpectIntEQ(test_pkcs11_make_ecc(&key, &rng, id, (int)sizeof(id)), 0);
+    ExpectIntEQ(wc_Pkcs11Token_Init(&token, &dev, 1, NULL, pin, 4), 0);
+
+    test_pkcs11_session_state = CKS_RW_USER_FUNCTIONS;
+    test_pkcs11_logins = 0;
+    ExpectIntEQ(test_pkcs11_sign_login(&token, &key, &rng, CKR_OK), 0);
+    ExpectIntEQ(test_pkcs11_logins, 0);
+
+    test_pkcs11_session_state = 0;
+    ExpectIntEQ(test_pkcs11_sign_login(&token, &key, &rng, CKR_OK), 0);
+    ExpectIntEQ(test_pkcs11_logins, 1);
+
+    wc_Pkcs11Token_Final(&token);
+    wc_ecc_free(&key);
+    if (haveRng)
+        DoExpectIntEQ(wc_FreeRng(&rng), 0);
+#endif
+    return EXPECT_RESULT();
+}
+
 #if defined(HAVE_AESGCM) && !defined(NO_AES) && !defined(NO_PKCS11_AES) && \
     !defined(NO_PKCS11_AESGCM)
 static CK_RV    test_pkcs11_gcm_init_rv = CKR_OK;

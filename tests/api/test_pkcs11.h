@@ -42,6 +42,7 @@ int test_wc_Pkcs11_RsaKeyGenExponent(void);
 int test_wc_Pkcs11_TokenOpenDropsPin(void);
 int test_wc_Pkcs11_FreeNoObject(void);
 int test_wc_Pkcs11_KeyGenSessionClosed(void);
+int test_wc_Pkcs11_LoginSkip(void);
 int test_wc_Pkcs11_AesGcmDecrypt(void);
 int test_wc_Pkcs11_RsaRawRefresh(void);
 
@@ -58,6 +59,7 @@ int test_wc_Pkcs11_RsaRawRefresh(void);
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_TokenOpenDropsPin),            \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_FreeNoObject),                 \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_KeyGenSessionClosed),          \
+    TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_LoginSkip),                    \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_AesGcmDecrypt),                \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_RsaRawRefresh),                \
     TEST_DECL_GROUP("pkcs11", test_wc_Pkcs11_ValueRead)
