@@ -1874,6 +1874,7 @@ static int Pkcs11CreateMlKemPrivateKey(CK_OBJECT_HANDLE* privateKey,
     int                          ret = 0;
     CK_RV                        rv;
     CK_ULONG                     privateKeyLen = 0;
+    CK_ULONG                     publicKeyLen = 0;
     CK_ML_KEM_PARAMETER_SET_TYPE param_set = 0;
     unsigned char*               privateData = NULL;
     CK_ATTRIBUTE                 keyTemplate[] = {
@@ -1909,14 +1910,17 @@ static int Pkcs11CreateMlKemPrivateKey(CK_OBJECT_HANDLE* privateKey,
             case WC_ML_KEM_512:
                 param_set = CKP_ML_KEM_512;
                 privateKeyLen = WC_ML_KEM_512_PRIVATE_KEY_SIZE;
+                publicKeyLen = WC_ML_KEM_512_PUBLIC_KEY_SIZE;
                 break;
             case WC_ML_KEM_768:
                 param_set = CKP_ML_KEM_768;
                 privateKeyLen = WC_ML_KEM_768_PRIVATE_KEY_SIZE;
+                publicKeyLen = WC_ML_KEM_768_PUBLIC_KEY_SIZE;
                 break;
             case WC_ML_KEM_1024:
                 param_set = CKP_ML_KEM_1024;
                 privateKeyLen = WC_ML_KEM_1024_PRIVATE_KEY_SIZE;
+                publicKeyLen = WC_ML_KEM_1024_PUBLIC_KEY_SIZE;
                 break;
             default:
                 ret = NOT_COMPILED_IN;
@@ -1928,9 +1932,10 @@ static int Pkcs11CreateMlKemPrivateKey(CK_OBJECT_HANDLE* privateKey,
         #endif
         }
     }
+    /* Mechanism key sizes are public key sizes, as for the public key. */
     if ((ret == 0) &&
-        ((mechInfo->ulMinKeySize > privateKeyLen) ||
-         (mechInfo->ulMaxKeySize < privateKeyLen))) {
+        ((mechInfo->ulMinKeySize > publicKeyLen) ||
+         (mechInfo->ulMaxKeySize < publicKeyLen))) {
         ret = WC_KEY_SIZE_E;
     }
     if (ret == 0) {
@@ -4793,7 +4798,8 @@ static int Pkcs11EccDeletePrivKey(Pkcs11Session* session, ecc_key* key)
 #endif
 
 #ifdef WOLFSSL_HAVE_MLKEM
-/* Finds the first ML-KEM key matching the key type. */
+/* Finds the first ML-KEM key matching the key type, CRYPTOCB_UNAVAILABLE when
+ * there is none so that software reports the missing key. */
 static int Pkcs11FindMlKemKey(CK_OBJECT_HANDLE* handle,
                               CK_OBJECT_CLASS keyClass,
                               Pkcs11Session* session,
@@ -4835,7 +4841,7 @@ static int Pkcs11FindMlKemKey(CK_OBJECT_HANDLE* handle,
                                       &count);
     }
     if (ret == 0 && count == 0) {
-        ret = WC_HW_E;
+        ret = CRYPTOCB_UNAVAILABLE;
     }
 
     return ret;
