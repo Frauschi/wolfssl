@@ -469,6 +469,48 @@ static void HmacKeyFreeHash(byte macType, wc_HmacHash* hash)
     }
 }
 
+#ifdef WOLF_CRYPTO_CB
+#if !defined(WOLFSSL_NO_MALLOC) && !defined(WOLFSSL_KCAPI_HMAC)
+    #define WC_HMAC_OWN_KEY_RAW
+#endif
+
+/* Keep the raw key for a device to use after wc_HmacSetKey() returns. */
+static int HmacSetKeyRaw(Hmac* hmac, const byte* key, word32 length)
+{
+    /* Software only tests keyRaw against NULL, so it borrows the key. */
+    hmac->keyRaw = key;
+    hmac->keyRawSz = 0;
+#ifdef WC_HMAC_OWN_KEY_RAW
+    if ((key != NULL) && WC_HMAC_USE_CRYPTOCB(hmac)) {
+        word32 sz = (length > 0) ? length : 1;
+        byte*  raw = (byte*)XMALLOC(sz, hmac->heap, DYNAMIC_TYPE_HMAC);
+
+        if (raw == NULL)
+            return MEMORY_E;
+        if (length > 0)
+            XMEMCPY(raw, key, length);
+        hmac->keyRaw = raw;
+        hmac->keyRawSz = sz;
+    }
+#endif
+    hmac->keyLen = (word16)length;
+
+    return 0;
+}
+
+static void HmacFreeKeyRaw(Hmac* hmac)
+{
+#ifdef WC_HMAC_OWN_KEY_RAW
+    if (hmac->keyRawSz > 0) {
+        ForceZero((byte*)(wc_ptr_t)hmac->keyRaw, hmac->keyRawSz);
+        XFREE((byte*)(wc_ptr_t)hmac->keyRaw, hmac->heap, DYNAMIC_TYPE_HMAC);
+    }
+#endif
+    hmac->keyRaw = NULL;
+    hmac->keyRawSz = 0;
+}
+#endif /* WOLF_CRYPTO_CB */
+
 int wc_HmacCopy(Hmac* src, Hmac* dst) {
     int ret;
     int hashes_copied = 0;
@@ -481,6 +523,12 @@ int wc_HmacCopy(Hmac* src, Hmac* dst) {
 #endif
 
     XMEMCPY(dst, src, sizeof(*dst));
+#ifdef WC_HMAC_OWN_KEY_RAW
+    if (src->keyRawSz > 0) {
+        dst->keyRaw = NULL;
+        dst->keyRawSz = 0;
+    }
+#endif
 
     /* Zero the hash contexts after the shallow copy to prevent shared
      * sub-pointers (e.g., msg, W buffers) with src.  Each corresponding hash
@@ -511,6 +559,21 @@ int wc_HmacCopy(Hmac* src, Hmac* dst) {
     }
 #endif
 
+#ifdef WC_HMAC_OWN_KEY_RAW
+    if ((ret == 0) && (src->keyRawSz > 0)) {
+        byte* raw = (byte*)XMALLOC(src->keyRawSz, dst->heap, DYNAMIC_TYPE_HMAC);
+
+        if (raw == NULL) {
+            ret = MEMORY_E;
+        }
+        else {
+            XMEMCPY(raw, src->keyRaw, src->keyRawSz);
+            dst->keyRaw = raw;
+            dst->keyRawSz = src->keyRawSz;
+        }
+    }
+#endif
+
 #if defined(WOLF_CRYPTO_CB) && defined(WOLF_CRYPTO_CB_COPY)
     /* The shallow copy above left dst sharing any per-context state a device
      * hung off devCtx; let the device give dst its own copy. The struct and the
@@ -533,6 +596,9 @@ int wc_HmacCopy(Hmac* src, Hmac* dst) {
         /* Release whichever deep copies succeeded before zeroing dst, lest
          * their owned sub-objects leak.
          */
+    #ifdef WOLF_CRYPTO_CB
+        HmacFreeKeyRaw(dst);
+    #endif
         if (hashes_copied >= 1)
             HmacKeyFreeHash(src->macType, &dst->hash);
 #ifdef WOLFSSL_HMAC_COPY_HASH
@@ -790,8 +856,9 @@ int wc_HmacSetKey_ex(Hmac* hmac, int type, const byte* key, word32 length,
 #endif
 
 #ifdef WOLF_CRYPTO_CB
-    hmac->keyRaw = key; /* use buffer directly */
-    hmac->keyLen = (word16)length;
+    ret = HmacSetKeyRaw(hmac, key, length);
+    if (ret != 0)
+        return ret;
 #endif
 
 #ifdef WOLFSSL_MAXQ108X
@@ -1862,6 +1929,9 @@ void wc_HmacFree(Hmac* hmac)
     HmacKeyFreeHash(hmac->macType, &hmac->o_hash);
 #endif
 
+#ifdef WOLF_CRYPTO_CB
+    HmacFreeKeyRaw(hmac);
+#endif
     ForceZero(hmac, sizeof(*hmac));
 }
 #endif /* WOLFSSL_KCAPI_HMAC */

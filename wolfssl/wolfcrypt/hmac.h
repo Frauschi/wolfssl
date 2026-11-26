@@ -159,6 +159,7 @@ struct Hmac {
     int     devId;
     void*   devCtx;
     const byte* keyRaw;
+    word32  keyRawSz;        /* size of keyRaw when owned, 0 when borrowed */
 #endif
 #ifdef WOLF_PRIVATE_KEY_ID
     byte    id[HMAC_MAX_ID_LEN];

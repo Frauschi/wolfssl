@@ -5037,6 +5037,8 @@ static int wolfSSL_evp_digest_pk_init(WOLFSSL_EVP_MD_CTX *ctx,
         }
 
         key = wolfSSL_EVP_PKEY_get0_hmac(pkey, &keySz);
+        if (ctx->isHMAC)
+            wc_HmacFree(&ctx->hash.hmac);
         if (wc_HmacInit(&ctx->hash.hmac, NULL, INVALID_DEVID) != 0)
             return WOLFSSL_FAILURE;
 

@@ -1792,6 +1792,8 @@ int wolfSSL_HMAC_CTX_copy(WOLFSSL_HMAC_CTX* dst, WOLFSSL_HMAC_CTX* src)
     }
 
     if (ret == 1) {
+        /* Release what dst held, such as its key copy. */
+        wc_HmacFree(&dst->hmac);
         /* Copy hash type. */
         dst->type = src->type;
         /* Move pads derived from key into save space. */
